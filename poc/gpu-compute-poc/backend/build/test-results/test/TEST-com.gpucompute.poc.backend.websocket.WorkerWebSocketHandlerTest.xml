@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:23.880Z" hostname="DESKTOP-MR7IIH9" time="0.062">
+  <properties/>
+  <testcase name="staleSessionHeartbeatCannotChangeReplacement()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.005"/>
+  <testcase name="authenticatedTokenCannotRegisterAnotherWorkerId()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.003"/>
+  <testcase name="secondRegisterOnSameSessionClosesWithPolicyViolation()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.003"/>
+  <testcase name="staleDisconnectKeepsReplacementOnlineAndActiveDisconnectSetsOffline()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.003"/>
+  <testcase name="activeHeartbeatUpdatesRegistryFromSameSession()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.004"/>
+  <testcase name="validRegisterBindsSessionAndStoresOnlineWorker()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.003"/>
+  <testcase name="unknownTypeClosesWithNotAcceptable()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.001"/>
+  <testcase name="heartbeatWorkerIdMismatchClosesWithoutMutation()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.005"/>
+  <testcase name="replacementBecomesActiveBeforeOldSessionIsClosed()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.019"/>
+  <testcase name="heartbeatBeforeRegisterClosesWithPolicyViolation()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.004"/>
+  <testcase name="invalidRegisterFieldClosesWithBadDataAndDoesNotRegister()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.004"/>
+  <testcase name="binaryFrameClosesWithNotAcceptable()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.001"/>
+  <testcase name="malformedJsonClosesWithBadDataAndDoesNotRegister()" classname="com.gpucompute.poc.backend.websocket.WorkerWebSocketHandlerTest" time="0.002"/>
+  <system-out><![CDATA[2026-08-28T11:06:23.883+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.883+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker session replaced workerId=worker-001 oldSessionId=session-A newSessionId=session-B
+2026-08-28T11:06:23.883+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.890+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.894+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.895+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker session replaced workerId=worker-001 oldSessionId=session-A newSessionId=session-B
+2026-08-28T11:06:23.895+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.895+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker offline workerId=worker-001 reason=DISCONNECTED
+2026-08-28T11:06:23.898+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.902+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.907+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.918+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.927+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker session replaced workerId=worker-001 oldSessionId=session-A newSessionId=session-B
+2026-08-28T11:06:23.928+09:00  INFO 2452 --- [    Test worker] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-001 gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

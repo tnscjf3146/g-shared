@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.config.JobSecurityConfigTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:21.614Z" hostname="DESKTOP-MR7IIH9" time="0.162">
+  <properties/>
+  <testcase name="jobApiRejectsMissingTokenAndAcceptsOperatorToken()" classname="com.gpucompute.poc.backend.config.JobSecurityConfigTest" time="0.062"/>
+  <testcase name="websocketTokenBindsExactlyOneWorkerIdentity()" classname="com.gpucompute.poc.backend.config.JobSecurityConfigTest" time="0.091"/>
+  <testcase name="commaSeparatedCredentialsAuthenticateTwoDifferentWorkers()" classname="com.gpucompute.poc.backend.config.JobSecurityConfigTest" time="0.006"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

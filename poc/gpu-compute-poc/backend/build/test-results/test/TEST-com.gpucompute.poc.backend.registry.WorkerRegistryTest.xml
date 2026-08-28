@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.registry.WorkerRegistryTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:23.543Z" hostname="DESKTOP-MR7IIH9" time="0.024">
+  <properties/>
+  <testcase name="findAllReturnsSortedImmutableSnapshot()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.005"/>
+  <testcase name="differentWorkerIdsRemainOnlineSimultaneously()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="registerStoresCompleteOnlineWorkerState()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.004"/>
+  <testcase name="heartbeatRejectsUnknownStaleAndOfflineWorkers()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="findByIdReturnsEmptyForUnknownWorker()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="staleSessionCannotCompleteNewSessionsJob()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="activeHeartbeatUpdatesOnlyLiveGpuFieldsStatusAndTimestamp()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="simultaneousHeartbeatAndTimeoutProduceOneAtomicOutcome()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.002"/>
+  <testcase name="lastConnectionWinsAndStaleDisconnectCannotOfflineReplacement()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <testcase name="timedOutWorkerReturnsOnlineOnlyAfterNewSessionRegisters()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.0"/>
+  <testcase name="timeoutAndReplacementRaceNeverInvalidatesNewSession()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.002"/>
+  <testcase name="timeoutOccursAtExactBoundaryAndPreservesLastRuntimeState()" classname="com.gpucompute.poc.backend.registry.WorkerRegistryTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

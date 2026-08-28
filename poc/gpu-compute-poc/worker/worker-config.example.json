@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy this file to worker-config.json next to gpu-worker-agent.exe and fill in your values. Keys starting with _ are ignored.",
+  "backendUrl": "wss://example.com/ws/workers",
+  "workerId": "worker-001",
+  "workerToken": "replace-with-the-token-issued-by-the-platform",
+  "hourlyPrice": 600,
+  "gpuIndex": 0,
+  "supportedWorkloads": [
+    "GPU_PYTORCH_TEST",
+    "GPU_PYTORCH_TEST_30S"
+  ]
+}

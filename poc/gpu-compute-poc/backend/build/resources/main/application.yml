@@ -1,0 +1,16 @@
+spring:
+  application:
+    name: gpu-compute-poc-backend
+
+worker:
+  liveness:
+    timeout: 15s
+    scan-interval-ms: 1000
+  workloads:
+    approved: GPU_PYTORCH_TEST,GPU_PYTORCH_TEST_30S
+    gpu-pytorch-test-image: le3560/gpu-pytorch-poc@sha256:15f1c509660e25ce4a8a86688aabad9dee87372e584efb175329c4922c5e1fa2
+    gpu-pytorch-test-30s-image: le3560/gpu-pytorch-poc-30s@sha256:d7fe2de03ff8532900c600d9620cd7d57fcedbeb6531b3acc2b53a9f09a71a49
+  security:
+    enabled: ${GPU_POC_SECURITY_ENABLED:true}
+    operator-token: ${GPU_POC_OPERATOR_TOKEN:}
+    worker-credentials: ${GPU_POC_WORKER_CREDENTIALS:}

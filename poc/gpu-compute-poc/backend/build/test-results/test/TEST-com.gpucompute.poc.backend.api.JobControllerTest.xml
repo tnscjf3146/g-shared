@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.api.JobControllerTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:20.663Z" hostname="DESKTOP-MR7IIH9" time="0.726">
+  <properties/>
+  <testcase name="postDispatchesExplicitWorkerAndWorkload()" classname="com.gpucompute.poc.backend.api.JobControllerTest" time="0.687"/>
+  <testcase name="getReturnsStoredCudaResult()" classname="com.gpucompute.poc.backend.api.JobControllerTest" time="0.025"/>
+  <testcase name="getReturnsExecutionProofForTimedJob()" classname="com.gpucompute.poc.backend.api.JobControllerTest" time="0.011"/>
+  <system-out><![CDATA[2026-08-28T11:06:20.855+09:00  INFO 2452 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-28T11:06:20.856+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-28T11:06:20.859+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-08-28T11:06:21.360+09:00  INFO 2452 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-28T11:06:21.360+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-28T11:06:21.361+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+2026-08-28T11:06:21.383+09:00  INFO 2452 --- [    Test worker] o.s.mock.web.MockServletContext          : Initializing Spring TestDispatcherServlet ''
+2026-08-28T11:06:21.384+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-08-28T11:06:21.384+09:00  INFO 2452 --- [    Test worker] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 0 ms
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
