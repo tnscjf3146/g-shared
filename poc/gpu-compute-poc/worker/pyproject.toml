@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpu-compute-poc-worker"
+version = "0.1.0"
+description = "Strict CUDA embedding worker for STEP 1 of the idle GPU compute PoC"
+requires-python = ">=3.11"
+dependencies = [
+  "sentence-transformers==6.0.0",
+  "nvidia-ml-py==13.610.43",
+]
+
+[tool.setuptools.packages.find]
+include = ["gpu_worker*"]
+

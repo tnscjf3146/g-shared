@@ -1,0 +1,3 @@
+worker:
+  security:
+    enabled: false
