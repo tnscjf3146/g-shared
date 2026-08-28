@@ -1,0 +1,4 @@
+# Install a CUDA-enabled torch wheel before this file. See README.md.
+sentence-transformers==6.0.0
+nvidia-ml-py==13.610.43
+

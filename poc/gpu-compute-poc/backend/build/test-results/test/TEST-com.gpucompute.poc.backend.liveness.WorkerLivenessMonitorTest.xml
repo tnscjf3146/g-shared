@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.liveness.WorkerLivenessMonitorTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:23.445Z" hostname="DESKTOP-MR7IIH9" time="0.002">
+  <properties/>
+  <testcase name="scanUsesInjectedClockAndClosesExactTimedOutSessionWithoutSleeping()" classname="com.gpucompute.poc.backend.liveness.WorkerLivenessMonitorTest" time="0.001"/>
+  <system-out><![CDATA[2026-08-28T11:06:23.446+09:00  INFO 2452 --- [    Test worker] c.g.p.b.liveness.WorkerLivenessMonitor   : Worker offline workerId=worker-001 reason=HEARTBEAT_TIMEOUT
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

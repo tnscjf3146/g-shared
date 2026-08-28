@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:23.463Z" hostname="DESKTOP-MR7IIH9" time="0.05">
+  <properties/>
+  <testcase name="&quot;blank workerId&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.005"/>
+  <testcase name="&quot;missing freeVramMb&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.001"/>
+  <testcase name="&quot;negative freeVramMb&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.001"/>
+  <testcase name="&quot;freeVramMb above registered total&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.001"/>
+  <testcase name="&quot;missing utilization&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.001"/>
+  <testcase name="&quot;negative utilization&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.0"/>
+  <testcase name="&quot;utilization above 100&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.0"/>
+  <testcase name="&quot;missing workerStatus&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.0"/>
+  <testcase name="&quot;invalid workerStatus&quot;" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.0"/>
+  <testcase name="decodesAndValidatesHeartbeatContract()" classname="com.gpucompute.poc.backend.protocol.HeartbeatMessageTest" time="0.003"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

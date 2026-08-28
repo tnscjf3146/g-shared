@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.integration.WorkerProtocolIntegrationTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:21.779Z" hostname="DESKTOP-MR7IIH9" time="1.626">
+  <properties/>
+  <testcase name="realSocketRegistersHeartbeatsTimesOutAndRequiresReregister()" classname="com.gpucompute.poc.backend.integration.WorkerProtocolIntegrationTest" time="0.813"/>
+  <system-out><![CDATA[
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v4.1.1)
+
+2026-08-28T11:06:21.850+09:00  INFO 2452 --- [    Test worker] c.g.p.b.i.WorkerProtocolIntegrationTest  : Starting WorkerProtocolIntegrationTest using Java 21.0.10 with PID 2452 (started by SSAFY in C:\gpu-compute-poc\backend)
+2026-08-28T11:06:21.851+09:00  INFO 2452 --- [    Test worker] c.g.p.b.i.WorkerProtocolIntegrationTest  : No active profile set, falling back to 1 default profile: "default"
+2026-08-28T11:06:22.308+09:00  INFO 2452 --- [    Test worker] o.s.boot.tomcat.TomcatWebServer          : Tomcat initialized with port 0 (http)
+2026-08-28T11:06:22.327+09:00  INFO 2452 --- [    Test worker] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-08-28T11:06:22.327+09:00  INFO 2452 --- [    Test worker] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/11.0.24]
+2026-08-28T11:06:22.384+09:00  INFO 2452 --- [    Test worker] b.w.c.s.WebApplicationContextInitializer : Root WebApplicationContext: initialization completed in 529 ms
+2026-08-28T11:06:22.580+09:00  INFO 2452 --- [    Test worker] o.s.boot.tomcat.TomcatWebServer          : Tomcat started on port 2665 (http) with context path '/'
+2026-08-28T11:06:22.585+09:00  INFO 2452 --- [    Test worker] c.g.p.b.i.WorkerProtocolIntegrationTest  : Started WorkerProtocolIntegrationTest in 0.784 seconds (process running for 5.149)
+2026-08-28T11:06:22.733+09:00  INFO 2452 --- [o-auto-1-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-08-28T11:06:22.734+09:00  INFO 2452 --- [o-auto-1-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-08-28T11:06:22.734+09:00  INFO 2452 --- [o-auto-1-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 0 ms
+2026-08-28T11:06:22.812+09:00  INFO 2452 --- [o-auto-1-exec-2] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-liveness gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.358+09:00  INFO 2452 --- [   scheduling-1] c.g.p.b.liveness.WorkerLivenessMonitor   : Worker offline workerId=worker-liveness reason=HEARTBEAT_TIMEOUT
+2026-08-28T11:06:23.368+09:00  INFO 2452 --- [o-auto-1-exec-6] c.g.p.b.w.WorkerWebSocketHandler         : Worker registered workerId=worker-liveness gpu="NVIDIA Test GPU" cuda=true connectionStatus=ONLINE workerStatus=IDLE
+2026-08-28T11:06:23.388+09:00  INFO 2452 --- [o-auto-1-exec-7] c.g.p.b.w.WorkerWebSocketHandler         : Worker offline workerId=worker-liveness reason=DISCONNECTED
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

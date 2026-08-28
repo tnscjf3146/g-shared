@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.gpucompute.poc.backend.protocol.RegisterMessageTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-08-28T02:06:23.513Z" hostname="DESKTOP-MR7IIH9" time="0.03">
+  <properties/>
+  <testcase name="&quot;blank workerId&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.002"/>
+  <testcase name="&quot;blank gpuModel&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;zero totalVramMb&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;negative freeVramMb&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;freeVramMb above total&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;negative utilization&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;utilization above 100&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;missing cudaAvailable&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;missing workloads&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;empty workloads&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;blank workload&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;missing hourlyPrice&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;negative hourlyPrice&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="&quot;missing workerStatus&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="&quot;unknown workerStatus&quot;" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.0"/>
+  <testcase name="malformedJsonUsesBadDataCloseStatus()" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.002"/>
+  <testcase name="unknownMessageTypeUsesNotAcceptableCloseStatus()" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.001"/>
+  <testcase name="decodesAndValidatesApprovedRegisterContract()" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.006"/>
+  <testcase name="fractionalIntegerFieldUsesBadDataCloseStatus()" classname="com.gpucompute.poc.backend.protocol.RegisterMessageTest" time="0.005"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
