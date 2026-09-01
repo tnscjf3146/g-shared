@@ -10,6 +10,7 @@ import org.springframework.web.socket.WebSocketSession;
 
 import com.gpucompute.poc.backend.domain.WorkerRegistration;
 import com.gpucompute.poc.backend.domain.WorkerStatus;
+import com.gpucompute.poc.backend.domain.WorkerBenchmark;
 import com.gpucompute.poc.backend.registry.WorkerRegistry;
 
 import static org.mockito.Mockito.mock;
@@ -39,6 +40,8 @@ class WorkerControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].workerId").value("worker-001"))
             .andExpect(jsonPath("$[1].workerId").value("worker-002"))
+            .andExpect(jsonPath("$[0].benchmark.version").value("gpu-benchmark-v1"))
+            .andExpect(jsonPath("$[0].benchmark.score").value(12.34))
             .andExpect(jsonPath("$[0].session").doesNotExist())
             .andExpect(jsonPath("$[0].activeSession").doesNotExist());
     }
@@ -59,6 +62,12 @@ class WorkerControllerTest {
             .andExpect(jsonPath("$.hourlyPrice").value(600))
             .andExpect(jsonPath("$.connectionStatus").value("ONLINE"))
             .andExpect(jsonPath("$.workerStatus").value("IDLE"))
+            .andExpect(jsonPath("$.benchmark.version").value("gpu-benchmark-v1"))
+            .andExpect(jsonPath("$.benchmark.score").value(12.34))
+            .andExpect(jsonPath("$.benchmark.throughputTflops").value(12.34))
+            .andExpect(jsonPath("$.benchmark.matrixSize").value(4096))
+            .andExpect(jsonPath("$.benchmark.precision").value("FP16"))
+            .andExpect(jsonPath("$.benchmark.measuredAt").value("2026-09-01T00:00:00Z"))
             .andExpect(jsonPath("$.lastHeartbeat").value("2026-08-27T00:00:00Z"))
             .andExpect(jsonPath("$.session").doesNotExist())
             .andExpect(jsonPath("$.activeSession").doesNotExist());
@@ -94,7 +103,11 @@ class WorkerControllerTest {
                 true,
                 Set.of("EMBEDDING"),
                 600,
-                workerStatus
+                workerStatus,
+                new WorkerBenchmark(
+                    "gpu-benchmark-v1", 12.34, 12.34, 4096, "FP16",
+                    Instant.parse("2026-09-01T00:00:00Z")
+                )
             ),
             session,
             Instant.parse("2026-08-27T00:00:00Z")

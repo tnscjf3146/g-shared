@@ -19,8 +19,14 @@ Java 21이 PATH와 JAVA_HOME에 설정된 환경에서는 첫 줄의 로컬 경�
 - Worker 목록: `GET http://127.0.0.1:8080/api/workers`
 - Worker 상세: `GET http://127.0.0.1:8080/api/workers/{workerId}`
 
-REST 응답은 `connectionStatus`, `workerStatus`, 마지막 GPU 상태와 `lastHeartbeat`를 포함하지만
+REST 응답은 `connectionStatus`, `workerStatus`, 마지막 GPU 상태, `benchmark`, `lastHeartbeat`를 포함하지만
 내부 `WebSocketSession`은 노출하지 않는다.
+
+새 Worker의 REGISTER는 `gpu-benchmark-v1` 결과를 포함하며 Backend는 score/throughput을
+숫자 타입으로 검증해 in-memory Worker Registry에 저장한다. 구버전 Worker의 benchmark 없는
+REGISTER는 하위 호환을 위해 허용되어 API에서 `benchmark: null`로 보인다. 현재 Worker는
+benchmark가 없거나 실패하면 REGISTER하지 않는다. 이 값은 공급자 Worker가 보고한 값이며
+이번 PoC에는 hardware attestation이나 위변조 방지가 없다.
 
 ## 상태와 liveness
 
@@ -73,3 +79,6 @@ created and started the fixed container. The job then exposes `RUNNING`,
 `containerId`, `containerName`, and `imageDigest`. A terminal SUCCESS also
 contains the timed CUDA details and checksum. These are execution proof fields,
 not Docker options supplied by the Backend.
+
+`GPU_STANDARD_BENCHMARK` is reserved for Worker startup. The approval policy
+rejects it even if it is accidentally added to the configured Job API allowlist.

@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class ApprovedWorkloadPolicy {
+    private static final String INTERNAL_BENCHMARK = "GPU_STANDARD_BENCHMARK";
     private final Set<String> workloads;
 
     public ApprovedWorkloadPolicy(
@@ -16,6 +17,8 @@ public class ApprovedWorkloadPolicy {
     }
 
     public boolean isApproved(String workload) {
-        return workload != null && workloads.contains(workload);
+        return workload != null
+            && !INTERNAL_BENCHMARK.equals(workload)
+            && workloads.contains(workload);
     }
 }

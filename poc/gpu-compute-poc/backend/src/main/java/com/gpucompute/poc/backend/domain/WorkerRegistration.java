@@ -12,12 +12,28 @@ public record WorkerRegistration(
     boolean cudaAvailable,
     Set<String> supportedWorkloads,
     long hourlyPrice,
-    WorkerStatus workerStatus
+    WorkerStatus workerStatus,
+    WorkerBenchmark benchmark
 ) {
     public WorkerRegistration {
         Objects.requireNonNull(workerId, "workerId");
         Objects.requireNonNull(gpuModel, "gpuModel");
         supportedWorkloads = Set.copyOf(supportedWorkloads);
         Objects.requireNonNull(workerStatus, "workerStatus");
+    }
+
+    public WorkerRegistration(
+        String workerId,
+        String gpuModel,
+        long totalVramMb,
+        long freeVramMb,
+        int gpuUtilization,
+        boolean cudaAvailable,
+        Set<String> supportedWorkloads,
+        long hourlyPrice,
+        WorkerStatus workerStatus
+    ) {
+        this(workerId, gpuModel, totalVramMb, freeVramMb, gpuUtilization,
+            cudaAvailable, supportedWorkloads, hourlyPrice, workerStatus, null);
     }
 }

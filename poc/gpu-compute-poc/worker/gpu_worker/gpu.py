@@ -14,6 +14,7 @@ BYTES_PER_MIB = 1024 * 1024
 @dataclass(frozen=True)
 class GpuSnapshot:
     index: int
+    uuid: str
     name: str
     total_vram_mb: int
     free_vram_mb: int
@@ -35,7 +36,7 @@ class NvmlGpuProbe:
                 import pynvml
             except ImportError as exc:
                 raise DependencyError(
-                    "nvidia-ml-py is not installed; install worker requirements first"
+                    f"nvidia-ml-py could not load: {exc}"
                 ) from exc
             self._nvml = pynvml
 
@@ -75,10 +76,13 @@ class NvmlGpuProbe:
         try:
             raw_name = self._nvml.nvmlDeviceGetName(self._handle)
             name = raw_name.decode("utf-8") if isinstance(raw_name, bytes) else str(raw_name)
+            raw_uuid = self._nvml.nvmlDeviceGetUUID(self._handle)
+            uuid = raw_uuid.decode("utf-8") if isinstance(raw_uuid, bytes) else str(raw_uuid)
             memory = self._nvml.nvmlDeviceGetMemoryInfo(self._handle)
             utilization = self._nvml.nvmlDeviceGetUtilizationRates(self._handle)
             return GpuSnapshot(
                 index=self.index,
+                uuid=uuid,
                 name=name,
                 total_vram_mb=round(memory.total / BYTES_PER_MIB),
                 free_vram_mb=round(memory.free / BYTES_PER_MIB),

@@ -11,6 +11,7 @@ import com.gpucompute.poc.backend.domain.ConnectionStatus;
 import com.gpucompute.poc.backend.domain.WorkerHeartbeat;
 import com.gpucompute.poc.backend.domain.WorkerRegistration;
 import com.gpucompute.poc.backend.domain.WorkerStatus;
+import com.gpucompute.poc.backend.domain.WorkerBenchmark;
 
 public record WorkerRecord(
     String workerId,
@@ -23,6 +24,7 @@ public record WorkerRecord(
     long hourlyPrice,
     ConnectionStatus connectionStatus,
     WorkerStatus workerStatus,
+    WorkerBenchmark benchmark,
     Instant lastHeartbeat,
     WebSocketSession activeSession,
     UUID activeJobId,
@@ -53,6 +55,7 @@ public record WorkerRecord(
             registration.hourlyPrice(),
             ConnectionStatus.ONLINE,
             registration.workerStatus(),
+            registration.benchmark(),
             observedAt,
             session,
             null,
@@ -72,6 +75,7 @@ public record WorkerRecord(
             hourlyPrice,
             ConnectionStatus.ONLINE,
             heartbeat.workerStatus(),
+            benchmark,
             observedAt,
             activeSession,
             activeJobId,
@@ -91,6 +95,7 @@ public record WorkerRecord(
             hourlyPrice,
             ConnectionStatus.OFFLINE,
             workerStatus,
+            benchmark,
             lastHeartbeat,
             null,
             activeJobId,
@@ -101,14 +106,14 @@ public record WorkerRecord(
     WorkerRecord reserve(UUID jobId) {
         return new WorkerRecord(workerId, gpuModel, totalVramMb, freeVramMb,
             gpuUtilization, cudaAvailable, supportedWorkloads, hourlyPrice,
-            connectionStatus, WorkerStatus.BUSY, lastHeartbeat, activeSession,
+            connectionStatus, WorkerStatus.BUSY, benchmark, lastHeartbeat, activeSession,
             jobId, activeSession.getId());
     }
 
     WorkerRecord releaseJob() {
         return new WorkerRecord(workerId, gpuModel, totalVramMb, freeVramMb,
             gpuUtilization, cudaAvailable, supportedWorkloads, hourlyPrice,
-            connectionStatus, WorkerStatus.IDLE, lastHeartbeat, activeSession,
+            connectionStatus, WorkerStatus.IDLE, benchmark, lastHeartbeat, activeSession,
             null, null);
     }
 }
