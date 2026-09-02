@@ -1,26 +1,227 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* ------------------------------------------------------------------
+ * G-shared 디자인 토큰 (AGENTS.md 기준) — 라이트 테마 단일, 다크모드 없음
+ * @theme 안의 변수는 Tailwind 유틸리티로도 생성된다
+ *   --color-primary  → bg-primary / text-primary / border-primary
+ *   --shadow-2       → shadow-2
+ *   --ease-out-expo  → ease-out-expo
+ *   --font-heading   → font-heading
+ * ------------------------------------------------------------------ */
+@theme {
+  /* 컬러 팔레트 (NVIDIA 테마) */
+  --color-primary: #76b900;
+  --color-primary-dark: #6ab900;
+  --color-accent: #75ff00;
+  --color-accent-mint: #30e2ad;
+  --color-text-muted: #5e5c63;
+  --color-border: #aaaaaa;
+  --color-dark: #333333;
+  --color-black: #0d0f0b;
+  --color-black-soft: #1c1e1a;
+  --color-white: #f7f9f4;
+  --color-white-dim: #ecefe8;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* 레이어 배경 (5단 Elevation) */
+  --color-surface-0: #ecefe8; /* L0 페이지 배경 */
+  --color-surface-1: #f7f9f4; /* L1 섹션/패널 */
+  --color-surface-2: #ffffff; /* L2~L4 카드/드롭다운/모달 */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* 상태 컬러 (StatusBadge) — Figma status/* 토큰 대응, 값은 팔레트에서 파생 */
+  --color-success: #76b900;
+  --color-success-tint: #eef7dc;
+  --color-warning: #e0a100;
+  --color-warning-tint: #fbf3d9;
+  --color-danger: #d64545;
+  --color-danger-tint: #fbe3e3;
+  --color-neutral: #5e5c63;
+  --color-neutral-tint: #ecefe8;
+
+  /* 깊이별 그림자 — 위로 갈수록 y-offset/blur 증가, 투명도 감소 */
+  --shadow-1: 0 1px 3px rgba(13, 15, 11, 0.08);
+  --shadow-2: 0 2px 8px rgba(13, 15, 11, 0.1), 0 1px 2px rgba(13, 15, 11, 0.06);
+  --shadow-3: 0 6px 16px rgba(13, 15, 11, 0.14), 0 2px 4px rgba(13, 15, 11, 0.08);
+  --shadow-4: 0 16px 40px rgba(13, 15, 11, 0.2), 0 4px 8px rgba(13, 15, 11, 0.1);
+  --shadow-glow-primary: 0 0 12px rgba(118, 185, 0, 0.25);
+
+  /* 변속 곡선 */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* 폰트 — next/font가 주입하는 CSS 변수를 우선 사용, 없으면 시스템 폰트 */
+  --font-sans: var(--font-inter, ui-sans-serif, system-ui, sans-serif);
+  --font-heading: var(--font-manrope, var(--font-inter, ui-sans-serif, system-ui, sans-serif));
+  --font-mono: var(--font-jetbrains-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+
+  /* 타입 램프 (Figma Type Tokens) — text-display / text-h1 … 로 사용 */
+  --text-display: 3rem; /* 48 */
+  --text-display--line-height: 1.15;
+  --text-h1: 2rem; /* 32 */
+  --text-h1--line-height: 1.25;
+  --text-h2: 1.5rem; /* 24 */
+  --text-h2--line-height: 1.3;
+  --text-body-lg: 1.25rem; /* 20 */
+  --text-body-lg--line-height: 1.5;
+  --text-body: 1.125rem; /* 18 */
+  --text-body--line-height: 1.55;
+  --text-label-sm: 1rem; /* 16 */
+  --text-label-sm--line-height: 1.4;
+  --text-caption: 0.875rem; /* 14 */
+  --text-caption--line-height: 1.4;
+
+  /* 등장 모션 키프레임 → animate-enter 등으로 생성 */
+  --animate-enter: enter-float var(--duration-l2) var(--ease-out-expo) both;
+  --animate-enter-spring-l3: enter-float var(--duration-l3) var(--ease-spring) both;
+  --animate-enter-spring-l4: enter-float var(--duration-l4) var(--ease-spring) both;
+  --animate-exit: exit-fade var(--duration-exit) ease-in both;
+
+  @keyframes enter-float {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  @keyframes exit-fade {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Tailwind 네임스페이스가 없는 토큰은 일반 CSS 변수로 */
+:root {
+  /* 레벨별 지속시간 — 상위 레벨일수록 길게 */
+  --duration-l1: 300ms;
+  --duration-l2: 350ms;
+  --duration-l3: 400ms;
+  --duration-l4: 450ms;
+  --duration-exit: 180ms;
+
+  /* z-index — 레벨 고정 */
+  --z-l0: 0;
+  --z-l1: 10;
+  --z-l2: 20;
+  --z-l3: 30;
+  --z-l4: 40;
+
+  /* 리스트 스태거 간격 */
+  --stagger-step: 40ms;
+}
+
+/* ------------------------------------------------------------------
+ * 베이스
+ * ------------------------------------------------------------------ */
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: var(--color-surface-0);
+    color: var(--color-dark);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    color: var(--color-black);
+  }
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-accent);
+    color: var(--color-black);
+  }
+}
+
+/* ------------------------------------------------------------------
+ * 레이어 유틸리티 — L0~L4 (배경 + 그림자 + z-index를 한 클래스로)
+ *   hover 시 한 단계 위로: card(L2) → L3 그림자 + translateY(-2px)
+ * ------------------------------------------------------------------ */
+@utility layer-0 {
+  background: var(--color-surface-0);
+  z-index: var(--z-l0);
+}
+@utility layer-1 {
+  background: var(--color-surface-1);
+  box-shadow: var(--shadow-1);
+  z-index: var(--z-l1);
+}
+@utility layer-2 {
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-l2);
+}
+@utility layer-3 {
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-3);
+  z-index: var(--z-l3);
+}
+@utility layer-4 {
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-4);
+  z-index: var(--z-l4);
+}
+@utility layer-hover {
+  transition:
+    box-shadow var(--duration-l2) var(--ease-out-expo),
+    transform var(--duration-l2) var(--ease-out-expo);
+  &:hover {
+    box-shadow: var(--shadow-3);
+    transform: translateY(-2px);
+  }
+}
+/* 강조 컴포넌트(CTA 카드 등)에만 추가 */
+@utility glow-primary {
+  box-shadow: var(--shadow-2), var(--shadow-glow-primary);
+}
+
+/* ------------------------------------------------------------------
+ * 등장 모션
+ *   .animate-enter              기본 (L1~L2, ease-out-expo)
+ *   .animate-enter-spring-l3    드롭다운/팝오버
+ *   .animate-enter-spring-l4    모달/토스트
+ *   .stagger > *                리스트/그리드 자식 40ms씩 지연 (최대 8개)
+ * ------------------------------------------------------------------ */
+@utility stagger {
+  & > *:nth-child(1) { animation-delay: calc(var(--stagger-step) * 0); }
+  & > *:nth-child(2) { animation-delay: calc(var(--stagger-step) * 1); }
+  & > *:nth-child(3) { animation-delay: calc(var(--stagger-step) * 2); }
+  & > *:nth-child(4) { animation-delay: calc(var(--stagger-step) * 3); }
+  & > *:nth-child(5) { animation-delay: calc(var(--stagger-step) * 4); }
+  & > *:nth-child(6) { animation-delay: calc(var(--stagger-step) * 5); }
+  & > *:nth-child(7) { animation-delay: calc(var(--stagger-step) * 6); }
+  & > *:nth-child(n + 8) { animation-delay: calc(var(--stagger-step) * 7); }
+}
+
+/* 접근성: 이동/스케일 없이 opacity만 */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes enter-float {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes exit-fade {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+  .layer-hover:hover {
+    transform: none;
+  }
 }
