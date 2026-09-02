@@ -1,0 +1,16 @@
+services:
+  backend:
+    build: ./back            # ./back의 Dockerfile로 이미지 빌드
+    container_name: gshared-backend
+    ports:
+      - "8080:8080"          # 서버 8080 → 컨테이너 8080
+    restart: unless-stopped   # 서버 재부팅·크래시 시 자동 재시작
+
+# [C] 단계에서 추가 예정:
+#   mysql:
+#     image: mysql:8
+#     ...
+# [D] 단계에서 추가 예정:
+#   frontend:
+#     build: ./front
+#     ...
