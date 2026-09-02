@@ -12,6 +12,22 @@ public record RegisterMessage(
     Boolean cudaAvailable,
     List<String> supportedWorkloads,
     Long hourlyPrice,
-    String workerStatus
+    String workerStatus,
+    BenchmarkMessage benchmark
 ) implements WorkerMessage {
+    public RegisterMessage(
+        WorkerMessageType type,
+        String workerId,
+        String gpuModel,
+        Long totalVramMb,
+        Long freeVramMb,
+        Integer gpuUtilization,
+        Boolean cudaAvailable,
+        List<String> supportedWorkloads,
+        Long hourlyPrice,
+        String workerStatus
+    ) {
+        this(type, workerId, gpuModel, totalVramMb, freeVramMb, gpuUtilization,
+            cudaAvailable, supportedWorkloads, hourlyPrice, workerStatus, null);
+    }
 }

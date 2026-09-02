@@ -1,9 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+from pathlib import Path
+
+
+ffi_dll = Path(sys.base_prefix) / "Library" / "bin" / "ffi-8.dll"
+ffi_binaries = [(str(ffi_dll), ".")] if ffi_dll.is_file() else []
+
 a = Analysis(
     ["gpu_worker/agent_entry.py"],
     pathex=["."],
-    binaries=[],
+    binaries=ffi_binaries,
     datas=[],
     hiddenimports=["pynvml", "websockets"],
     hookspath=[],

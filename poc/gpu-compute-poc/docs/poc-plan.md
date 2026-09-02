@@ -1,5 +1,17 @@
 # PoC 구현 계획
 
+## 현재 게이트 상태 (2026-08-28)
+
+| 단계 | 상태 | 검증 |
+|---|---|---|
+| STEP 1 | **PASS** | RTX 4070 Laptop GPU에서 CUDA Embedding, 외부 `nvidia-smi`, 기존 테스트 9개 통과 |
+| STEP 2 | **PASS** | 실제 Python GPU Worker outbound WebSocket 연결, REGISTER, 5초 HEARTBEAT, OFFLINE, last-connection-wins, Backend/Python 전체 테스트 통과 |
+| STEP 2.5 | **PASS** | 서로 다른 네트워크의 Backend ↔ Worker를 Cloudflare WSS Tunnel로 연결, 원격 `GPU_PYTORCH_TEST` SUCCESS, RTX 4070 Docker CUDA 실행, `containerExitCode=0`, checksum 일치, cache miss/hit 검증 |
+| STEP 3 | 시작하지 않음 | STEP 2 이후 별도 설계 필요 |
+
+STEP 2의 실제 결과는 [step2-integration-validation.md](step2-integration-validation.md),
+STEP 2.5의 실제 결과는 [step2-5-integration-validation.md](step2-5-integration-validation.md)에 기록한다.
+
 ## 사전 환경 점검 결과 (2026-08-26)
 
 | 항목 | 확인 결과 | 판정 |
@@ -28,10 +40,13 @@ STEP 1 런타임만 기준으로 한다.
 CUDA Toolkit의 `nvcc`는 사전 빌드 PyTorch wheel 실행에 필수는 아니다. Docker, Java, Redis,
 PostgreSQL은 STEP 1 런타임 의존성이 아니다.
 
+STEP 2는 Java 21, Spring Boot 4.1.1, Gradle Wrapper 9.3.1, `websockets==17.1`을 추가로 사용한다.
+DB, Redis, Docker Runtime은 STEP 2에 포함하지 않는다.
+
 ## 단계별 구현 게이트
 
 1. Worker 단독 CUDA Embedding: GPU/NVML 탐지, 명시적 CUDA 실행, 시간 측정 및 사용률 관찰.
-2. Backend 연결: Spring Boot WebSocket 서버, outbound Worker 등록과 heartbeat.
+2. **Backend 연결 — PASS**: Spring Boot WebSocket 서버, outbound Worker 등록, heartbeat, liveness와 조회 API.
 3. 원격 실행: 승인된 EMBEDDING 명령만 Worker registry를 통해 실행하고 결과 반환.
 4. Multi GPU: Job/Chunk 상태 머신, 두 실제 GPU Worker의 동시 처리와 결과 순서 병합.
 5. Scheduler V1: FastAPI, hard constraint와 benchmark 기반 FAST/CHEAP/BALANCED 동적 ranking.
@@ -57,4 +72,5 @@ PostgreSQL은 STEP 1 런타임 의존성이 아니다.
 | 임의 코드 실행 | 공급자 PC 침해 | workload allowlist; 사용자 Python/쉘 실행 경로를 만들지 않음 |
 | 결과 payload 대형화 | Backend 병목 | 핵심 검증 이후 STEP 8 P2P data plane으로 분리 |
 | 비용 단위/부동소수점 | 정산 오차 | 최소 단위 정수 사용, 반올림 정책을 STEP 6/7 ADR로 고정 |
+| Windows WDDM에서 장시간 유지한 NVML handle 무효화 | heartbeat snapshot 실패 및 Worker 종료 | snapshot 실패 시 NVML probe를 1회 재초기화하고, 실패가 계속되면 non-zero 종료 |
 

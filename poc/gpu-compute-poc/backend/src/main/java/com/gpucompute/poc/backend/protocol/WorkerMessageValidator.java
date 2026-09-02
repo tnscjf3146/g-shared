@@ -2,6 +2,8 @@ package com.gpucompute.poc.backend.protocol;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
@@ -9,6 +11,7 @@ import org.springframework.web.socket.CloseStatus;
 import com.gpucompute.poc.backend.domain.WorkerRegistration;
 import com.gpucompute.poc.backend.domain.WorkerHeartbeat;
 import com.gpucompute.poc.backend.domain.WorkerStatus;
+import com.gpucompute.poc.backend.domain.WorkerBenchmark;
 
 @Component
 public class WorkerMessageValidator {
@@ -45,6 +48,7 @@ public class WorkerMessageValidator {
 
         require(message.hourlyPrice() != null && message.hourlyPrice() >= 0, "hourlyPrice must be non-negative");
         WorkerStatus workerStatus = parseWorkerStatus(message.workerStatus());
+        WorkerBenchmark benchmark = validateBenchmark(message.benchmark());
 
         return new WorkerRegistration(
             message.workerId(),
@@ -55,7 +59,48 @@ public class WorkerMessageValidator {
             message.cudaAvailable(),
             workloads,
             message.hourlyPrice(),
-            workerStatus
+            workerStatus,
+            benchmark
+        );
+    }
+
+    private static WorkerBenchmark validateBenchmark(BenchmarkMessage benchmark) {
+        // Legacy Workers without a benchmark remain protocol-compatible. The
+        // current Worker never takes this path because startup benchmarking is
+        // mandatory before REGISTER.
+        if (benchmark == null) {
+            return null;
+        }
+        require("gpu-benchmark-v1".equals(benchmark.version()),
+            "benchmark.version must be gpu-benchmark-v1");
+        require(benchmark.score() != null
+                && Double.isFinite(benchmark.score())
+                && benchmark.score() > 0,
+            "benchmark.score must be finite and greater than zero");
+        require(benchmark.throughputTflops() != null
+                && Double.isFinite(benchmark.throughputTflops())
+                && benchmark.throughputTflops() > 0,
+            "benchmark.throughputTflops must be finite and greater than zero");
+        require(Double.compare(benchmark.score(), benchmark.throughputTflops()) == 0,
+            "benchmark.score must equal benchmark.throughputTflops");
+        require(Integer.valueOf(4096).equals(benchmark.matrixSize()),
+            "benchmark.matrixSize must be 4096");
+        require("FP16".equals(benchmark.precision()),
+            "benchmark.precision must be FP16");
+        requireNotBlank(benchmark.measuredAt(), "benchmark.measuredAt");
+        Instant measuredAt;
+        try {
+            measuredAt = Instant.parse(benchmark.measuredAt());
+        } catch (DateTimeParseException error) {
+            throw badData("benchmark.measuredAt must be an ISO-8601 instant");
+        }
+        return new WorkerBenchmark(
+            benchmark.version(),
+            benchmark.score(),
+            benchmark.throughputTflops(),
+            benchmark.matrixSize(),
+            benchmark.precision(),
+            measuredAt
         );
     }
 

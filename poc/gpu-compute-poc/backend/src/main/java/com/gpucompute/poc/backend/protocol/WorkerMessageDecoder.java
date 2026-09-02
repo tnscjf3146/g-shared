@@ -78,6 +78,12 @@ public class WorkerMessageDecoder {
                 "gpuUtilization",
                 "hourlyPrice"
             );
+            requireOnlyFields(root, Set.of(
+                "type", "workerId", "gpuModel", "totalVramMb", "freeVramMb",
+                "gpuUtilization", "cudaAvailable", "supportedWorkloads",
+                "hourlyPrice", "workerStatus", "benchmark"
+            ));
+            validateBenchmarkNode(root.get("benchmark"));
             return objectMapper.treeToValue(root, RegisterMessage.class);
         } catch (ProtocolException error) {
             throw error;
@@ -134,6 +140,31 @@ public class WorkerMessageDecoder {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private static void validateBenchmarkNode(JsonNode benchmark) {
+        if (benchmark == null || benchmark.isNull()) {
+            return;
+        }
+        if (!benchmark.isObject()) {
+            throw badData("benchmark must be an object");
+        }
+        requireOnlyFields(benchmark, Set.of(
+            "version", "score", "throughputTflops", "matrixSize",
+            "precision", "measuredAt"
+        ));
+        JsonNode score = benchmark.get("score");
+        JsonNode throughput = benchmark.get("throughputTflops");
+        JsonNode matrixSize = benchmark.get("matrixSize");
+        if (score != null && !score.isNull() && !score.isNumber()) {
+            throw badData("benchmark.score must be numeric");
+        }
+        if (throughput != null && !throughput.isNull() && !throughput.isNumber()) {
+            throw badData("benchmark.throughputTflops must be numeric");
+        }
+        if (matrixSize != null && !matrixSize.isNull() && !matrixSize.isIntegralNumber()) {
+            throw badData("benchmark.matrixSize must be an integer");
+        }
     }
 
     private static void requireIntegralFields(JsonNode root, String... fieldNames) {

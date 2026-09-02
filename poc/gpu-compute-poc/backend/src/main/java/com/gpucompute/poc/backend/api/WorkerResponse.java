@@ -18,6 +18,7 @@ public record WorkerResponse(
     long hourlyPrice,
     ConnectionStatus connectionStatus,
     WorkerStatus workerStatus,
+    BenchmarkResponse benchmark,
     Instant lastHeartbeat
 ) {
     static WorkerResponse from(WorkerRecord record) {
@@ -32,6 +33,7 @@ public record WorkerResponse(
             record.hourlyPrice(),
             record.connectionStatus(),
             record.workerStatus(),
+            BenchmarkResponse.from(record.benchmark()),
             record.lastHeartbeat()
         );
     }

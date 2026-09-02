@@ -52,6 +52,75 @@ class RegisterMessageTest {
             .containsExactlyInAnyOrder("EMBEDDING", "FUTURE_WORKLOAD");
         assertThat(registration.hourlyPrice()).isEqualTo(600);
         assertThat(registration.workerStatus()).isEqualTo(WorkerStatus.IDLE);
+        assertThat(registration.benchmark()).isNull();
+    }
+
+    @Test
+    void registerWithBenchmarkValidatesNumericContract() {
+        String json = """
+            {
+              "type": "REGISTER",
+              "workerId": "worker-001",
+              "gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU",
+              "totalVramMb": 8188,
+              "freeVramMb": 7800,
+              "gpuUtilization": 0,
+              "cudaAvailable": true,
+              "supportedWorkloads": ["GPU_PYTORCH_TEST_30S"],
+              "hourlyPrice": 600,
+              "workerStatus": "IDLE",
+              "benchmark": {
+                "version": "gpu-benchmark-v1",
+                "score": 12.34,
+                "throughputTflops": 12.34,
+                "matrixSize": 4096,
+                "precision": "FP16",
+                "measuredAt": "2026-09-01T00:00:00Z"
+              }
+            }
+            """;
+
+        WorkerRegistration registration = validator.validate(
+            (RegisterMessage) decoder.decode(json)
+        );
+
+        assertThat(registration.benchmark().version()).isEqualTo("gpu-benchmark-v1");
+        assertThat(registration.benchmark().score()).isEqualTo(12.34);
+        assertThat(registration.benchmark().throughputTflops()).isEqualTo(12.34);
+        assertThat(registration.benchmark().measuredAt())
+            .isEqualTo(java.time.Instant.parse("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
+    void rejectsNegativeBenchmarkScore() {
+        RegisterMessage message = withBenchmark(new BenchmarkMessage(
+            "gpu-benchmark-v1", -1.0, 12.34, 4096, "FP16",
+            "2026-09-01T00:00:00Z"
+        ));
+
+        assertThatThrownBy(() -> validator.validate(message))
+            .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
+    void rejectsNonFiniteBenchmarkNumbers() {
+        for (double value : new double[] {
+            Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY
+        }) {
+            RegisterMessage message = withBenchmark(new BenchmarkMessage(
+                "gpu-benchmark-v1", value, value, 4096, "FP16",
+                "2026-09-01T00:00:00Z"
+            ));
+            assertThatThrownBy(() -> validator.validate(message))
+                .isInstanceOf(ProtocolException.class);
+        }
+    }
+
+    private static RegisterMessage withBenchmark(BenchmarkMessage benchmark) {
+        return new RegisterMessage(
+            WorkerMessageType.REGISTER, "worker-001", "GPU", 8188L, 7800L,
+            0, true, List.of("EMBEDDING"), 600L, "IDLE", benchmark
+        );
     }
 
     @Test

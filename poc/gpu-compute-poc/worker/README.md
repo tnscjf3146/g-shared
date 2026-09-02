@@ -1,4 +1,4 @@
-# STEP 1 — Standalone CUDA Embedding Worker
+# GPU Worker — STEP 1 CUDA Runtime and STEP 2 Backend Client
 
 ## 목표와 성공 gate
 
@@ -91,3 +91,121 @@ python -m gpu_worker --allow-cpu --repeat 1
 
 정상 실행되어도 종료 코드 3과 `POC SUCCESS: NO`가 의도된 결과다.
 
+## STEP 2 Backend 연결
+
+STEP 2 client는 GPU Runtime과 WebSocket transport를 분리한다. 연결 전에 PyTorch CUDA availability와
+NVML 초기화를 확인하며, GPU 이름·VRAM·utilization은 하드코딩하지 않고 실제 snapshot에서 읽는다.
+
+```powershell
+cd C:\gpu-compute-poc\worker
+.\.venv\Scripts\python.exe -m gpu_worker.client `
+  --backend-url ws://127.0.0.1:8080/ws/workers `
+  --worker-id worker-001 `
+  --hourly-price 600 `
+  --gpu-index 0 `
+  --supported-workload EMBEDDING
+```
+
+동작 순서는 다음과 같다.
+
+1. CUDA/NVML과 Docker Linux/GPU 환경을 검증한다.
+2. 실행 파일 옆의 `benchmark-result.json`을 현재 GPU UUID와 benchmark version으로 검증한다.
+3. cache miss이면 내부 `GPU_STANDARD_BENCHMARK`를 실행하고 결과를 원자적으로 저장한다.
+4. Benchmark가 성공한 뒤에만 Backend로 outbound WebSocket 연결을 만든다.
+5. 실제 GPU snapshot과 benchmark를 포함한 `REGISTER`를 한 번 보낸다.
+6. 5초마다 새 NVML snapshot으로 `HEARTBEAT`를 보낸다.
+7. Backend가 연결을 닫거나 transport 오류가 발생하면 재연결하지 않고 종료한다.
+
+Windows WDDM 환경에서 유지 중인 NVML handle이 무효화되는 경우 snapshot 시 probe를 한 번만
+재초기화한다. 이는 GPU 계측 복구이며 WebSocket 자동 reconnect가 아니다.
+
+STEP 2 client 자동 테스트를 포함한 전체 Worker 테스트:
+
+```powershell
+cd C:\gpu-compute-poc\worker
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m pip check
+```
+
+# STEP 2.5 Docker GPU agent
+
+The Worker checks NVIDIA/NVML, Docker CLI/Engine, Linux container mode and GPU
+access from a digest-pinned CUDA probe before connecting. A failed check prints
+`SETUP_REQUIRED` and does not REGISTER. It does not install/start Docker or
+restart Windows.
+
+The distributable directory is built by the platform operator, not the GPU
+supplier:
+
+```powershell
+cd C:\gpu-compute-poc\worker
+.\scripts\build-agent.ps1
+```
+
+The supplier copies `dist\gpu-worker-agent\`, edits one file and double-clicks
+the executable. No PowerShell command is required.
+
+1. Rename `worker-config.example.json` to `worker-config.json` in the same
+   directory as `gpu-worker-agent.exe`.
+2. Fill in `backendUrl`, `workerId`, `workerToken` and `hourlyPrice`.
+3. Double-click `gpu-worker-agent.exe`.
+
+```json
+{
+  "backendUrl": "wss://<backend-host>/ws/workers",
+  "workerId": "worker-001",
+  "workerToken": "<worker-token>",
+  "hourlyPrice": 600,
+  "gpuIndex": 0,
+  "supportedWorkloads": ["GPU_PYTORCH_TEST", "GPU_PYTORCH_TEST_30S"]
+}
+```
+
+The file is looked up next to the running executable, not in the current
+working directory, so Explorer double-click and shell shortcuts both work. Keys
+starting with `_` are ignored, so the example file's comment can stay. A missing
+file, malformed JSON or a missing required setting prints one readable line and
+exits with code 2 instead of a traceback. `worker-config.json` holds a token and
+is git-ignored; only `worker-config.example.json` belongs in the repository.
+
+The earlier command-line form still works unchanged, and operators can also use
+environment variables. The precedence is command-line argument, then environment
+variable, then `worker-config.json`.
+
+```powershell
+$env:GPU_WORKER_TOKEN='<worker-token>'
+.\gpu-worker-agent.exe `
+  --backend-url wss://<backend-host>/ws/workers `
+  --worker-id worker-001 `
+  --hourly-price 600 `
+  --supported-workload GPU_PYTORCH_TEST
+```
+
+| Setting | `worker-config.json` | Environment variable | Command line |
+|---|---|---|---|
+| Backend URL | `backendUrl` | `GPU_WORKER_BACKEND_URL` | `--backend-url` |
+| Worker ID | `workerId` | `GPU_WORKER_ID` | `--worker-id` |
+| Worker token | `workerToken` | `GPU_WORKER_TOKEN` | not accepted |
+| Hourly price | `hourlyPrice` | `GPU_WORKER_HOURLY_PRICE` | `--hourly-price` |
+| GPU index | `gpuIndex` | `GPU_WORKER_GPU_INDEX` | `--gpu-index` |
+| Workloads | `supportedWorkloads` | `GPU_WORKER_SUPPORTED_WORKLOADS` (comma separated) | `--supported-workload` (repeatable) |
+
+The token has no command-line flag so it never appears in a process list or
+shell history. The token is sent only in the WebSocket Authorization header. The Backend sends
+only a workload ID; the fixed Worker catalog resolves the immutable Docker image.
+The Worker performs image inspect/pull, hardened container execution, CUDA result
+validation and `EXECUTE_RESULT` automatically while heartbeat continues.
+
+Before opening the WebSocket, every ready Worker must have a valid
+`gpu-benchmark-v1` result. A cache is reused only when both GPU UUID and version
+match. Missing, damaged, stale, non-finite, or non-positive results trigger one
+new benchmark attempt. Failure exits without REGISTER; there is no infinite
+retry. `GPU_STANDARD_BENCHMARK` is an internal catalog entry and cannot be
+advertised or dispatched through the Job API. See
+[the benchmark specification and GPU validation guide](../docs/gpu-standard-benchmark.md).
+
+`GPU_PYTORCH_TEST_30S` uses a separate immutable image and a Worker-generated
+container name, labels, and job environment value. During execution,
+`docker ps` shows `gpu-poc-job-<jobId>`. `docker inspect` exposes only the
+Worker-generated `gpu-poc.job-id`, `gpu-poc.worker-id`, and
+`gpu-poc.workload` labels. The Backend still sends only `jobId` and `workload`.
