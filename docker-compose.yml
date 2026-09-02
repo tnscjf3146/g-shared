@@ -5,11 +5,26 @@ services:
     ports:
       - "8080:8080"          # 서버 8080 → 컨테이너 8080
     restart: unless-stopped   # 서버 재부팅·크래시 시 자동 재시작
+    depends_on:
+      - mysql                 # mysql이 먼저 뜬 뒤 backend 시작
 
-# [C] 단계에서 추가 예정:
-#   mysql:
-#     image: mysql:8
-#     ...
+  mysql:
+    image: mysql:8            # 도커허브 공식 MySQL 8 이미지
+    container_name: gshared-mysql
+    ports:
+      - "3306:3306"           # 서버 3306 → 컨테이너 3306
+    restart: unless-stopped
+    environment:              # 값은 .env 파일에서 가져옴 (git에 비번 안 남김)
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}   # root(관리자) 비밀번호
+      MYSQL_DATABASE: ${MYSQL_DATABASE}             # 시작 시 자동 생성할 DB
+      MYSQL_USER: ${MYSQL_USER}                     # 일반 사용자 계정
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}             # 일반 사용자 비밀번호
+    volumes:
+      - mysql-data:/var/lib/mysql   # DB 데이터를 컨테이너 밖(볼륨)에 보관
+
+volumes:
+  mysql-data:                 # 명명된 볼륨 (컨테이너 지워도 데이터 유지)
+
 # [D] 단계에서 추가 예정:
 #   frontend:
 #     build: ./front
