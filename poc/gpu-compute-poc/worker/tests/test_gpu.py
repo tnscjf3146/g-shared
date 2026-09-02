@@ -26,6 +26,9 @@ class FakeNvml:
     def nvmlDeviceGetName(self, handle):
         return b"NVIDIA Test GPU"
 
+    def nvmlDeviceGetUUID(self, handle):
+        return b"GPU-test-uuid"
+
     def nvmlDeviceGetMemoryInfo(self, handle):
         mib = 1024 * 1024
         return SimpleNamespace(total=8192 * mib, free=7100 * mib)
@@ -42,6 +45,7 @@ class NvmlGpuProbeTests(unittest.TestCase):
             snapshot = probe.snapshot()
 
         self.assertEqual(snapshot.name, "NVIDIA Test GPU")
+        self.assertEqual(snapshot.uuid, "GPU-test-uuid")
         self.assertEqual(snapshot.total_vram_mb, 8192)
         self.assertEqual(snapshot.free_vram_mb, 7100)
         self.assertEqual(snapshot.utilization_percent, 37)
@@ -59,4 +63,3 @@ class NvmlGpuProbeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

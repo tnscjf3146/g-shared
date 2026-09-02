@@ -1,4 +1,8 @@
 .venv/
+.gradle/
+build/
+dist/
+*.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -6,4 +10,5 @@ __pycache__/
 .idea/
 .vscode/
 model-cache/
+worker-config.json
 

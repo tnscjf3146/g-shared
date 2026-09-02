@@ -50,6 +50,27 @@ class WorkerWebSocketHandlerTest {
     }
 
     @Test
+    void registerWithBenchmarkStoresBenchmarkInRegistry() throws Exception {
+        WebSocketSession session = openSession("session-A");
+
+        handler.handleMessage(session, new TextMessage("""
+            {"type":"REGISTER","workerId":"worker-001","gpuModel":"NVIDIA Test GPU",
+             "totalVramMb":8188,"freeVramMb":7800,"gpuUtilization":0,
+             "cudaAvailable":true,"supportedWorkloads":["GPU_PYTORCH_TEST_30S"],
+             "hourlyPrice":600,"workerStatus":"IDLE","benchmark":{
+               "version":"gpu-benchmark-v1","score":12.34,
+               "throughputTflops":12.34,"matrixSize":4096,"precision":"FP16",
+               "measuredAt":"2026-09-01T00:00:00Z"}}
+            """));
+
+        WorkerRecord record = registry.findById("worker-001").orElseThrow();
+        assertThat(record.benchmark()).isNotNull();
+        assertThat(record.benchmark().score()).isEqualTo(12.34);
+        assertThat(record.benchmark().measuredAt())
+            .isEqualTo(Instant.parse("2026-09-01T00:00:00Z"));
+    }
+
+    @Test
     void malformedJsonClosesWithBadDataAndDoesNotRegister() throws Exception {
         WebSocketSession session = openSession("session-A");
 

@@ -1,8 +1,8 @@
 {
   "_comment": "Copy this file to worker-config.json next to gpu-worker-agent.exe and fill in your values. Keys starting with _ are ignored.",
-  "backendUrl": "wss://example.com/ws/workers",
+  "backendUrl": "wss://gpu-compute-poc-production.up.railway.app/ws/workers",
   "workerId": "worker-001",
-  "workerToken": "replace-with-the-token-issued-by-the-platform",
+  "workerToken": "f2d5eec7a47e46c4a9616289832f24340939efe530a84fb480ce70591c68e264",
   "hourlyPrice": 600,
   "gpuIndex": 0,
   "supportedWorkloads": [

@@ -17,6 +17,7 @@ import com.gpucompute.poc.backend.domain.ConnectionStatus;
 import com.gpucompute.poc.backend.domain.WorkerHeartbeat;
 import com.gpucompute.poc.backend.domain.WorkerRegistration;
 import com.gpucompute.poc.backend.domain.WorkerStatus;
+import com.gpucompute.poc.backend.domain.WorkerBenchmark;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -45,6 +46,8 @@ class WorkerRegistryTest {
         assertThat(record.hourlyPrice()).isEqualTo(600);
         assertThat(record.connectionStatus()).isEqualTo(ConnectionStatus.ONLINE);
         assertThat(record.workerStatus()).isEqualTo(WorkerStatus.IDLE);
+        assertThat(record.benchmark().version()).isEqualTo("gpu-benchmark-v1");
+        assertThat(record.benchmark().score()).isEqualTo(12.34);
         assertThat(record.lastHeartbeat()).isEqualTo(observedAt);
         assertThat(record.activeSession()).isSameAs(session);
         assertThat(result.replacedSession()).isEmpty();
@@ -334,7 +337,11 @@ class WorkerRegistryTest {
             true,
             Set.of("EMBEDDING"),
             600,
-            workerStatus
+            workerStatus,
+            new WorkerBenchmark(
+                "gpu-benchmark-v1", 12.34, 12.34, 4096, "FP16",
+                Instant.parse("2026-09-01T00:00:00Z")
+            )
         );
     }
 
