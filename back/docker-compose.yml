@@ -1,0 +1,31 @@
+# 로컬 개발용 — MySQL, Redis만 띄웁니다.
+services:
+  mysql:
+    image: mysql:8
+    container_name: gshared-mysql-local
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8
+    container_name: gshared-redis-local
+    ports:
+      - "6379:6379"
+
+volumes:
+  mysql-data:
