@@ -1,0 +1,42 @@
+# nginx 설정 (인프라 기록)
+
+G-shared 배포 서버(EC2)의 nginx 리버스 프록시 설정 기록본입니다.
+
+## 이 파일이 뭔가
+
+- `default` — 서버 `/etc/nginx/sites-available/default`의 내용.
+- nginx는 **서버에 직접설치(apt)** 돼 있고, 이 파일은 그 설정의 **백업·공유용 복사본**입니다.
+- ⚠️ 이 파일을 저장소에서 고쳐도 **서버에 자동 반영되지 않습니다.** 서버 반영은 아래 절차대로 수동으로 합니다. (자동화는 CI/CD 도입 시)
+
+## 라우팅 구조
+
+```
+브라우저 → nginx(:80)
+   ├─ /api → localhost:8080 (백엔드 컨테이너)
+   └─ /    → localhost:3000 (프론트 컨테이너)
+```
+
+## 서버에 반영하는 법
+
+서버에서:
+
+```bash
+# 1. 백업 (되돌릴 수 있게 먼저)
+sudo cp /etc/nginx/sites-available/default /etc/nginx/sites-available/default.bak
+
+# 2. 이 저장소의 default 내용으로 교체
+#    (저장소를 서버에 pull 받은 뒤)
+sudo cp infra/nginx/default /etc/nginx/sites-available/default
+
+# 3. 문법 검사 (통과해야 함)
+sudo nginx -t
+
+# 4. 적용 (무중단)
+sudo systemctl reload nginx
+```
+
+## 참고
+
+- 방화벽(UFW): 22·80·443 개방됨.
+- 프론트 컨테이너는 `docker-compose.yml`에서 `3000:80`으로 매핑 (컨테이너 내부는 80).
+- HTTPS(443)는 미설정 — 추후 Let's Encrypt 도입 예정.

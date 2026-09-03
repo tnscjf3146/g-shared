@@ -1,0 +1,24 @@
+# G-shared nginx 리버스 프록시 설정
+# 서버 위치: /etc/nginx/sites-available/default (직접설치 nginx)
+# 이 파일은 서버 설정의 "기록/백업본"입니다. 반영 방법은 같은 폴더 README.md 참고.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    server_name _;
+
+    # /api → 백엔드(스프링부트 컨테이너, 8080)
+    location /api {
+        proxy_pass http://localhost:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # / → 프론트(프론트 컨테이너, 3000)
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
