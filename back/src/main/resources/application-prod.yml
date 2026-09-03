@@ -9,7 +9,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: none    # 운영에서 스키마 자동변경은 금지
+      ddl-auto: validate  # 스키마는 Flyway 가 만들고, JPA 는 검증만
 
   data:
     redis:
