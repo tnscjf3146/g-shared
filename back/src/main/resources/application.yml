@@ -1,0 +1,30 @@
+spring:
+  profiles:
+    default: local          # 아무것도 지정 안 하면 local
+
+  jpa:
+    open-in-view: false     # 지연 로딩이 컨트롤러까지 새는 걸 막음
+
+  data:
+    redis:
+      port: 6379
+
+# 값의 출처만 다르고 표현은 같음
+#   local → .env 파일
+#   prod  → compose 가 넣어주는 환경변수
+jwt:
+  secret: ${JWT_SECRET}
+  access-expiration: 30m
+  refresh-expiration: 14d
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized   # 기본은 보수적으로
+
+cookie:
+  secure: true
