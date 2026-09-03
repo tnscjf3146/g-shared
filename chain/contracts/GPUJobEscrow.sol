@@ -1,47 +1,71 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/// @title 최소한의 ERC20 인터페이스
+/// @notice 에스크로 컨트랙트에서 토큰 전송을 위해 사용하는 ERC20 함수의 최소 집합입니다.
 interface IERC20Minimal {
     function transfer(address to, uint256 amount) external returns (bool);
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
 }
 
-/// GPU 작업 에스크로 v2
-///
-/// 온체인에 두는 것은 정산 정보뿐이다.
-/// workloadId · imageDigest · datasetHash 같은 작업 상세는 백엔드 DB 가 원본이다.
-///
-/// 돈이 나가는 함수는 상태를 먼저 바꾸고 나서 토큰을 보낸다 (재진입 방어).
+/// @title GPU 작업 에스크로 컨트랙트 v2
+/// @notice GPU 작업에 대한 대금 예치 및 정산을 온체인에서 안전하게 처리합니다.
+/// @dev 온체인에는 정산 정보만 보관하며, workloadId, imageDigest, datasetHash 등 작업 상세 정보는 오프체인(백엔드 DB)에 저장됩니다.
+/// 또한 재진입(Reentrancy) 공격을 방어하기 위해 CEI(Checks-Effects-Interactions) 패턴을 준수하여 상태 변경 후 토큰을 전송합니다.
 contract GPUJobEscrow {
+    /// @notice 에스크로 작업의 생명주기를 나타내는 상태 값
     enum JobState { NONE, CREATED, FUNDED, ASSIGNED, SUBMITTED, COMPLETED, CANCELLED }
 
-    /// 필드 순서가 저장 슬롯 수를 정한다.
-    /// client(20) + state(1) + deadline(8) = 29 바이트라 한 슬롯에 들어간다.
+    /// @notice 단일 작업(Job)에 대한 구조체
+    /// @dev 변수 배치를 통해 단일 스토리지 슬롯(32바이트)에 맞춤: client(20) + state(1) + deadline(8) = 29 bytes.
     struct Job {
-        address  client;
-        JobState state;
-        uint64   deadline;     // 상태가 바뀔 때 갱신된다
-        address  provider;     // 수락 전에는 address(0)
-        uint256  price;
-        bytes32  resultHash;
+        address  client;       // 의뢰자 지갑 주소
+        JobState state;        // 현재 작업 상태
+        uint64   deadline;     // 상태 변경 시마다 갱신되는 제한 시간(타임스탬프)
+        address  provider;     // 작업을 수락한 제공자 (수락 전에는 address(0))
+        uint256  price;        // 작업 대금 (SSF 토큰 단위)
+        bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
 
+    /// @notice 정산에 사용될 ERC20 토큰 컨트랙트
     IERC20Minimal public immutable token;
-    uint64 public immutable execDeadline;      // 수락 후 결과 제출까지
-    uint64 public immutable approveDeadline;   // 제출 후 의뢰자 승인까지
+    
+    /// @notice 작업 수락 후 결과 제출까지 허용되는 최대 시간(초)
+    uint64 public immutable execDeadline;
+    
+    /// @notice 결과 제출 후 의뢰자의 승인까지 허용되는 최대 시간(초)
+    uint64 public immutable approveDeadline;
 
+    /// @notice 다음 작업에 부여될 고유 ID
     uint256 public nextJobId = 1;
+    
+    /// @notice Job ID와 작업 상세 정보 매핑
     mapping(uint256 => Job) public jobs;
 
+    // ─────────────────────────────────────────────────────────────
+    // 이벤트(Events)
+    // ─────────────────────────────────────────────────────────────
+
+    /// @notice 새로운 작업이 생성되었을 때 발생
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 price);
+    /// @notice 작업 대금이 에스크로에 예치되었을 때 발생
     event JobFunded(uint256 indexed jobId, uint256 price);
+    /// @notice 작업이 취소되어 환불되었을 때 발생
     event JobCancelled(uint256 indexed jobId, address indexed client, uint256 refund);
+    /// @notice 제공자가 작업을 수락했을 때 발생
     event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
+    /// @notice 제공자가 작업 결과를 제출했을 때 발생
     event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash, uint64 deadline);
+    /// @notice 작업이 완료되고 대금이 지급되었을 때 발생
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
+    /// @notice 제한 시간 초과로 작업 상태가 강제로 정리되었을 때 발생
     event JobTimedOut(uint256 indexed jobId, JobState fromState);
 
+    /// @notice 에스크로 컨트랙트를 초기화합니다.
+    /// @param token_ 에스크로에 사용할 토큰 주소
+    /// @param execDeadline_ 작업 수락 후 제출까지의 기한(초)
+    /// @param approveDeadline_ 제출 후 의뢰자 승인까지의 기한(초)
     constructor(address token_, uint64 execDeadline_, uint64 approveDeadline_) {
         require(token_ != address(0), "Escrow: token is zero");
         require(execDeadline_ > 0 && approveDeadline_ > 0, "Escrow: deadline is zero");
@@ -51,10 +75,12 @@ contract GPUJobEscrow {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 의뢰자
+    // 의뢰자(Client) 기능
     // ─────────────────────────────────────────────────────────────
 
-    /// 작업을 만든다. 아직 돈은 움직이지 않는다.
+    /// @notice 새로운 작업을 생성합니다 (토큰 이동 없음).
+    /// @param price 지급할 작업 대금
+    /// @return jobId 생성된 작업의 고유 ID
     function createJob(uint256 price) external returns (uint256 jobId) {
         require(price > 0, "Escrow: price is zero");
 
@@ -72,7 +98,9 @@ contract GPUJobEscrow {
         emit JobCreated(jobId, msg.sender, price);
     }
 
-    /// 대금을 예치한다. 의뢰자가 미리 token.approve 를 해두어야 한다.
+    /// @notice 작업 대금을 에스크로 컨트랙트에 예치합니다.
+    /// @dev 호출 전에 반드시 token.approve를 통해 컨트랙트가 대금을 출금할 수 있도록 허용해야 합니다.
+    /// @param jobId 대금을 예치할 작업 ID
     function fundJob(uint256 jobId) external {
         Job storage job = jobs[jobId];
 
@@ -87,7 +115,9 @@ contract GPUJobEscrow {
         emit JobFunded(jobId, job.price);
     }
 
-    /// 수락 전이면 취소한다. 예치했다면 돌려받는다.
+    /// @notice 아직 수락되지 않은 작업을 취소합니다.
+    /// @dev 대금이 예치(FUNDED)된 상태라면 의뢰자에게 환불됩니다.
+    /// @param jobId 취소할 작업 ID
     function cancelJob(uint256 jobId) external {
         Job storage job = jobs[jobId];
 
@@ -110,7 +140,8 @@ contract GPUJobEscrow {
         emit JobCancelled(jobId, job.client, refund);
     }
 
-    /// 결과를 승인하고 정산한다.
+    /// @notice 제출된 결과물을 승인하고 대금을 제공자에게 지급합니다.
+    /// @param jobId 승인할 작업 ID
     function approveResult(uint256 jobId) external {
         Job storage job = jobs[jobId];
 
@@ -126,11 +157,12 @@ contract GPUJobEscrow {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 공급자
+    // 공급자(Provider) 기능
     // ─────────────────────────────────────────────────────────────
 
-    /// 일감을 잡는다. 먼저 도착한 트랜잭션이 이긴다.
-    /// 늦게 온 트랜잭션은 revert 되며, 이는 오류가 아니라 정상 상황이다.
+    /// @notice 예치된 일감을 수락하여 작업을 배정받습니다.
+    /// @dev 선착순으로 처리되며, 늦게 도착한 트랜잭션은 revert 처리됩니다 (정상 상황).
+    /// @param jobId 수락할 작업 ID
     function acceptJob(uint256 jobId) external {
         Job storage job = jobs[jobId];
 
@@ -144,8 +176,10 @@ contract GPUJobEscrow {
         emit JobAccepted(jobId, msg.sender, job.deadline);
     }
 
-    /// 결과 해시를 올린다. 해시는 공급자가 직접 계산한다.
-    /// 백엔드가 만들면 서명이 백엔드 것이 되어 부인 방지가 사라진다.
+    /// @notice 작업이 완료되었음을 알리고 결과물에 대한 해시를 등록합니다.
+    /// @dev 백엔드가 서명하지 않고 공급자가 직접 트랜잭션을 발생시켜 부인 방지(Non-repudiation)를 달성합니다.
+    /// @param jobId 결과물을 제출할 작업 ID
+    /// @param resultHash 결과물에 대한 해시값
     function submitResult(uint256 jobId, bytes32 resultHash) external {
         Job storage job = jobs[jobId];
 
@@ -161,14 +195,12 @@ contract GPUJobEscrow {
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 누구나
+    // 공용(Public/Anyone) 기능
     // ─────────────────────────────────────────────────────────────
 
-    /// 시한이 지난 작업을 정리한다. 호출자 제한이 없다.
-    /// 컨트랙트가 시한을 직접 검사하므로 누가 눌러도 결과가 같다.
-    ///
-    ///   ASSIGNED  공급자가 결과를 못 냈다      → 의뢰자 환불
-    ///   SUBMITTED 의뢰자가 승인하지 않았다     → 공급자 지급
+    /// @notice 지정된 제한 시간이 지난 작업을 정리합니다 (누구나 호출 가능).
+    /// @dev ASSIGNED(제출 시한 초과) -> 의뢰자에게 환불 / SUBMITTED(승인 시한 초과) -> 공급자에게 강제 지급
+    /// @param jobId 정리할 작업 ID
     function settleTimeout(uint256 jobId) external {
         Job storage job = jobs[jobId];
         JobState fromState = job.state;
