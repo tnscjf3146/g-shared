@@ -22,10 +22,12 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql   # DB 데이터를 컨테이너 밖(볼륨)에 보관
 
+  frontend:
+    build: ./front           # ./front의 Dockerfile로 이미지 빌드 (nginx+정적HTML)
+    container_name: gshared-frontend
+    ports:
+      - "3000:80"            # 서버 3000 → 컨테이너 80 (컨테이너 안 nginx는 80)
+    restart: unless-stopped
+
 volumes:
   mysql-data:                 # 명명된 볼륨 (컨테이너 지워도 데이터 유지)
-
-# [D] 단계에서 추가 예정:
-#   frontend:
-#     build: ./front
-#     ...
