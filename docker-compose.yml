@@ -5,8 +5,15 @@ services:
     ports:
       - "8080:8080"          # 서버 8080 → 컨테이너 8080
     restart: unless-stopped   # 서버 재부팅·크래시 시 자동 재시작
+    env_file:
+      - .env                  # .env 값을 통째로 컨테이너에 전달
+    environment:
+      SPRING_PROFILES_ACTIVE: prod   # prod 프로필로 기동
+    volumes:
+      - ./logs:/app/logs      # 애플리케이션 로그를 서버에 보관
     depends_on:
       - mysql                 # mysql이 먼저 뜬 뒤 backend 시작
+      - redis                 # redis도 먼저 기동
 
   mysql:
     image: mysql:8            # 도커허브 공식 MySQL 8 이미지
@@ -22,6 +29,14 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql   # DB 데이터를 컨테이너 밖(볼륨)에 보관
 
+  redis:
+    image: redis:8            # Refresh Token 저장 및 토큰 블랙리스트용
+    container_name: gshared-redis
+    restart: unless-stopped
+    # 포트를 열지 않음 = 컨테이너끼리만 접근 가능
+    volumes:
+      - redis-data:/data      # 재시작해도 토큰 유지
+
   frontend:
     build: ./frontend        # Next.js SSR (standalone) 컨테이너
     container_name: gshared-frontend
@@ -31,3 +46,4 @@ services:
 
 volumes:
   mysql-data:                 # 명명된 볼륨 (컨테이너 지워도 데이터 유지)
+  redis-data:                 # Refresh Token 보관용
