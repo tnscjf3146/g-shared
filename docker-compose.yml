@@ -23,10 +23,13 @@ services:
       - mysql-data:/var/lib/mysql   # DB 데이터를 컨테이너 밖(볼륨)에 보관
 
   frontend:
-    build: ./front           # ./front의 Dockerfile로 이미지 빌드 (nginx+정적HTML)
+    build: ./frontend        # 프론트 담당이 frontend/에 Dockerfile 넣으면 빌드됨
     container_name: gshared-frontend
     ports:
-      - "3000:80"            # 서버 3000 → 컨테이너 80 (컨테이너 안 nginx는 80)
+      - "3000:80"            # 서버 3000 → 컨테이너 80
+    # [규격] 프론트 컨테이너는 내부 80 포트로 서빙할 것 (React 빌드 결과를 nginx로).
+    #        서버 nginx가 / → localhost:3000 으로 프록시. (frontend/ 없으면 이 서비스는 build 실패하니
+    #        프론트 코드 올라오기 전엔 `docker compose up`에서 frontend 제외하거나 폴더 준비 후 배포)
     restart: unless-stopped
 
 volumes:
