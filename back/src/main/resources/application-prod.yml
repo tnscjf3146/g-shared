@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    # mysql = compose 서비스 이름
+    url: "jdbc:mysql://${MYSQL_HOST:mysql}:3306/${MYSQL_DATABASE}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+
+  jpa:
+    hibernate:
+      ddl-auto: none    # 운영에서 스키마 자동변경은 금지
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+
+management:
+  endpoint:
+    health:
+      show-details: never   # 내부 정보 노출 차단
+
+logging:
+  level:
+    root: warn
+    com.gshared.back: info
+  file:
+    name: /app/logs/back.log
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14

@@ -1,0 +1,43 @@
+spring:
+  config:
+    import: "optional:file:.env[.properties]"
+
+  datasource:
+    url: "jdbc:mysql://localhost:3306/${MYSQL_DATABASE}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: create
+    properties:
+      hibernate:
+        format_sql: true    # SQL 줄바꿈 정렬
+        highlight_sql: true # SQL 키워드에 색
+
+  data:
+    redis:
+      host: localhost
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"        # 로컬에선 전부 열어둠
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  charset:
+    console: UTF-8          # 윈도우 콘솔 한글 깨짐 방지
+  level:
+    root: info
+    com.gshared.back: debug              # 내 코드
+    org.hibernate.SQL: debug             # 실행되는 SQL
+    org.hibernate.orm.jdbc.bind: trace   # ? 에 들어간 실제 값
+    org.springframework.security: debug  # 인증 필터 흐름
+    org.springframework.web: debug       # 요청 매핑
+
+cookie:
+  secure: false
