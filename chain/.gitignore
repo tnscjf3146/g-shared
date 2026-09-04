@@ -2,3 +2,5 @@ node_modules/
 artifacts/
 cache/
 .env
+deployments/hardhat.json
+deployments/localhost.json
