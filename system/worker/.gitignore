@@ -1,0 +1,13 @@
+# The supplier's own settings and their Worker token. Never committed.
+worker-config.json
+
+# Written beside the Worker every run.
+gshared-debug.log
+
+# Python build artefacts and local environments.
+__pycache__/
+*.pyc
+build/
+dist/
+*.egg-info/
+.venv/

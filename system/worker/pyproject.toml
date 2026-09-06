@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gshared-worker"
+version = "0.1.0"
+description = "G-shared Worker: the program a GPU supplier runs on their own Windows PC"
+# Nothing in this package needs a newer interpreter, and 3.10 is what the team
+# has installed. Raise this when a ported stage actually requires more.
+requires-python = ">=3.10"
+# Deliberately empty. Startup is standard library and ctypes only; the GPU,
+# container and WebSocket dependencies arrive with the stages that use them.
+dependencies = []
+
+[project.scripts]
+g-shared-worker = "gshared_worker.main:run"
+
+[tool.setuptools.packages.find]
+include = ["gshared_worker*"]
