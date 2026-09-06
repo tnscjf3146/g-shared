@@ -5,14 +5,9 @@ the Worker, give the identity back. This file owns that order, what the supplier
 is told, and which exit code the launcher gets -- and deliberately owns nothing
 else.
 
-Three steps of the PoC are not here yet, and each arrives with its own branch:
-
-* R1, preparing the machine (WSL2, the private distribution, Docker, the NVIDIA
-  container toolkit);
-* R2, enrolling the machine and checking its registration with the Backend;
-* R3, the Worker client itself (benchmark, connect, REGISTER, reconnect).
-
-They all hang off ``run_worker`` below, which is why it is a parameter.
+The stage that follows is ``run_worker``. Today it is the environment
+diagnosis; preparing the machine, enrolling it and running the Worker client
+arrive with their own branches and take the same place.
 """
 
 from __future__ import annotations
@@ -24,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .config import WorkerSettings, resolve_settings, worker_directory
+from .environment_check import check_environment
 from .errors import WorkerAlreadyRunningError, WorkerConfigurationError, WorkerError
 from .exit_codes import WorkerExitCode
 from .instance_guard import WorkerInstanceGuard, default_lock_directory
@@ -49,7 +45,7 @@ def run(
     log_path = start_debug_log(directory)
     stamp_the_build()
     say = out or print
-    run_worker = run_worker or _stages_not_ported_yet
+    run_worker = run_worker or check_environment
 
     try:
         exit_code = _start(
@@ -177,22 +173,6 @@ def _run_the_worker(
         return int(WorkerExitCode.EXPECTED_FAILURE)
     _debug.info("worker stopped with exit code %s", code)
     return code
-
-
-def _stages_not_ported_yet(
-    settings: WorkerSettings, say: Callable[..., None]
-) -> int:
-    """What runs while preparation, enrolment and the client are still to come.
-
-    Reaching here is the whole of what this build claims: the program started,
-    it knows its settings, and it is the only Worker serving this GPU.
-    """
-    _debug.info("startup complete; no further stage is part of this build")
-    say("")
-    say("Startup complete. Configuration, logging and the single-instance")
-    say("  guard are in place. Preparing the machine, enrolling it and")
-    say("  connecting to the Backend are not part of this build yet.")
-    return int(WorkerExitCode.OK)
 
 
 def _this_process_owns_the_console() -> bool:
