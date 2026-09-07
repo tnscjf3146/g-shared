@@ -61,6 +61,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
 
+                        // WebSocket 핸드셰이크는 워커 토큰으로 인증(WorkerHandshakeInterceptor) → JWT 필터 통과
+                        .requestMatchers("/ws/**").permitAll()
+
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
 
