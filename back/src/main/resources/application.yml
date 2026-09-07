@@ -17,6 +17,17 @@ jwt:
   access-expiration: 30m
   refresh-expiration: 14d
 
+# 지갑 연결 서명에 쓰는 값.
+# domain/uri 는 사용자가 MetaMask 팝업에서 읽는 문장에 그대로 들어가므로
+# 요청 본문이 아니라 서버 설정에서만 가져온다. (local 프로필에서 덮어씀)
+wallet-auth:
+  domain: ${WALLET_AUTH_DOMAIN}
+  uri: ${WALLET_AUTH_URI}
+  # 자체 토큰(GCoin)을 올린 네트워크의 ID. 토큰을 직접 만들어도 체인은 SSAFY 체인이다.
+  # 로컬 Hardhat 노드(31337)에 붙일 때만 환경변수로 덮어쓴다.
+  chain-id: ${WALLET_AUTH_CHAIN_ID:31221}
+  challenge-expiration: 5m
+
 management:
   endpoints:
     web:
