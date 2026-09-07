@@ -19,6 +19,14 @@ spring:
     redis:
       host: localhost
 
+# 로컬은 프론트(Next.js) 개발 서버 주소를 그대로 쓴다.
+cors:
+  allowed-origins: http://localhost:3000
+
+wallet-auth:
+  domain: localhost:3000
+  uri: http://localhost:3000
+
 management:
   endpoints:
     web:
