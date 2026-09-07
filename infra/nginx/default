@@ -13,6 +13,8 @@ server {
         proxy_pass http://localhost:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # 진짜 클라이언트 IP 전달 (백엔드 Rate Limiting이 이 헤더로 IP 식별)
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 
     # / → 프론트(프론트 컨테이너, 3000)
@@ -20,5 +22,6 @@ server {
         proxy_pass http://localhost:3000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
