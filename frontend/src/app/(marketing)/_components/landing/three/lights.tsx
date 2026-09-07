@@ -6,6 +6,11 @@ import { useRef } from 'react'
 import { type Group, type Light, type SpotLight } from 'three'
 import { P } from '../progress'
 
+// 스윕 빔 세기 (P.beam 배율). INTRO TOP(sweep 0..1) 은 팬 위를 비스듬히 훑는 컷이라 카드가 어둡게 보여 더 밝게
+const BEAM_TOP_MAIN = 30 // 이전 16
+const BEAM_TOP_AUX = 40 // 이전 22
+const BEAM_LOGO = 40 // HERO(sweep 2..3) 로고 스윕
+
 // 조명: 스튜디오 조명은 전부 P.env 배율(챕터 1 암전 → 챕터 2 페이드인).
 // 스윕 스팟 하나가 +X 끝 캡(로고)을 화면 왼→오(=+Z→−Z)로 훑는다. 살짝 위에서 비춰 metallic 상감의 반사각을 잡는다.
 export function Lights() {
@@ -39,7 +44,7 @@ export function Lights() {
       if (s2) {
         s2.position.set(2.6, 1.25, z)
         s2.target.position.set(-0.9, 0.25, z)
-        s2.intensity = P.beam * 22
+        s2.intensity = P.beam * BEAM_TOP_AUX
         s2.target.updateMatrixWorld()
       }
     } else if (k <= 2) {
@@ -54,7 +59,7 @@ export function Lights() {
       s.angle = 0.4
       if (s2) s2.intensity = 0
     }
-    s.intensity = P.beam * (k <= 1 ? 16 : 40)
+    s.intensity = P.beam * (k <= 1 ? BEAM_TOP_MAIN : BEAM_LOGO)
     s.target.updateMatrixWorld()
   })
   return (

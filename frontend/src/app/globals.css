@@ -23,6 +23,35 @@
   --color-white: #f7f9f4;
   --color-white-dim: #ecefe8;
 
+  /* 헤어라인 — 카드·패널 1px 테두리 (라이트 테마용. 입력 테두리는 --color-border) */
+  --color-hairline: #e1e4dd;
+  --color-hairline-strong: #c9cdc4;
+
+  /* 모서리 스케일 (AGENTS.md "버튼"·"카드" 절) — rounded-xs … rounded-2xl 로 사용
+   *   4 칩·배지 / 6 태그 / 8 버튼·입력 / 12 카드 / 16 미디어·스크린샷 패널 / 24 큰 CTA 배너 / pill 토글·상태 필 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-pill: 9999px;
+
+  /* 간격 — 기본 단위 4px(Tailwind 기본). 섹션 사이 96px → py-section / gap-section */
+  --spacing-section: 6rem;
+
+  /* 콘텍츠 최대 폭 1280 → max-w-content */
+  --container-content: 80rem;
+
+  /* 브레이크포인트 (AGENTS.md "반응형" 절): xs 480 / sm 640 / md 768 / lg 1024 / xl 1280 / 2xl 1440 */
+  --breakpoint-xs: 30rem;
+  --breakpoint-2xl: 90rem;
+
+  /* 자간 — 제목은 음수로 조이고, 아이브로만 양수 */
+  --tracking-display: -0.03em;
+  --tracking-heading: -0.02em;
+  --tracking-eyebrow: 0.04em;
+
   /* 레이어 배경 (5단 Elevation) */
   --color-surface-0: #ecefe8; /* L0 페이지 배경 */
   --color-surface-1: #f7f9f4; /* L1 섹션/패널 */
@@ -49,10 +78,11 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  /* 폰트 — next/font가 주입하는 CSS 변수를 우선 사용, 없으면 시스템 폰트 */
-  --font-sans: var(--font-inter, ui-sans-serif, system-ui, sans-serif);
-  --font-heading: var(--font-manrope, var(--font-inter, ui-sans-serif, system-ui, sans-serif));
-  --font-mono: var(--font-jetbrains-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  /* 폰트 — Pretendard 단일 서체(app/layout.tsx 에서 next/font/local 로 주입). 역할별 토큰은 유지해 나중에 서체를 바꿀 때 한 곳만 고친다 */
+  --font-sans: var(--font-pretendard, "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif);
+  --font-heading: var(--font-sans);
+  --font-mono: var(--font-sans); /* 숫자 정렬은 tabular-nums 로 (Pretendard 는 tnum 지원) */
+  --font-logo: var(--font-sans); /* 로고 워드마크 */
 
   /* 타입 램프 (Figma Type Tokens) — text-display / text-h1 … 로 사용 */
   --text-display: 3rem; /* 48 */
@@ -136,6 +166,7 @@
   h3 {
     font-family: var(--font-heading);
     color: var(--color-black);
+    letter-spacing: var(--tracking-heading); /* 제목은 음수 자간으로 조인다 (display 크기는 tracking-display) */
   }
   code,
   kbd,
@@ -150,6 +181,254 @@
     background: var(--color-accent);
     color: var(--color-black);
   }
+}
+
+/* ------------------------------------------------------------------
+ * 랜딩 고정 네비 — 유리(glass) 레이어
+ *   테마는 body[data-nav-theme] (landingScene 이 씀): light = 밝은 Hero 위(기본), dark = 검정 섹션·Footer 위
+ *   표시는 body[data-nav]: hidden 이면 위로 슬라이드아웃
+ *   유리 = 옅은 틴트 + 배경 블러 + 하단 헤어라인 + 상단 안쪽 하이라이트. 색은 배경에 맞춰 명시적으로 두 벌
+ * ------------------------------------------------------------------ */
+@layer components {
+  .nav-glass {
+    color: var(--color-black);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--color-black) 8%, transparent);
+    /* 아래로 떨어지는 부드러운 그림자 + 상단 안쪽 하이라이트 → 항상 한 층 떠 있는 유리 */
+    box-shadow:
+      0 8px 20px rgba(13, 15, 11, 0.16),
+      0 2px 4px rgba(13, 15, 11, 0.08),
+      inset 0 1px 0 color-mix(in srgb, var(--color-surface-2) 70%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    transition:
+      background-color 300ms var(--ease-out-expo),
+      border-color 300ms var(--ease-out-expo),
+      box-shadow 300ms var(--ease-out-expo),
+      color 300ms var(--ease-out-expo),
+      transform 500ms var(--ease-out-expo);
+  }
+  body[data-nav-theme="dark"] .nav-glass {
+    color: var(--color-white);
+    background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--color-surface-2) 12%, transparent);
+    box-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.6),
+      0 2px 4px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 color-mix(in srgb, var(--color-surface-2) 10%, transparent);
+  }
+  /* 네비 버튼(로그인·로그아웃 공용) — 회색 헤어라인 버튼. 색은 전부 globals 회색 토큰, 어두운 테마에선 surface-2 기준으로 반전. 8px 모서리, 높이 36 */
+  .nav-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    height: 2.25rem;
+    padding: 0 1rem;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--color-dark);
+    background: var(--color-surface-1);
+    border: 1px solid var(--color-hairline-strong);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--color-black) 6%, transparent);
+    transition:
+      background-color 200ms var(--ease-out-expo),
+      color 200ms var(--ease-out-expo),
+      border-color 200ms var(--ease-out-expo),
+      box-shadow 200ms var(--ease-out-expo),
+      transform 200ms var(--ease-out-expo);
+    &:hover:not(:disabled) {
+      background: var(--color-surface-2);
+      border-color: var(--color-border);
+      color: var(--color-black);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 14px color-mix(in srgb, var(--color-black) 12%, transparent);
+    }
+    &:active:not(:disabled) {
+      transform: translateY(0);
+      background: var(--color-white-dim);
+      box-shadow: none;
+    }
+    &:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+      outline-offset: 2px;
+    }
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+  }
+  body[data-nav-theme="dark"] .nav-btn {
+    color: var(--color-white-dim);
+    background: color-mix(in srgb, var(--color-surface-2) 8%, transparent);
+    border-color: color-mix(in srgb, var(--color-surface-2) 18%, transparent);
+    box-shadow: none;
+    &:hover:not(:disabled) {
+      color: var(--color-white);
+      background: color-mix(in srgb, var(--color-surface-2) 14%, transparent);
+      border-color: color-mix(in srgb, var(--color-surface-2) 30%, transparent);
+      box-shadow: 0 6px 14px color-mix(in srgb, var(--color-black) 40%, transparent);
+    }
+    &:active:not(:disabled) {
+      background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
+    }
+  }
+  body[data-nav="hidden"] .nav-glass {
+    transform: translateY(-100%);
+  }
+}
+
+/* ------------------------------------------------------------------
+ * 버튼 — AGENTS.md "버튼" 절. components/ui/button.tsx 가 조합한다
+ *   btn + 크기(btn-sm 32 / btn-md 40 / btn-lg 46) + 변형(btn-primary / btn-secondary / btn-ghost / btn-inverse)
+ *   모서리 8px 고정(pill 금지), 라벨 500, 포커스는 2px 프라이머리 링, 비활성 60%
+ * ------------------------------------------------------------------ */
+@utility btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background-color 200ms var(--ease-out-expo),
+    border-color 200ms var(--ease-out-expo),
+    color 200ms var(--ease-out-expo),
+    box-shadow 200ms var(--ease-out-expo);
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-primary) 50%, transparent);
+    outline-offset: 2px;
+  }
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+@utility btn-sm {
+  height: 2rem;
+  padding: 0 0.75rem;
+  font-size: 0.8125rem;
+}
+@utility btn-md {
+  height: 2.5rem;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+}
+@utility btn-lg {
+  height: 2.875rem;
+  padding: 0 1.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+@utility btn-primary {
+  background: var(--color-primary);
+  color: #ffffff;
+  box-shadow: var(--shadow-2);
+  &:hover:not(:disabled) {
+    background: var(--color-primary-dark);
+  }
+  &:active:not(:disabled) {
+    background: color-mix(in srgb, var(--color-primary-dark) 85%, var(--color-black));
+  }
+}
+@utility btn-secondary {
+  background: var(--color-surface-2);
+  color: var(--color-dark);
+  border: 1px solid var(--color-border);
+  &:hover:not(:disabled) {
+    background: var(--color-surface-1);
+  }
+}
+@utility btn-ghost {
+  background: transparent;
+  color: var(--color-black);
+  border: 1px solid var(--color-dark);
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-black) 5%, transparent);
+  }
+}
+@utility btn-inverse {
+  background: var(--color-black);
+  color: var(--color-white);
+  &:hover:not(:disabled) {
+    background: var(--color-black-soft);
+  }
+}
+
+/* ------------------------------------------------------------------
+ * 입력 — 버튼과 같은 8px 모서리, 높이 40(input) / 46(input-lg, 인증 카드). 포커스 = 프라이머리 테두리 + 링, 오류 = aria-invalid
+ * ------------------------------------------------------------------ */
+@utility input {
+  height: 2.5rem;
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  padding: 0 0.75rem;
+  font-size: 0.9375rem;
+  color: var(--color-black);
+  transition: border-color 200ms var(--ease-out-expo), box-shadow 200ms var(--ease-out-expo);
+  &::placeholder {
+    color: var(--color-text-muted);
+  }
+  &:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 35%, transparent);
+  }
+  &[aria-invalid="true"] {
+    border-color: var(--color-danger);
+  }
+}
+@utility input-lg {
+  height: 2.875rem;
+  padding: 0 1rem;
+}
+
+/* ------------------------------------------------------------------
+ * 카드·컨테이너 — AGENTS.md "카드" 절
+ *   card         기본 카드(L2): surface-2 + 1px 헤어라인 + shadow-2, 모서리 12, 패딩 24
+ *   card-featured 강조 카드: 프라이머리 테두리 + 글로우 (한 화면에 하나만)
+ *   card-quiet    테두리만(L1): 목록 아이템·설정 패널 등 조용한 카드
+ *   panel         미디어·스크린샷·차트 프레임: 모서리 16, 패딩 24, 내용은 overflow-hidden
+ *   cta-banner    마무리 CTA 배너: 모서리 12, 패딩 48
+ *   hover 는 layer-hover 를 함께 붙인다 (shadow-3 + 2px 상승)
+ * ------------------------------------------------------------------ */
+@utility card {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  padding: 1.5rem;
+}
+@utility card-featured {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, transparent);
+  box-shadow: var(--shadow-2), var(--shadow-glow-primary);
+}
+@utility card-quiet {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: 1.5rem;
+}
+@utility panel {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  padding: 1.5rem;
+  overflow: hidden;
+}
+@utility cta-banner {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  padding: 3rem;
 }
 
 /* ------------------------------------------------------------------

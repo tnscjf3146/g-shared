@@ -3,7 +3,7 @@
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useMemo } from 'react'
-import { MathUtils, type Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
+import { type Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
 import { P } from '../progress'
 
 const MODEL = '/models/gpu.glb'
@@ -15,7 +15,6 @@ type Part = {
   core: number // 0 히트파이프, 1 콜드플레이트·브릿지, 아니면 -1
   choke: number // VRM 초크면 위상(A 조 0, B 조 π), 아니면 -1 — 챕터 9 이후 두 조가 번갈아 높이가 줄었다 돌아옴
   spin: boolean // 팬(회전)
-  fan: number // 팬이면 0..1 (왼→오 순서), 아니면 -1
   hs: boolean // 히트싱크(핀·히트파이프) — 챕터 7~8 에서 함께 들리고 위로 나감
 }
 
@@ -56,11 +55,8 @@ export function GpuModel() {
       if (look) o.traverse((c) => { if ((c as Mesh).isMesh) (c as Mesh).material = look })
       const core = o.name.startsWith('Heatpipe_') ? 0 : o.name === 'ColdPlate' || o.name.startsWith('PlateBridge_') ? 1 : -1
       const choke = o.name.startsWith('Choke_') ? (CHOKE_A.has(Number(o.name.slice(6))) ? 0 : Math.PI) : -1
-      list.push({ obj: o, base: o.position.clone(), ex: new Vector3(ex[0], ex[2], -ex[1]), core, choke, spin: o.userData.spin === 1, fan: -1, hs: o.name.startsWith('Fin_') || core === 0 }) // Blender(x,y,z) → glTF(x,z,-y)
+      list.push({ obj: o, base: o.position.clone(), ex: new Vector3(ex[0], ex[2], -ex[1]), core, choke, spin: o.userData.spin === 1, hs: o.name.startsWith('Fin_') || core === 0 }) // Blender(x,y,z) → glTF(x,z,-y)
     })
-    // 팬 상승 시차용 인덱스(x 작은 것부터)
-    const fans = list.filter((p) => p.spin).sort((a, b) => a.base.x - b.base.x)
-    fans.forEach((p, i) => (p.fan = i / Math.max(fans.length - 1, 1)))
     return list
   }, [scene])
 
@@ -68,8 +64,8 @@ export function GpuModel() {
     const t = clock.elapsedTime
     for (const p of parts) {
       // 매 프레임 조립 위치에서 시작해 챕터별 오프셋을 더한다(스크롤 되감기 가능)
-      // 챕터 3: 팬만 위로 상승해 화면 밖으로(왼쪽 팬부터 약간 시차). 챕터 5: 쉬라우드가 분리되어 위로
-      const up = p.spin ? MathUtils.clamp(P.fans * 1.3 - p.fan * 0.3, 0, 1) * FAN_LIFT : p.obj.name === 'Shroud' ? P.shroud * SHROUD_LIFT : 0
+      // 챕터 3: 팬 3개가 동시에 위로 상승해 화면 밖으로(시차 없음 — 시차를 두면 스크롤이 조금만 움직여도 한 팬만 먼저 떠 보인다). 챕터 5: 쉬라우드가 분리되어 위로
+      const up = p.spin ? P.fans * FAN_LIFT : p.obj.name === 'Shroud' ? P.shroud * SHROUD_LIFT : 0
       p.obj.position.set(p.base.x, p.base.y + up, p.base.z)
       // 다 올라간 팬(fans=1)·쉬라우드(shroud=1)는 숨김 — 뒤 챕터에서 카메라가 위로 올라가도 안 보이게. 되감으면 다시 보임
       let hidden = p.spin ? P.fans >= 1 : p.obj.name === 'Shroud' ? P.shroud >= 1 : false
