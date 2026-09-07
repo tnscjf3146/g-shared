@@ -1,0 +1,11 @@
+node_modules/
+artifacts/
+cache/
+coverage/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+ignition/deployments/chain-31337/
+ignition/parameters/ssafy.json
