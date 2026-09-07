@@ -5,20 +5,21 @@ import { P } from '../progress'
 // 1–2 는 인트로(시간 ms, 로드 시 1회), 3 부터 스크롤(ms 단위 스크롤 sync).
 
 /** 인트로 챕터 시작 시각(ms) */
-export const I = { top: 0, toFront: 1400, dark: 1650, hero: 2000, reveal: 3400, end: 5000 } // 빔이 팬들을 훑음 → 빔 꺼지고 잠깐 암전(그 사이 정면으로 틸트다운) → 빔 켜지며 로고 훑기 → 리빌
+const I = { top: 0, toFront: 1400, dark: 1650, hero: 2000, reveal: 3400, end: 5000 } // 빔이 팬들을 훑음 → 빔 꺼지고 잠깐 암전(그 사이 정면으로 틸트다운) → 빔 켜지며 로고 훑기 → 리빌
 /** 스크롤 챕터 시작 시각(ms) */
-export const T = { fans: 0, fansEnd: 1500, smoke: 2550, smokeEnd: 4000, shroud: 3000, shroudEnd: 5000, orbit: 8000, orbitEnd: 9000, hsLift: 10000, hsLiftEnd: 10500, hsOff: 12000, hsOffEnd: 13000, top: 14500, topEnd: 16000, stack: 18000, stackEnd: 20500, assemble: 21000, end: 23000 } // 챕터별 시작/끝(ms). 사이는 정지
+export const T = { hold: 1500, fans: 1500, fansEnd: 3000, smoke: 4050, smokeEnd: 5500, shroud: 4500, shroudEnd: 6500, orbit: 8000, orbitEnd: 9000, hsLift: 10000, hsLiftEnd: 10500, hsOff: 12000, hsOffEnd: 13000, top: 14500, topEnd: 16000, stack: 18000, stackEnd: 20500, assemble: 21000, end: 23000 } // 챕터별 시작/끝(ms). 사이는 정지. 0–hold 는 인트로 직후 정지 구간(조립 상태 그대로) — 스크롤이 조금 움직여도 부품이 반응하지 않게
 
 const CAM_INTRO_TOP = { yaw: Math.PI / 2, tilt: 0.315, dist: 3.3, lookY: -0.12 } // lookY 를 낮춰(타깃을 카드 아래로) 카드가 화면 위쪽에 오게 // 인트로 첫 컷: +X 끝 위 낮은 각(18°)에서 카드 길이 방향으로 내려다봄 — 가까운 팬이 크게, 나머지가 멀어지는 구도(Blender 레퍼런스)
 const CAM_HERO = { yaw: Math.PI / 2, tilt: 0, dist: 2.35, lookY: 0.0225, shift: -0.05 } // 끝 캡 정면, G 원이 화면 정중앙
 
-/** 0 INTRO TOP — +X 끝 위 낮은 각에서 카드 길이 방향을 보는 컷. 로고와 같은 스윕 빔이 카드 위를 −X→+X 로 지나가며 팬 3개를 차례로 비춘다(sweep 0→1).
+/** 0 INTRO TOP — +X 끝 위 낮은 각에서 카드 길이 방향을 보는 컷. 배경은 이 챕터만 딥 블랙(#deep), 이후는 dark(#333). 로고와 같은 스윕 빔이 카드 위를 −X→+X 로 지나가며 팬 3개를 차례로 비춘다(sweep 0→1).
  *  스윕이 끝나면 완전 암전(#blackout 검은 오버레이 — LED 점까지 안 보임), 그 사이 카메라가 끝 캡 정면으로 틸트다운한다(HERO 시작에 오버레이가 걷히고 빔이 켜짐). */
 export function introTop(intro: Timeline) {
   intro.add(P, { yaw: [CAM_INTRO_TOP.yaw, CAM_INTRO_TOP.yaw], tilt: [CAM_INTRO_TOP.tilt, CAM_INTRO_TOP.tilt], dist: [CAM_INTRO_TOP.dist, CAM_INTRO_TOP.dist], lookY: [CAM_INTRO_TOP.lookY, CAM_INTRO_TOP.lookY], shift: [0, 0], env: [0, 0], duration: I.toFront - I.top, ease: 'linear' }, I.top)
   intro.add(P, { beam: [0, 1], duration: 250, ease: 'out(2)' }, I.top)
   intro.add(P, { sweep: [0, 1], duration: I.toFront - I.top, ease: 'inOut(2)' }, I.top)
   intro.add('#blackout', { opacity: [0, 1], duration: I.dark - I.toFront, ease: 'out(2)' }, I.toFront) // 먼저 완전 암전(카메라는 아직 그대로)
+  intro.add('#deep', { opacity: [1, 0], duration: I.dark - I.toFront, ease: 'linear' }, I.toFront) // INTRO TOP 전용 딥 블랙 바닥을 암전 뒤에서 걷어냄 → 이후 배경은 bg-dark
   intro.add(P, { beam: [1, 0], duration: I.dark - I.toFront, ease: 'out(2)' }, I.toFront)
   // 오버레이가 다 덮인 뒤에야 카메라 이동 — 암전 전에 움직임이 보이지 않게
   intro.add(P, { yaw: [CAM_INTRO_TOP.yaw, CAM_HERO.yaw], tilt: [CAM_INTRO_TOP.tilt, CAM_HERO.tilt], dist: [CAM_INTRO_TOP.dist, CAM_HERO.dist], lookY: [CAM_INTRO_TOP.lookY, CAM_HERO.lookY], shift: [0, CAM_HERO.shift], env: [0, 0], sweep: [1, 2], duration: I.hero - I.dark, ease: 'linear' }, I.dark)
@@ -39,7 +40,7 @@ export function reveal(intro: Timeline) {
   intro.add(P, { yaw: [CAM_HERO.yaw, CAM0.yaw], tilt: [CAM_HERO.tilt, CAM0.tilt], dist: [CAM_HERO.dist, CAM0.dist], lookY: [CAM_HERO.lookY, 0], shift: [CAM_HERO.shift, 0], duration: I.end - I.reveal, ease: 'inOut(3)' }, I.reveal)
 }
 
-/** 3 FANS OUT — 팬 3개가 위로 가속 상승해 화면 밖으로(팬별 시차는 gpuModel). */
+/** 3 FANS OUT — 정지 구간(0–1500) 뒤, 팬 3개가 **동시에** 위로 가속 상승해 화면 밖으로. */
 export function fansOut(scroll: Timeline) {
   scroll.add(P, { fans: [0, 1], duration: T.fansEnd - T.fans, ease: 'in(2)' }, T.fans)
 }

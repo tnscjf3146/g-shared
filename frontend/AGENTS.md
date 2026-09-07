@@ -36,6 +36,15 @@
 }
 ```
 
+### 서체 (확정)
+
+**Pretendard 하나만 쓴다.** 제목·본문·로고·숫자·모노 자리까지 전부 Pretendard(피그마의 Manrope/Inter/Barlow 표기는 굵기·크기만 따른다).
+
+- 로딩: `pretendard` 패키지의 가변 woff2 를 `app/layout.tsx` 에서 `next/font/local` 로 셀프호스팅(`--font-pretendard`, weight 45~920, `display: swap`). 구글 폰트·CDN 링크를 추가하지 않는다.
+- 토큰: `globals.css` 의 `--font-sans` / `--font-heading` / `--font-mono` / `--font-logo` 가 모두 Pretendard 를 가리킨다. 컴포넌트에서는 서체 이름 대신 역할 토큰(`font-sans`, `font-heading`, `font-logo`)만 쓴다.
+- 굵기: 본문 400, 라벨·메뉴 500, 버튼·소제목 600, 제목 700, display(Hero 56) 800. 숫자 나열(요금·시간·통계)은 `tabular-nums`.
+- 자간은 "반응형" 절의 `tracking-display/-heading/-eyebrow` 규칙을 따른다.
+
 ### 레이어 구조 (5단 Elevation)
 
 컴포넌트가 배경 위에 둥둥 떠 있는 느낌을 주기 위해 5단 깊이 체계를 사용한다.
@@ -111,6 +120,68 @@
 - 페이지 진입 시 등장 순서: L1 섹션 → L2 카드(스태거) 순으로 아래 레벨부터
 - 퇴장은 등장의 절반 시간(150~200ms) + `ease-in`으로 빠르게 사라짐 (지루함 방지)
 - `prefers-reduced-motion: reduce`일 땐 이동/스케일 없이 opacity 페이드만 (접근성)
+
+### 버튼 (확정)
+
+Linear 마케팅 시스템의 버튼 규칙을 우리 팔레트(라이트 테마·NVIDIA 그린)로 옮긴 것. 구현은 `globals.css` 의 `btn-*` 유틸리티, 컴포넌트는 `components/ui/button.tsx`(`variant` · `size` · `href`).
+
+| 변형 | 배경 / 글자 | 테두리 | 용도 |
+| --- | --- | --- | --- |
+| `primary` | `--color-primary` / 흰색, `shadow-2`, hover `--color-primary-dark` | 없음 | 화면당 주 행동 1개("지금 시작하기", "로그인", "계정 만들기") |
+| `secondary` | `--color-surface-2` / `--color-dark` | `--color-border` | 보조 행동("취소", "더 보기") |
+| `ghost` | 투명 / `--color-black`, hover 검정 5% | `--color-dark` | 밝은 배경 위 두 번째 CTA("내 GPU로 수익 내기") |
+| `inverse` | `--color-black` / `--color-white` | 없음 | 어두운 섹션 위 CTA |
+
+| 크기 | 높이 | 패딩(좌우) | 라벨 | 용도 |
+| --- | --- | --- | --- | --- |
+| `sm` | 32 | 12 | 13 / 500 | 표 안·툴바 |
+| `md` (기본) | 40 | 14 | 14 / 500 | 일반 UI |
+| `lg` | 46 | 24 | 15 / 600 | Hero CTA, 인증 카드(피그마 Button 46h) |
+
+규칙
+- **모서리는 8px(`rounded-md`) 고정.** CTA 를 pill 로 둥글리지 않는다. pill 은 탭 토글·상태 배지처럼 "선택/상태"를 나타내는 요소에만. 네비 우측 로그인/로그아웃은 같은 `nav-btn`(`globals.css`, 36h, `surface-1` 배경 + `hairline-strong` 테두리 + `dark` 글자, 어두운 유리 위에선 `surface-2` 8% 틴트로 반전)을 쓴다. 색은 회색 토큰만, 하드코딩 금지.
+- 색 사용은 희소하게: `primary` 그린은 **주 CTA · 포커스 링 · 브랜드 마크 · 링크 강조**에만. 배경 채움·섹션 색으로 쓰지 않는다. `--color-accent`(#75FF00)는 hover/강조 한 점.
+- 포커스는 2px 프라이머리 링(50%), 비활성은 `opacity .6` + `cursor: not-allowed`. 제출 중엔 비활성 + 인라인 스피너.
+- 터치 타깃 **40px 이상**(`md`). 터치 뷰포트의 폼 버튼은 `lg`(46).
+- 입력(`components/ui/input.tsx`)도 같은 8px 모서리: `input` 40 / `input-lg` 46(인증 카드), 포커스 = 프라이머리 테두리 + 35% 링, 오류 = `aria-invalid` → `--color-danger` 테두리.
+
+### 카드·컨테이너 (확정)
+
+깊이는 **표면 단계 + 1px 헤어라인 + 레이어 그림자**로 표현한다(Linear 는 다크라 그림자를 안 쓰지만, 라이트 테마에선 헤어라인만으로 층이 안 보여 레이어 그림자를 함께 쓴다). 구현은 `globals.css` 의 `card` / `card-featured` / `card-quiet` / `panel` / `cta-banner`.
+
+| 클래스 | 레벨 | 모서리 | 패딩 | 용도 |
+| --- | --- | --- | --- | --- |
+| `card` | L2 `surface-2` + `--color-hairline` + `shadow-2` | 12 | 24 | 기능 카드, 목록 카드, 가격 카드, 인증 카드(패딩은 40 으로 override) |
+| `card-featured` | `card` + 프라이머리 45% 테두리 + `glow-primary` | 12 | 24 | 추천 요금제 등 **한 화면에 하나만** |
+| `card-quiet` | L1 `surface-1` + 헤어라인 + `shadow-1` | 12 | 24 | 설정 패널, 조용한 목록 아이템 |
+| `panel` | L2 + 헤어라인, `overflow-hidden` | 16 | 24 | 스크린샷·차트·3D 뷰 등 미디어 프레임 |
+| `cta-banner` | L2/L3 `shadow-3` | 12 | 48 | 페이지 하단 마무리 CTA |
+
+규칙
+- 후기·인용 카드는 `card` 에 `p-8`(32). 카드 안 블록 간격은 24(`gap-6`), 섹션 사이는 96(`py-section`).
+- hover 로 떠오르는 카드는 `layer-hover` 를 함께(그림자 L3 + 2px 상승). 정적 카드는 붙이지 않는다.
+- 모서리 스케일: 4 칩·배지 / 6 태그 / **8 버튼·입력** / **12 카드** / **16 미디어 패널** / 24 큰 배너 / pill 토글·상태 필. 같은 레벨 카드끼리 다른 모서리를 쓰지 않는다.
+- 헤어라인 `--color-hairline`(#E1E4DD)은 카드·패널 테두리용, `--color-border`(#AAAAAA)는 입력·구분선용. 카드 위에 카드를 겹칠 땐 상위 레벨 클래스를 쓴다(레이어 규칙과 동일).
+- 미디어(스크린샷·3D 캡처)는 `panel` 안에서 비율 유지, 잘라내지 않는다.
+
+### 반응형 (확정)
+
+콘텐츠 최대 폭 **1280**(`max-w-content`), 좌우 패딩 데스크톱 64 → 태블릿 32 → 모바일 20. 브레이크포인트는 Tailwind 기본에 `xs`·`2xl` 만 조정.
+
+| 이름 | 폭 | 바뀌는 것 |
+| --- | --- | --- |
+| `2xl` | 1440 | 기본 데스크톱(피그마 프레임 폭) |
+| `xl` | 1280 | 콘텐츠 폭 상한. 카드 3열 유지 |
+| `lg` | 1024 | 카드 3열 → 2열. Hero 아트 숨김(`hidden lg:block`) |
+| `md` | 768 | 네비 링크 → 햄버거, 비교표 → 아코디언, 2열 → 1열 시작 |
+| `xs` | 480 | 1열. display 56 → 36, h1 32 → 28. 버튼은 전체 폭 |
+
+규칙
+- 카드 그리드: `grid-cols-1 md:grid-cols-2 lg:grid-cols-3`. 3열 이상은 쓰지 않는다.
+- 제목 스케일: display 56(`--text-display` 48 기준 확대) → `xs` 에서 36. 자간은 `tracking-display`(-0.03em) / `tracking-heading`(-0.02em), 아이브로는 `tracking-eyebrow`(+0.04em).
+- 터치 뷰포트(`md` 미만): 버튼·입력 44 이상, 탭 필 36 이상. hover 효과(`layer-hover`)는 유지되되 필수 정보는 hover 에 숨기지 않는다.
+- 이미지·미디어: `panel` 안에서 `aspect-*` 로 비율 고정, 로고 마퀴는 6열 → 3열(`md` 미만).
+- 랜딩 3D 스크롤 연출은 예외로 데스크톱 기준(1440×900)이며, `md` 미만에서는 인트로·연출 축약을 별도로 결정한다(`landing/landing.md`).
 
 ## 컨벤션
 

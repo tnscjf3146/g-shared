@@ -16,7 +16,7 @@ export function GpuCanvas() {
       dpr={[1, 1.75]}
       camera={{ fov: 32, near: 0.1, far: 50, position: [3, 2.5, 4] }}
       gl={{ antialias: true, toneMapping: ACESFilmicToneMapping, toneMappingExposure: 1.1 }}
-      style={{ background: '#000' }}
+      style={{ background: 'transparent' }} // 배경색은 뒤의 sticky 컨테이너(bg-dark)와 INTRO TOP 전용 #deep 레이어가 담당
     >
       <CameraRig />
       <Suspense fallback={null}>
