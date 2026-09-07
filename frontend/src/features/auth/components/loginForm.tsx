@@ -10,6 +10,7 @@ import { login } from '../api'
 import { messageFor } from '../errors'
 import { useZodForm } from '../hooks/use-zod-form'
 import { loginSchema } from '../schema'
+import { safeNextPath } from '../next-path'
 import { useAuth } from '../store'
 
 // 피그마 P2 로그인 · LoginCard (지갑 연결 버튼은 지갑 기능 브랜치에서). 제출 시 zod 검사 → 필드 오류, 서버 오류는 폼 상단 인라인
@@ -20,8 +21,7 @@ export function LoginForm() {
   const f = useZodForm(loginSchema, { email: '', password: '' })
   const [showPw, setShowPw] = useState(false)
 
-  const next = params.get('next')
-  const nextPath = next && next.startsWith('/') ? next : '/'
+  const nextPath = safeNextPath(params.get('next')) // 오픈 리다이렉트 차단: 같은 오리진 절대 경로만
   const expired = params.get('reason') === 'expired' // 보호 API 에서 만료로 돌려보내진 경우
   const signedUp = params.get('signup') === 'done' // 회원가입 직후
 

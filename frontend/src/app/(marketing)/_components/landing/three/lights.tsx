@@ -10,6 +10,9 @@ import { P } from '../progress'
 const BEAM_TOP_MAIN = 30 // 이전 16
 const BEAM_TOP_AUX = 40 // 이전 22
 const BEAM_LOGO = 40 // HERO(sweep 2..3) 로고 스윕
+const LOGO_SWEEP_HZ = 0.22 // 조립 완료 뒤 좌우 왕복 속도(초당 왕복 수) — 한쪽 끝에서 반대쪽까지 약 2.3초
+const BEAM_LOGO_END = 26 // 조립 완료 뒤 로고 빔 세기(HERO 스윕 40 보다 어둡게)
+const LOGO_SWEEP_Z = 1.0 // 왕복 폭(±z). 끝 캡 폭보다 조금 넓게 지나가 빔 자국이 로고를 완전히 가로지름
 
 // 조명: 스튜디오 조명은 전부 P.env 배율(챕터 1 암전 → 챕터 2 페이드인).
 // 스윕 스팟 하나가 +X 끝 캡(로고)을 화면 왼→오(=+Z→−Z)로 훑는다. 살짝 위에서 비춰 metallic 상감의 반사각을 잡는다.
@@ -19,7 +22,7 @@ export function Lights() {
   const spot2 = useRef<SpotLight>(null) // 첫 컷 전용 보조 스팟: 메인과 같은 z, 카드 먼 쪽을 비춰 빔 자국을 세로(카드 길이)로 길게
   const top = useRef<Light>(null)
   const { scene } = useThree()
-  useFrame(() => {
+  useFrame(({ clock }) => {
     scene.environmentIntensity = P.env
     for (const o of group.current?.children ?? []) {
       const l = o as Light
@@ -60,6 +63,16 @@ export function Lights() {
       if (s2) s2.intensity = 0
     }
     s.intensity = P.beam * (k <= 1 ? BEAM_TOP_MAIN : BEAM_LOGO)
+    // 조립 완료 뒤(P.logoSweep): 같은 스팟이 시간 기반으로 로고 앞을 좌우(+Z↔−Z)로 계속 왕복한다.
+    // CAM_END(tilt 0.22, dist 4.5)의 카메라 축 근처에 두어 metallic 상감 하이라이트가 보이게 — 로고(1.55, 0.02, 0)에서 카메라 방향(0.95, 0.32)으로 1.3 만큼 떨어진 위치
+    if (P.logoSweep > 0) {
+      const z = LOGO_SWEEP_Z * Math.sin(clock.elapsedTime * Math.PI * 2 * LOGO_SWEEP_HZ)
+      s.angle = 0.4
+      s.position.set(2.8, 0.44, z)
+      s.target.position.set(1.55, 0.02, 0)
+      s.intensity = Math.max(s.intensity, P.logoSweep * BEAM_LOGO_END)
+      if (s2) s2.intensity = 0
+    }
     s.target.updateMatrixWorld()
   })
   return (

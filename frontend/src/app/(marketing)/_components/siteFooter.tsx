@@ -1,6 +1,6 @@
 import Link from 'next/link'
 
-// 랜딩 푸터 (피그마 P1 랜딩 v3 · Footer, 어두운 배경, 높이 80). 약관·개인정보 페이지는 아직 없어 홈으로 보낸다
+// 랜딩 푸터 (피그마 P1 랜딩 v3 · Footer, 어두운 배경, 높이 80). 약관·개인정보 페이지는 아직 없어 홈으로 보낸다.
 export function SiteFooter() {
   return (
     <footer className="flex h-20 items-center justify-between bg-black px-16">

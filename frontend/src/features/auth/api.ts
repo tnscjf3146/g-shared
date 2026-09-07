@@ -2,6 +2,7 @@ import { ApiError, fetcher } from '@/lib/fetcher'
 import { RETRYABLE_401 } from './errors'
 import { tokenResponseSchema } from './schema'
 import { authStore } from './store'
+import { safeNextPath } from './next-path'
 import type { LoginInput, SignupRequest } from './types'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -97,7 +98,7 @@ function toLogin(): never {
   sessionFlag.set(false)
   authStore.signOut()
   if (typeof window !== 'undefined') {
-    const next = encodeURIComponent(location.pathname + location.search)
+    const next = encodeURIComponent(safeNextPath(location.pathname + location.search)) // 소비 측(loginForm)도 다시 검증하지만 생성 시점에도 정규화
     location.assign(new URL(`/login?next=${next}&reason=expired`, location.origin).href) // React 밖(API 계층)이라 라우터를 못 쓴다 → 전체 URL 로 하드 이동
   }
   throw new ApiError(401, 'UNAUTHORIZED', '인증이 필요합니다.')
