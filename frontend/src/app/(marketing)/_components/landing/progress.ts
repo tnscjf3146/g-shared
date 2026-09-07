@@ -19,4 +19,5 @@ export const P = {
   stack: 0, // 햄버거 레시피 구조도: 모든 부품이 Blender explode 배치로 층층이 모여 한눈에 0..1
   assemble: 0, // 구조도의 층 간격이 0 으로 줄어 조립 완료 0..1 (stack 유지 상태에서)
   topLight: 0, // 탑뷰 전용 위 조명 세기 0..1
+  logoSweep: 0, // 조립 완료 뒤 로고를 좌우로 계속 훑는 빔 세기 0..1 (lights.tsx, 시간 기반 왕복)
 }

@@ -110,4 +110,5 @@ export function stack(scroll: Timeline) {
 /** 9 ASSEMBLE — 구조도의 층이 내려와 조립 완료. 카메라는 +X 끝 캡(로고) 정면 쪽으로 돌아와 살짝 위에서 로고를 본다. */
 export function assemble(scroll: Timeline) {
   scroll.add(P, { assemble: [0, 1], duration: T.assembleEnd - T.assemble, ease: 'inOut(2)' }, T.assemble) // 카메라는 cameraTrack(CAM_END)
+  scroll.add(P, { logoSweep: [0, 1], duration: T.end - T.assembleEnd, ease: 'out(2)' }, T.assembleEnd) // 조립 완료 뒤 정지 구간에 빔이 켜져 로고를 좌우로 계속 훑는다(되감으면 꺼짐)
 }
