@@ -8,6 +8,7 @@ given back.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from gshared_worker import environment_check
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
 from gshared_worker.errors import WorkerAlreadyRunningError, WorkerError
@@ -59,6 +61,7 @@ class StartupTestCase(unittest.TestCase):
 
     def setUp(self):
         FakeGuard.held = set()
+        self.reached = []
         self._temporary = TemporaryDirectory()
         self.directory = Path(self._temporary.name)
         self.said = []
@@ -77,13 +80,20 @@ class StartupTestCase(unittest.TestCase):
         return {"LOCALAPPDATA": str(self.directory / "AppData")}
 
     def start(self, *, run_worker=None, guard_factory=FakeGuard, env=None):
+        # The real stage diagnoses the machine it runs on, which is not what
+        # these tests are about; it has its own file. Everything here needs to
+        # know is whether the stage was reached at all.
         return worker_main.run(
             out=self.said.append,
             env=self.env() if env is None else env,
             directory=self.directory,
-            run_worker=run_worker,
+            run_worker=run_worker or self.stage_reached,
             guard_factory=guard_factory,
         )
+
+    def stage_reached(self, settings, say):
+        self.reached.append(settings)
+        return WorkerExitCode.OK
 
     @property
     def output(self):
@@ -96,10 +106,19 @@ class StartupTestCase(unittest.TestCase):
 
 
 class AConfiguredMachineStartsTest(StartupTestCase):
-    def test_it_reaches_the_end_of_what_this_build_does(self):
+    def test_it_reaches_the_stage_that_follows_startup(self):
         self.enrol()
 
         self.assertEqual(self.start(), WorkerExitCode.OK)
+        self.assertEqual(len(self.reached), 1)
+
+    def test_that_stage_is_the_environment_diagnosis(self):
+        # Startup does not decide what comes next by printing something; it
+        # calls whatever stage is wired in. Today that is the diagnosis.
+        self.assertIs(
+            inspect.signature(worker_main.run).parameters["run_worker"].default, None
+        )
+        self.assertIs(worker_main.check_environment, environment_check.check_environment)
 
     def test_the_settings_it_read_are_shown(self):
         self.enrol()
@@ -221,6 +240,14 @@ class ASecondWorkerOnTheSameGpuTest(StartupTestCase):
         FakeGuard.held.add(("worker-001", 0))
 
         self.start(run_worker=lambda settings, say: self.fail("must not run"))
+
+    def test_the_stage_is_never_reached_without_the_identity(self):
+        self.enrol()
+        FakeGuard.held.add(("worker-001", 0))
+
+        self.start()
+
+        self.assertEqual(self.reached, [])
 
     def test_a_stage_that_finds_the_same_answer_deeper_down_agrees(self):
         self.enrol()
