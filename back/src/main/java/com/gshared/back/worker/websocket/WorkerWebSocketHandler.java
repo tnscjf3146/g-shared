@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import tools.jackson.databind.ObjectMapper;
 
@@ -29,21 +30,37 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
 
     // 세션 attribute 에 저장해둘 workerId 키 (핸드셰이크 인터셉터가 넣어줌 → 부품 5)
     public static final String WORKER_ID = "workerId";
+    // "REGISTER 를 마친 세션" 표시 플래그 (등록 전에 다른 메시지를 보내면 무시)
+    public static final String REGISTERED = "registered";
+    // 동시 전송 안전 세션(ConcurrentWebSocketSessionDecorator) 보관 키
+    private static final String SEND_SESSION = "sendSession";
+
+    // 데코레이터 파라미터: 전송 대기 한계 10초, 버퍼 512KB 초과 시 세션 종료
+    private static final int SEND_TIME_LIMIT_MS = 10_000;
+    private static final int BUFFER_SIZE_LIMIT = 512 * 1024;
 
     private final ObjectMapper objectMapper;
     private final WorkerSessionRegistry sessionRegistry;
     private final WorkerService workerService;
 
-    /** 워커가 연결되면 호출. (인증은 이미 인터셉터가 통과시킴) */
+    /**
+     * 워커가 연결되면 호출. (인증은 이미 인터셉터가 통과시킴)
+     * 이 시점에 세션을 동시전송 안전 데코레이터로 감싸 attribute 에 보관한다 →
+     * 이후 모든 발신(ACK·JOB_ASSIGN 등)이 이 세션을 거쳐 쓰레드 안전해진다.
+     */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
         String workerId = (String) session.getAttributes().get(WORKER_ID);
+        session.getAttributes().put(SEND_SESSION,
+                new ConcurrentWebSocketSessionDecorator(session, SEND_TIME_LIMIT_MS, BUFFER_SIZE_LIMIT));
         log.info("[WS] 연결됨 workerId={} sessionId={}", workerId, session.getId());
         // 실제 등록은 워커가 보내는 REGISTER 메시지에서 처리 (명세: 연결 후 REGISTER 전송)
     }
 
-    // "REGISTER 를 마친 세션" 표시 플래그 (등록 전에 다른 메시지를 보내면 무시)
-    public static final String REGISTERED = "registered";
+    /** attribute 에 보관해둔 동시전송 안전 세션. (없으면 원본 fallback) */
+    private WebSocketSession sendSession(WebSocketSession session) {
+        return (WebSocketSession) session.getAttributes().getOrDefault(SEND_SESSION, session);
+    }
 
     /**
      * 워커가 텍스트 메시지를 보낼 때마다 호출. type 을 보고 분기한다.
@@ -90,8 +107,9 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
             return;   // REGISTER 전에 끊긴 경우
         }
         // 이 세션이 아직 "현재 연결"일 때만 OFFLINE 처리.
+        // 레지스트리엔 감싼 세션을 넣었으므로 비교도 감싼 세션으로 한다.
         // (재연결 후 옛 세션의 종료 이벤트가 늦게 오면 remove 가 false → 새 연결 건드리지 않음)
-        if (sessionRegistry.remove(workerId, session)) {
+        if (sessionRegistry.remove(workerId, sendSession(session))) {
             try {
                 workerService.markOffline(workerId);
             } catch (Exception e) {
@@ -103,7 +121,8 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     // ── type 별 처리 ────────────────────────────────────────────
     private void handleRegister(WebSocketSession session, String workerId, WorkerMessage msg) {
         log.info("[WS] REGISTER workerId={}", workerId);
-        WebSocketSession previous = sessionRegistry.add(workerId, session);
+        // 레지스트리에는 동시전송 안전 세션을 등록 → 백엔드 능동 발신(JOB_ASSIGN 등)도 안전
+        WebSocketSession previous = sessionRegistry.add(workerId, sendSession(session));
         closeQuietly(previous);   // 같은 워커의 이전 연결이 남아있으면 정리
         workerService.markOnline(workerId, LocalDateTime.now());
         session.getAttributes().put(REGISTERED, Boolean.TRUE);
@@ -134,12 +153,10 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
 
     // ── 공통 헬퍼 ───────────────────────────────────────────────
 
-    /** 봉투를 JSON 으로 직렬화해 워커에게 전송. */
+    /** 봉투를 JSON 으로 직렬화해 워커에게 전송. (동시전송 안전 세션 경유) */
     private void send(WebSocketSession session, WorkerMessage message) {
         try {
-            // ponytail: 여러 쓰레드가 같은 세션에 동시 전송하면 깨질 수 있음.
-            //           JOB_ASSIGN 등 백엔드 능동 발신이 늘면 ConcurrentWebSocketSessionDecorator 로 감쌀 것.
-            session.sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
+            sendSession(session).sendMessage(new TextMessage(objectMapper.writeValueAsString(message)));
         } catch (IOException e) {
             log.warn("[WS] 전송 실패 sessionId={} type={}", session.getId(), message.type(), e);
         }
