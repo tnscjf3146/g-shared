@@ -93,8 +93,13 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
                 // 나머지(REGISTER_ACK/JOB_ASSIGN 등)는 백엔드가 "보내는" 타입이라 수신될 일 없음
                 default -> log.warn("[WS] 예상치 못한 수신 type={} workerId={}", msg.type(), workerId);
             }
+        } catch (tools.jackson.core.JacksonException e) {
+            // 예상 범주: 워커가 보낸 메시지가 깨짐 — 워커 측 문제이므로 warn, 연결 유지
+            log.warn("[WS] 메시지 파싱 실패(연결 유지) workerId={} payload={}", workerId, message.getPayload(), e);
         } catch (Exception e) {
-            log.warn("[WS] 메시지 처리 실패(연결 유지) workerId={} payload={}", workerId, message.getPayload(), e);
+            // 예상 밖: DB 장애 등 시스템 오류 가능성 — error 로 격상해 묻히지 않게. 연결은 유지
+            // (연결을 끊어도 시스템 오류가 해결되지 않고, 워커 이탈만 유발하므로)
+            log.error("[WS] 메시지 처리 중 예상치 못한 오류(연결 유지) workerId={} payload={}", workerId, message.getPayload(), e);
         }
     }
 
