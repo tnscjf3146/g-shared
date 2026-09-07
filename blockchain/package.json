@@ -11,7 +11,11 @@
     "typecheck": "tsc --noEmit",
     "test": "hardhat test",
     "check": "npm run build && npm run typecheck && npm test",
-    "deploy:local": "hardhat ignition deploy ignition/modules/GCoin.ts"
+    "deploy:local": "hardhat ignition deploy ignition/modules/GCoin.ts",
+    "preflight:ssafy": "hardhat run scripts/preflight-ssafy.ts",
+    "deploy:ssafy": "npm run preflight:ssafy && hardhat ignition deploy ignition/modules/GCoin.ts --network ssafy --parameters ignition/parameters/ssafy.json && npm run verify:ssafy",
+    "verify:ssafy": "hardhat run scripts/verify-ssafy.ts",
+    "test:deployment": "node scripts/test-ssafy-deployment.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "3.1.8",

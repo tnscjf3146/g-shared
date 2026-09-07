@@ -9,5 +9,5 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["hardhat.config.ts", "test/**/*.ts", "ignition/modules/**/*.ts", "artifacts/**/*.d.ts"]
+  "include": ["hardhat.config.ts", "test/**/*.ts", "scripts/**/*.ts", "ignition/modules/**/*.ts", "artifacts/**/*.d.ts"]
 }

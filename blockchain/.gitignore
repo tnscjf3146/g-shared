@@ -8,3 +8,4 @@ dist/
 !.env.example
 *.log
 ignition/deployments/chain-31337/
+ignition/parameters/ssafy.json
