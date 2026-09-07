@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from gshared_worker import environment_check
+from gshared_worker import runtime_check
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
 from gshared_worker.errors import WorkerAlreadyRunningError, WorkerError
@@ -112,13 +113,39 @@ class AConfiguredMachineStartsTest(StartupTestCase):
         self.assertEqual(self.start(), WorkerExitCode.OK)
         self.assertEqual(len(self.reached), 1)
 
-    def test_that_stage_is_the_environment_diagnosis(self):
+    def test_that_stage_diagnoses_the_machine_then_brings_the_runtime_up(self):
         # Startup does not decide what comes next by printing something; it
-        # calls whatever stage is wired in. Today that is the diagnosis.
+        # calls whatever stage is wired in. Today that is two steps.
         self.assertIs(
             inspect.signature(worker_main.run).parameters["run_worker"].default, None
         )
         self.assertIs(worker_main.check_environment, environment_check.check_environment)
+        self.assertIs(worker_main.ensure_runtime, runtime_check.ensure_runtime)
+
+    def test_the_runtime_is_never_touched_when_the_machine_fails_diagnosis(self):
+        # A machine that is not ready must not be installed into.
+        self.enrol()
+        reached = []
+
+        with patch.object(worker_main, "check_environment",
+                          lambda settings, say: WorkerExitCode.EXPECTED_FAILURE),              patch.object(worker_main, "ensure_runtime",
+                          lambda settings, say: reached.append(1) or 0):
+            code = self.start(run_worker=worker_main.start_the_machine)
+
+        self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
+        self.assertEqual(reached, [])
+
+    def test_the_runtime_follows_a_machine_that_passed(self):
+        self.enrol()
+        reached = []
+
+        with patch.object(worker_main, "check_environment",
+                          lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "ensure_runtime",
+                          lambda settings, say: reached.append(1) or WorkerExitCode.OK):
+            code = self.start(run_worker=worker_main.start_the_machine)
+
+        self.assertEqual(code, WorkerExitCode.OK)
+        self.assertEqual(reached, [1])
 
     def test_the_settings_it_read_are_shown(self):
         self.enrol()
