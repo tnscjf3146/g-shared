@@ -26,14 +26,20 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.ObjectMapper;
+
+import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, CorsProperties.class})
 public class SecurityConfig {
 
     private final ObjectMapper objectMapper;
+    private final CorsProperties corsProperties;
     private final JwtProvider jwtProvider;
     private final TokenBlacklistRepository tokenBlacklistRepository;
     private final CustomUserDetailsService customUserDetailsService;
@@ -47,6 +53,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
@@ -87,5 +94,23 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(corsProperties.allowedOrigins());
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        // 실제 보안 경계는 허용 출처다. 허용하지 않은 출처는 어떤 헤더를 붙여도 막히므로
+        // 헤더는 요청한 값을 그대로 반사한다. (Spring 이 * 를 실제 요청 헤더로 치환한다)
+        configuration.setAllowedHeaders(List.of("*"));
+        // refreshToken 쿠키를 주고받으려면 필요하다. 이 값을 켜면 출처에 와일드카드를 쓸 수 없다.
+        configuration.setAllowCredentials(true);
+        // preflight(OPTIONS) 응답 캐시. RateLimitFilter 가 OPTIONS 도 세므로 캐시로 호출을 줄인다.
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", configuration);
+        return source;
     }
 }
