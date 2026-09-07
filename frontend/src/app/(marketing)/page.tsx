@@ -1,5 +1,6 @@
 import { HeroSection } from './_components/hero/heroSection'
 import { LandingScene } from './_components/landing/landingScene'
+import { BackToTop } from './_components/backToTop'
 import { SiteFooter } from './_components/siteFooter'
 import { SiteNav } from './_components/siteNav'
 
@@ -11,6 +12,7 @@ export default function LandingPage() {
       <HeroSection />
       <LandingScene />
       <SiteFooter />
+      <BackToTop />
     </main>
   )
 }
