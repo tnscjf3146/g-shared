@@ -5,10 +5,10 @@ the Worker, give the identity back. This file owns that order, what the supplier
 is told, and which exit code the launcher gets -- and deliberately owns nothing
 else.
 
-The stage that follows is ``run_worker``. Today it is two steps -- diagnosing
-the machine, then bringing the GPU runtime up inside our own WSL distribution.
-Enrolling the machine and running the Worker client arrive with their own
-branches and take the same place.
+The stage that follows is ``run_worker``. Today it is three steps -- diagnosing
+the machine, bringing the GPU runtime up inside our own WSL distribution, and
+establishing whose account the machine belongs to. Connecting to the Backend
+arrives with its own branch and takes the same place.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from .environment_check import check_environment
 from .errors import WorkerAlreadyRunningError, WorkerConfigurationError, WorkerError
 from .exit_codes import WorkerExitCode
 from .instance_guard import WorkerInstanceGuard, default_lock_directory
+from .auth_check import authenticate_worker
 from .logging_setup import LOGGER_NAME, stamp_the_build, start_debug_log
 from .runtime_check import ensure_runtime
 
@@ -178,17 +179,22 @@ def _run_the_worker(
 
 
 def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int:
-    """Diagnose the machine, then bring its GPU runtime up.
+    """Diagnose the machine, bring its GPU runtime up, then say whose it is.
 
-    Two stages rather than one because they answer different questions and may
-    do different things: the first only looks at a machine nobody may alter,
-    the second installs into a distribution G-shared owns. A machine that fails
-    the first is never acted on.
+    Separate stages because they answer different questions and may do
+    different things: the first only looks at a machine nobody may alter, the
+    second installs into a distribution G-shared owns, the third asks a person
+    to sign in. Each one is reached only when the one before it passed -- there
+    is no point attaching a machine to an account before knowing it can do the
+    work, and no point installing into a machine that failed diagnosis.
     """
     code = check_environment(settings, say)
     if code != WorkerExitCode.OK:
         return code
-    return ensure_runtime(settings, say)
+    code = ensure_runtime(settings, say)
+    if code != WorkerExitCode.OK:
+        return code
+    return authenticate_worker(settings, say)
 
 
 def _this_process_owns_the_console() -> bool:

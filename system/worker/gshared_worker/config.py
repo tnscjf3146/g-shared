@@ -39,11 +39,16 @@ DEFAULT_HOURLY_PRICE = 600
 
 #: Where the service lives, when nobody has said otherwise.
 #:
-#: The local Backend from the repository's docker-compose.yml (port 8080). The
-#: PoC's default was a Railway address belonging to the PoC deployment, so it is
-#: deliberately not carried across; the deployed G-shared endpoint replaces this
-#: value once the Backend exposes a Worker socket.
-DEFAULT_BACKEND_URL = "ws://localhost:8080/ws/workers"
+#: The deployed G-shared service. A supplier runs this program on their own PC
+#: and has no reason to know an address, so the default has to be the real one
+#: rather than a developer's machine. ``backendUrl`` in the configuration file,
+#: or GSHARED_WORKER_BACKEND_URL, points a build somewhere else -- at a local
+#: Backend during development, say.
+#:
+#: The scheme is ``wss``, so the HTTP origin derived from it for signing in is
+#: ``https``. See ``_http_origin_of`` in :mod:`gshared_worker.auth_check`: one
+#: setting decides both, and they cannot drift apart.
+DEFAULT_BACKEND_URL = "wss://j15e204.p.ssafy.io/ws/workers"
 
 #: What a machine offers to do, when nobody has said otherwise.
 #:
@@ -163,6 +168,27 @@ def read_config_file(path: Path) -> dict[str, object]:
     return values
 
 
+def resolve_backend_url(
+    *, env: Mapping[str, str], directory: Path | None = None
+) -> str:
+    """Which G-shared service to talk to, without needing an enrolled machine.
+
+    The sign-in window needs this and nothing else: it exists to obtain the
+    workerId that :func:`resolve_settings` insists on, so it cannot be made to
+    ask for one first. The configuration file is still read and still refused
+    if it is malformed -- a typo is a typo whoever is asking.
+    """
+    return _backend_url(env, read_config_file(config_file_path(directory)))
+
+
+def _backend_url(env: Mapping[str, str], file_values: Mapping[str, object]) -> str:
+    return _first(
+        _clean(env.get(ENV_BACKEND_URL)),
+        _clean(file_values.get("backendUrl")),
+        DEFAULT_BACKEND_URL,
+    )
+
+
 def resolve_settings(
     *,
     env: Mapping[str, str],
@@ -174,11 +200,7 @@ def resolve_settings(
     file_values = read_config_file(path)
     config_path = path if path.is_file() else None
 
-    backend_url = _first(
-        _clean(env.get(ENV_BACKEND_URL)),
-        _clean(file_values.get("backendUrl")),
-        DEFAULT_BACKEND_URL,
-    )
+    backend_url = _backend_url(env, file_values)
     worker_id = _first(
         _clean(env.get(ENV_WORKER_ID)),
         _clean(file_values.get("workerId")),

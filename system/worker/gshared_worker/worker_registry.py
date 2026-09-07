@@ -1,0 +1,243 @@
+"""The Backend's Worker API, as finally agreed.
+
+Three calls, and what authenticates each one:
+
+* ``POST /api/workers/register`` -- ``Bearer <user access token>``. The person
+  is signed in; the Backend decides from that token whose account the machine
+  joins. The Worker never sends a user id: a client that names its own owner
+  is a client that can name somebody else's.
+* ``POST /api/workers/authenticate`` -- ``Bearer <worker token>``. From here on
+  the machine speaks for itself and the person is not involved.
+* ``PUT /api/workers/{workerId}/gpu`` -- ``Bearer <worker token>``. Answers 204.
+
+The state is read from the **HTTP status**, not from a string in the body:
+
+* 200 -- REGISTERED
+* 401 -- AUTH_FAILED, the token was refused
+* 403 -- REVOKED, the account no longer wants this Worker
+* 404 -- see below; **never** REVOKED on its own
+* 5xx -- BACKEND_UNREACHABLE, the service failed to answer the question
+* a network error or timeout -- BACKEND_UNREACHABLE
+
+**A 404 is not evidence about this Worker.** It is what a missing Worker record
+answers, but it is equally what an endpoint that does not exist yet answers, or
+a path spelt wrong -- which is exactly this build's situation. So the body is
+read: only ``code`` being ``WORKER_NOT_FOUND`` means the service actually
+looked and found nothing, and that is reported as its own state. Every other
+404 is a contract error -- the service did not answer the question that was
+asked. Neither one deletes a credential, enrols the machine again, or concludes
+that it was revoked.
+
+A 5xx is deliberately *not* an auth failure either. The service breaking
+teaches nothing about this Worker, and treating it as a refusal would tell
+somebody with a perfectly good machine to register it again.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Any
+from urllib.parse import quote
+
+from .backend_client import BackendAnswer, BackendClient, Outcome
+from .logging_setup import LOGGER_NAME
+from .worker_auth import RegistryAnswer, WorkerAuthState
+from .worker_credentials import WorkerCredentials
+
+_debug = logging.getLogger(LOGGER_NAME)
+
+#: The one 404 body that means the service really did look for this Worker.
+WORKER_NOT_FOUND = "WORKER_NOT_FOUND"
+
+REGISTER_PATH = "/api/workers/register"
+AUTHENTICATE_PATH = "/api/workers/authenticate"
+
+
+def gpu_path(worker_id: str) -> str:
+    """The GPU endpoint for one Worker, with the id safe to put in a path."""
+    return f"/api/workers/{quote(worker_id, safe='')}/gpu"
+
+
+@dataclass(frozen=True)
+class GpuUpdate:
+    """What this machine is offering, as ``PUT .../gpu`` states it."""
+
+    gpu_model: str
+    vram_mb: int
+    driver_version: str
+    #: Measured, never assumed. The field name the Backend settled on is
+    #: ``benchmarkTokensPerSec``; ``benchmarkScore`` is not part of this API.
+    benchmark_tokens_per_sec: float
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "gpuModel": self.gpu_model,
+            "vramMb": int(self.vram_mb),
+            "driverVersion": self.driver_version,
+            "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
+        }
+
+
+@dataclass(frozen=True)
+class WorkerRegistrationRequest:
+    """What ``POST /api/workers/register`` is told about this machine.
+
+    Built from :class:`gshared_worker.machine_facts.MachineFacts` plus a
+    measured benchmark. Every field is required, because a machine registered
+    with a placeholder is a machine the scheduler will believe.
+    """
+
+    device_name: str
+    os_version: str
+    gpu_model: str
+    vram_mb: int
+    driver_version: str
+    benchmark_tokens_per_sec: float
+
+    @classmethod
+    def describing(
+        cls, facts: Any, benchmark_tokens_per_sec: float
+    ) -> "WorkerRegistrationRequest":
+        """This machine, plus the one number that has to be measured."""
+        return cls(
+            device_name=facts.device_name,
+            os_version=facts.os_version,
+            gpu_model=facts.gpu_model,
+            vram_mb=facts.vram_mb,
+            driver_version=facts.driver_version,
+            benchmark_tokens_per_sec=benchmark_tokens_per_sec,
+        )
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "deviceName": self.device_name,
+            "osVersion": self.os_version,
+            "gpuModel": self.gpu_model,
+            "vramMb": int(self.vram_mb),
+            "driverVersion": self.driver_version,
+            "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
+        }
+
+    def gpu_update(self) -> GpuUpdate:
+        """The same GPU facts, for the endpoint that refreshes them later."""
+        return GpuUpdate(
+            self.gpu_model, self.vram_mb, self.driver_version,
+            self.benchmark_tokens_per_sec,
+        )
+
+
+class HttpWorkerRegistry:
+    """The Backend's Worker side over HTTP.
+
+    Satisfies :class:`gshared_worker.worker_auth.WorkerRegistry`. Every request
+    goes through :class:`~gshared_worker.backend_client.BackendClient`, so
+    timeouts, unreachability and the ``{code, message}`` error body are handled
+    once for the whole Worker rather than twice.
+    """
+
+    def __init__(self, client: BackendClient) -> None:
+        self._client = client
+
+    def verify(self, credentials: WorkerCredentials) -> RegistryAnswer:
+        """Does the Backend still accept this Worker. Changes nothing."""
+        answered = self._client.request(
+            "POST", AUTHENTICATE_PATH, {"workerId": credentials.worker_id},
+            bearer=credentials.worker_token,
+        )
+        if not answered.succeeded:
+            return _refused(answered, "this Worker")
+
+        named = (answered.body or {}).get("workerId")
+        if isinstance(named, str) and named and named != credentials.worker_id:
+            # The service accepted the token but says it belongs to a different
+            # Worker. Carrying on would run work under the wrong identity.
+            return RegistryAnswer(
+                WorkerAuthState.AUTH_FAILED,
+                "the service accepted the token for a different Worker",
+            )
+        return RegistryAnswer(
+            WorkerAuthState.REGISTERED, "the service still accepts this Worker")
+
+    def register(
+        self, access_token: str, registration: WorkerRegistrationRequest
+    ) -> RegistryAnswer:
+        """Attach this machine to the account that access token belongs to."""
+        answered = self._client.request(
+            "POST", REGISTER_PATH, registration.as_payload(), bearer=access_token)
+        if not answered.succeeded:
+            return _refused(answered, "this machine")
+
+        body = answered.body or {}
+        worker_id, token = body.get("workerId"), body.get("workerToken")
+        if not _given(worker_id) or not _given(token):
+            # Registered, apparently, without saying what this Worker now is.
+            # The service turns this into a failure; nothing is stored.
+            return RegistryAnswer(
+                WorkerAuthState.REGISTERED,
+                "the service registered this machine but returned no identity",
+            )
+        return RegistryAnswer(
+            WorkerAuthState.REGISTERED, "this machine is registered",
+            WorkerCredentials(worker_id.strip(), token.strip()),
+        )
+
+    def update_gpu(
+        self, credentials: WorkerCredentials, gpu: GpuUpdate
+    ) -> RegistryAnswer:
+        """Refresh what this Worker is offering. Accepted means 204.
+
+        Not called from the auth flow: what would produce a fresh benchmark
+        does not exist yet. It is here because it is the same contract and the
+        same client, and the branch that measures GPUs should find it built.
+        REGISTERED means the update was accepted.
+        """
+        answered = self._client.request(
+            "PUT", gpu_path(credentials.worker_id), gpu.as_payload(),
+            bearer=credentials.worker_token,
+        )
+        if not answered.succeeded:
+            return _refused(answered, "this Worker")
+        return RegistryAnswer(
+            WorkerAuthState.REGISTERED, "the GPU details were accepted")
+
+
+def _given(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _refused(answered: BackendAnswer, subject: str) -> RegistryAnswer:
+    """Turn a status into a state. Nothing is learned from an outage."""
+    if answered.outcome is Outcome.UNREACHABLE:
+        return RegistryAnswer(WorkerAuthState.BACKEND_UNREACHABLE, answered.message)
+
+    status = answered.status
+    if status is not None and status >= 500:
+        return RegistryAnswer(
+            WorkerAuthState.BACKEND_UNREACHABLE,
+            "The G-shared service had a problem and could not answer. "
+            "Nothing was changed. Try again when it is back.",
+        )
+    if status == 403:
+        return RegistryAnswer(
+            WorkerAuthState.REVOKED, f"the account no longer accepts {subject}")
+    if status == 404:
+        if answered.code == WORKER_NOT_FOUND:
+            # The service looked and found nothing. Said so in as many words,
+            # which is the only thing that makes a 404 mean this.
+            _debug.info("worker api: 404 %s", WORKER_NOT_FOUND)
+            return RegistryAnswer(
+                WorkerAuthState.WORKER_NOT_FOUND,
+                f"the service has no record of {subject}")
+        # A 404 from a path that is not there. Reading this as a revocation
+        # would tell a supplier their machine was removed from their account
+        # because an endpoint has not been written yet.
+        _debug.info("worker api: 404 without %s -- treating as a contract error "
+                    "(code=%s)", WORKER_NOT_FOUND, answered.code)
+        return RegistryAnswer(
+            WorkerAuthState.BACKEND_CONTRACT_ERROR,
+            "the service answered 404 at that address, which says nothing "
+            f"about {subject}")
+    return RegistryAnswer(
+        WorkerAuthState.AUTH_FAILED,
+        answered.message or f"the service refused {subject}")

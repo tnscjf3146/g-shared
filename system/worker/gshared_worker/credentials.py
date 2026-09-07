@@ -1,9 +1,9 @@
-"""Reading the Worker token back off the disk, on this Windows account only.
+"""The Worker token on disk, protected so only this Windows account can read it.
 
-The token is stored by Windows DPAPI in Current User scope, so the file that
-holds it is useless on any other account or any other machine. Only the reading
-direction is here: writing one is what enrolment does, and enrolment is not part
-of this build.
+Windows DPAPI in Current User scope: the file that holds the token is useless on
+any other account and on any other machine. Both directions live here -- the
+Worker writes one when it is first registered and reads it back on every run
+afterwards.
 """
 
 from __future__ import annotations
@@ -21,7 +21,33 @@ CRYPTPROTECT_UI_FORBIDDEN = 0x00000001
 class Dpapi(Protocol):
     """Narrow DPAPI boundary, so tests need no real protected value."""
 
+    def protect(self, plaintext: bytearray, flags: int) -> bytearray: ...
+
     def unprotect(self, protected: bytearray, flags: int) -> bytearray: ...
+
+
+def protect_current_user(secret: str, *, api: Dpapi | None = None) -> str:
+    """Protect one non-empty secret with Windows DPAPI Current User scope.
+
+    The plaintext buffer is zeroed on the way out whatever happens, so the
+    token does not linger in memory any longer than the call itself.
+    """
+    if not isinstance(secret, str) or not secret:
+        raise ValueError("secret must be a non-empty string")
+
+    plaintext = bytearray(secret, "utf-8")
+    protected: bytearray | None = None
+    try:
+        protected = (api or _WindowsDpapi()).protect(
+            plaintext, CRYPTPROTECT_UI_FORBIDDEN
+        )
+        if not protected:
+            raise OSError("DPAPI returned an empty protected value")
+        return base64.b64encode(protected).decode("ascii")
+    finally:
+        _zero(plaintext)
+        if protected is not None:
+            _zero(protected)
 
 
 def unprotect_current_user(encoded: str, *, api: Dpapi | None = None) -> str:
@@ -79,6 +105,16 @@ class _WindowsDpapi:
 
     def _configure_signatures(self) -> None:
         blob_pointer = ctypes.POINTER(_DataBlob)
+        self._crypt32.CryptProtectData.argtypes = [
+            blob_pointer,
+            ctypes.c_wchar_p,
+            blob_pointer,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            blob_pointer,
+        ]
+        self._crypt32.CryptProtectData.restype = ctypes.c_int
         self._crypt32.CryptUnprotectData.argtypes = [
             blob_pointer,
             ctypes.c_void_p,
@@ -92,7 +128,13 @@ class _WindowsDpapi:
         self._kernel32.LocalFree.argtypes = [ctypes.c_void_p]
         self._kernel32.LocalFree.restype = ctypes.c_void_p
 
+    def protect(self, plaintext: bytearray, flags: int) -> bytearray:
+        return self._call(self._crypt32.CryptProtectData, plaintext, flags)
+
     def unprotect(self, protected: bytearray, flags: int) -> bytearray:
+        return self._call(self._crypt32.CryptUnprotectData, protected, flags)
+
+    def _call(self, function, protected: bytearray, flags: int) -> bytearray:
         if not protected:
             raise ValueError("DPAPI input must not be empty")
         source_array = (ctypes.c_ubyte * len(protected)).from_buffer(protected)
@@ -100,7 +142,7 @@ class _WindowsDpapi:
             len(protected), ctypes.cast(source_array, ctypes.POINTER(ctypes.c_ubyte))
         )
         output_blob = _DataBlob()
-        succeeded = self._crypt32.CryptUnprotectData(
+        succeeded = function(
             ctypes.byref(input_blob),
             None,
             None,

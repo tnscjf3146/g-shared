@@ -1,6 +1,6 @@
 {
   "_comment": "Copy this file to worker-config.json next to the Worker and fill in your values. Keys starting with _ are ignored.",
-  "backendUrl": "ws://localhost:8080/ws/workers",
+  "backendUrl": "wss://j15e204.p.ssafy.io/ws/workers",
   "workerId": "worker-001",
   "workerToken": "replace-with-the-token-issued-by-the-platform",
   "hourlyPrice": 600,

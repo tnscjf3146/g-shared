@@ -18,6 +18,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from gshared_worker import environment_check
+from gshared_worker import auth_check
 from gshared_worker import runtime_check
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
@@ -141,11 +142,30 @@ class AConfiguredMachineStartsTest(StartupTestCase):
 
         with patch.object(worker_main, "check_environment",
                           lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "ensure_runtime",
-                          lambda settings, say: reached.append(1) or WorkerExitCode.OK):
+                          lambda settings, say: reached.append("runtime") or WorkerExitCode.OK),              patch.object(worker_main, "authenticate_worker",
+                          lambda settings, say: reached.append("auth") or WorkerExitCode.OK):
             code = self.start(run_worker=worker_main.start_the_machine)
 
         self.assertEqual(code, WorkerExitCode.OK)
-        self.assertEqual(reached, [1])
+        self.assertEqual(reached, ["runtime", "auth"])
+
+    def test_authentication_is_the_stage_after_the_runtime(self):
+        self.assertIs(worker_main.authenticate_worker, auth_check.authenticate_worker)
+
+    def test_nobody_is_asked_to_sign_in_on_a_machine_without_a_runtime(self):
+        # Attaching a machine to an account before knowing it can do the work
+        # would register something that cannot earn.
+        self.enrol()
+        reached = []
+
+        with patch.object(worker_main, "check_environment",
+                          lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "ensure_runtime",
+                          lambda settings, say: WorkerExitCode.EXPECTED_FAILURE),              patch.object(worker_main, "authenticate_worker",
+                          lambda settings, say: reached.append("auth") or 0):
+            code = self.start(run_worker=worker_main.start_the_machine)
+
+        self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
+        self.assertEqual(reached, [])
 
     def test_the_settings_it_read_are_shown(self):
         self.enrol()
