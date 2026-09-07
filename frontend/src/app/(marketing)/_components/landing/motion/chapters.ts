@@ -7,7 +7,7 @@ import { P } from '../progress'
 /** 인트로 챕터 시작 시각(ms) */
 const I = { top: 0, toFront: 1400, dark: 1650, hero: 2000, reveal: 3400, end: 5000 } // 빔이 팬들을 훑음 → 빔 꺼지고 잠깐 암전(그 사이 정면으로 틸트다운) → 빔 켜지며 로고 훑기 → 리빌
 /** 스크롤 챕터 시작 시각(ms) */
-export const T = { hold: 1500, fans: 1500, fansEnd: 3000, smoke: 4050, smokeEnd: 5500, shroud: 4500, shroudEnd: 6500, orbit: 8000, orbitEnd: 9000, hsLift: 10000, hsLiftEnd: 10500, hsOff: 12000, hsOffEnd: 13000, top: 14500, topEnd: 16000, stack: 18000, stackEnd: 20500, assemble: 21000, end: 23000 } // 챕터별 시작/끝(ms). 사이는 정지. 0–hold 는 인트로 직후 정지 구간(조립 상태 그대로) — 스크롤이 조금 움직여도 부품이 반응하지 않게
+export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 6000, hsOffEnd: 7000, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
 
 const CAM_INTRO_TOP = { yaw: Math.PI / 2, tilt: 0.315, dist: 3.3, lookY: -0.12 } // lookY 를 낮춰(타깃을 카드 아래로) 카드가 화면 위쪽에 오게 // 인트로 첫 컷: +X 끝 위 낮은 각(18°)에서 카드 길이 방향으로 내려다봄 — 가까운 팬이 크게, 나머지가 멀어지는 구도(Blender 레퍼런스)
 const CAM_HERO = { yaw: Math.PI / 2, tilt: 0, dist: 2.35, lookY: 0.0225, shift: -0.05 } // 끝 캡 정면, G 원이 화면 정중앙
@@ -40,17 +40,17 @@ export function reveal(intro: Timeline) {
   intro.add(P, { yaw: [CAM_HERO.yaw, CAM0.yaw], tilt: [CAM_HERO.tilt, CAM0.tilt], dist: [CAM_HERO.dist, CAM0.dist], lookY: [CAM_HERO.lookY, 0], shift: [CAM_HERO.shift, 0], duration: I.end - I.reveal, ease: 'inOut(3)' }, I.reveal)
 }
 
-/** 3 FANS OUT — 정지 구간(0–1500) 뒤, 팬 3개가 **동시에** 위로 가속 상승해 화면 밖으로. */
+/** 3 FANS + SHROUD OFF — 정지 구간(0–1000) 뒤, 팬 3개와 쉬라우드가 **한 번에** 위로 가속 상승해 화면 밖으로(fansOut·smoke·shroudOff 가 같은 구간에서 함께 돈다). */
 export function fansOut(scroll: Timeline) {
   scroll.add(P, { fans: [0, 1], duration: T.fansEnd - T.fans, ease: 'in(2)' }, T.fans)
 }
 
-/** 4 SMOKE — 백플레이트 가장자리에서 연기가 밀려 나와 그 자리에서 흩어진다(퍼프 형태는 smoke.tsx). 쉬라우드가 다 올라갈 때까지 분사하고 사라진다. */
+/** 3 SMOKE — 팬·쉬라우드가 올라가는 사이 백플레이트 가장자리에서 연기가 밀려 나와 그 자리에서 흩어진다(퍼프 형태는 smoke.tsx). */
 export function smoke(scroll: Timeline) {
   scroll.add(P, { smoke: [0, 1], duration: T.smokeEnd - T.smoke, ease: 'linear' }, T.smoke)
 }
 
-/** 5 SHROUD OFF — 연기가 흩어지는 사이 쉬라우드가 분리되어 위로 가속 상승, 화면 밖으로. */
+/** 3 SHROUD OFF — 팬과 같은 구간에 쉬라우드가 분리되어 위로 가속 상승, 화면 밖으로. */
 export function shroudOff(scroll: Timeline) {
   scroll.add(P, { shroud: [0, 1], duration: T.shroudEnd - T.shroud, ease: 'in(2)' }, T.shroud)
 }
@@ -60,10 +60,10 @@ export function shroudOff(scroll: Timeline) {
  *  어느 시점·어느 방향으로 스크롤해도 카메라가 한 값으로 정해지게 한다. 시작값 = REVEAL 끝 값. 다른 챕터 함수는 카메라를 만지지 않는다.
  *  (yaw: π/2 = +X 끝 캡 정면, 1.0 = 우하단 3/4, π−1.0 = 좌하단 3/4, 0 = 카메라가 +Z(PCIe 엣지) 쪽) */
 const CAM0 = { yaw: 1.0, tilt: 0.55, dist: 6.5 }
-const CAM_ORBIT = { yaw: Math.PI - 1.0, tilt: 0.55, dist: 6.5 } // 6 ORBIT: 끝 캡이 좌하단
-const CAM_TOP = { yaw: 0, tilt: 0.785, dist: 5.6 } // 9 TOP VIEW: 위에서 −Y 쪽으로 45° 기울여, 살짝 확대
-const CAM_STACK = { yaw: Math.PI * 2 - 0.9, tilt: 0.42, dist: 8.0 } // 10 STACK: 낮은 각으로 한 바퀴 돌아 멀리서
-const CAM_END = { yaw: Math.PI * 2.5, tilt: 0.22, dist: 4.5 } // 11 ASSEMBLE: 끝 캡(로고) 정면 쪽, 살짝 위
+const CAM_ORBIT = { yaw: Math.PI - 1.0, tilt: 0.55, dist: 6.5 } // 4 ORBIT: 끝 캡이 좌하단
+const CAM_TOP = { yaw: 0, tilt: 0.785, dist: 5.6 } // 7 TOP VIEW: 위에서 −Y 쪽으로 45° 기울여, 살짝 확대
+const CAM_STACK = { yaw: Math.PI * 2 - 0.9, tilt: 0.42, dist: 8.0 } // 8 STACK: 낮은 각으로 한 바퀴 돌아 멀리서
+const CAM_END = { yaw: Math.PI * 2.5, tilt: 0.22, dist: 4.5 } // 9 ASSEMBLE: 끝 캡(로고) 정면 쪽, 살짝 위
 type Cam = typeof CAM0
 export function cameraTrack(scroll: Timeline) {
   const hold = (c: Cam, from: number, to: number) => scroll.add(P, { yaw: [c.yaw, c.yaw], tilt: [c.tilt, c.tilt], dist: [c.dist, c.dist], duration: to - from, ease: 'linear' }, from)
@@ -78,35 +78,37 @@ export function cameraTrack(scroll: Timeline) {
   hold(CAM_TOP, T.topEnd, T.stack)
   move(CAM_TOP, CAM_STACK, T.stack, T.stackEnd)
   hold(CAM_STACK, T.stackEnd, T.assemble)
-  move(CAM_STACK, CAM_END, T.assemble, T.end)
+  move(CAM_STACK, CAM_END, T.assemble, T.assembleEnd)
+  hold(CAM_END, T.assembleEnd, T.end) // 조립 완료 뒤 500 정지 → DONE
 }
 
 
-/** 7 HS LIFT — 히트싱크(핀 66장 + 히트파이프)가 위로, 콜드플레이트·플레이트 브릿지는 그보다 조금만 들려 층이 구분된다. */
+/** 5 HS LIFT — 히트싱크(핀 66장 + 히트파이프)가 위로, 콜드플레이트·플레이트 브릿지는 그보다 조금만 들려 층이 구분된다. */
 export function hsLift(scroll: Timeline) {
   scroll.add(P, { hsLift: [0, 1], duration: T.hsLiftEnd - T.hsLift, ease: 'inOut(2)' }, T.hsLift)
 }
 
-/** 8 HS OFF — 들린 히트싱크와 플레이트류가 함께 위로 상승해 화면 밖으로 나간 뒤 숨겨진다. */
+/** 6 HS OFF — 들린 히트싱크와 플레이트류가 함께 위로 상승해 화면 밖으로 나간 뒤 숨겨진다. */
 export function hsOff(scroll: Timeline) {
   scroll.add(P, { hsOff: [0, 1], duration: T.hsOffEnd - T.hsOff, ease: 'in(1.2)' }, T.hsOff)
 }
 
-/** 9 TOP VIEW — 남은 카드(PCB·백플레이트·브라켓)를 위(Blender +Z)에서, 시선을 −Y(PCIe 엣지) 쪽으로 조금 기울여 내려본다.
+/** 7 TOP VIEW — 남은 카드(PCB·백플레이트·브라켓)를 위(Blender +Z)에서, 시선을 −Y(PCIe 엣지) 쪽으로 조금 기울여 내려본다.
  *  yaw 0 = 카메라가 glTF +Z(= Blender −Y) 쪽 → 화면 오른쪽 = +X, 아래 = PCIe 엣지. tilt 0.785 = 45°. */
 export function topView(scroll: Timeline) {
   // 카메라는 cameraTrack(CAM_TOP). 여기선 탑뷰 동안만 위에서 비추는 조명
   scroll.add(P, { topLight: [0, 1], duration: T.topEnd - T.top, ease: 'out(2)' }, T.top)
 }
 
-/** 10 STACK — 햄버거 레시피 구조도. 나갔던 부품까지 전부 돌아와 Blender explode 배치(×STACK_SCALE)로 층층이 떠 있고,
+/** 8 STACK — 햄버거 레시피 구조도. 나갔던 부품까지 전부 돌아와 Blender explode 배치(×STACK_SCALE)로 층층이 떠 있고,
  *  카메라는 낮은 각으로 내려와 한 바퀴 돌며(yaw 0 → 2π−0.9 ≈ 정면 3/4) 멀리서 전체를 담는다. */
 export function stack(scroll: Timeline) {
   scroll.add(P, { stack: [0, 1], duration: 1200, ease: 'inOut(2)' }, T.stack)
   scroll.add(P, { topLight: [1, 0], duration: 1200, ease: 'inOut(2)' }, T.stack) // 탑뷰 조명 끔. 카메라는 cameraTrack(CAM_STACK)
 }
 
-/** 11 ASSEMBLE — 구조도의 층이 내려와 조립 완료. 카메라는 +X 끝 캡(로고) 정면 쪽으로 돌아와 살짝 위에서 로고를 본다. */
+/** 9 ASSEMBLE — 구조도의 층이 내려와 조립 완료. 카메라는 +X 끝 캡(로고) 정면 쪽으로 돌아와 살짝 위에서 로고를 본다. */
 export function assemble(scroll: Timeline) {
-  scroll.add(P, { assemble: [0, 1], duration: T.end - T.assemble, ease: 'inOut(2)' }, T.assemble) // 카메라는 cameraTrack(CAM_END)
+  scroll.add(P, { assemble: [0, 1], duration: T.assembleEnd - T.assemble, ease: 'inOut(2)' }, T.assemble) // 카메라는 cameraTrack(CAM_END)
+  scroll.add(P, { logoSweep: [0, 1], duration: T.end - T.assembleEnd, ease: 'out(2)' }, T.assembleEnd) // 조립 완료 뒤 정지 구간에 빔이 켜져 로고를 좌우로 계속 훑는다(되감으면 꺼짐)
 }

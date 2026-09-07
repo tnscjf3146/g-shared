@@ -99,7 +99,7 @@ export function LandingScene() {
   }, [])
 
   return (
-    <section ref={root} className="relative h-[2400vh] bg-dark text-white">
+    <section ref={root} className="relative h-[1600vh] bg-dark text-white">
       <div className="sticky top-0 h-screen overflow-hidden bg-dark">
         {/* INTRO TOP 전용 딥 블랙 바닥(캔버스 뒤). 빔 스윕이 끝나고 암전이 덮이는 사이 인트로 타임라인이 opacity 1→0 으로 걷어내 이후는 bg-dark */}
         <div id="deep" className="pointer-events-none absolute inset-0 bg-black" />

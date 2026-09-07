@@ -275,6 +275,24 @@
       background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
     }
   }
+  /* 맨 위로 — 푸터 위(우측, px-16 정렬) 고정. 연출이 끝나 네비가 돌아온 어두운 구간에서만 떠오르고, Hero·스토리 중엔 숨김 */
+  .back-to-top {
+    position: fixed;
+    right: 4rem;
+    bottom: calc(5rem + 1.5rem); /* 푸터 높이 80 + 24 */
+    z-index: 40;
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+    transition:
+      opacity 300ms var(--ease-out-expo),
+      transform 300ms var(--ease-out-expo);
+  }
+  body[data-nav="shown"][data-nav-theme="dark"] .back-to-top {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
   body[data-nav="hidden"] .nav-glass {
     transform: translateY(-100%);
   }
