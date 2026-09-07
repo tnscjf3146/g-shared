@@ -38,9 +38,6 @@ def check_environment(
 
     if found.is_ready:
         say("  GPU environment ready.")
-        say("")
-        say("Preparing the machine, enrolling it and connecting to the Backend")
-        say("  are not part of this build yet.")
         return int(WorkerExitCode.OK)
 
     say("")

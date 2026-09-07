@@ -5,9 +5,10 @@ the Worker, give the identity back. This file owns that order, what the supplier
 is told, and which exit code the launcher gets -- and deliberately owns nothing
 else.
 
-The stage that follows is ``run_worker``. Today it is the environment
-diagnosis; preparing the machine, enrolling it and running the Worker client
-arrive with their own branches and take the same place.
+The stage that follows is ``run_worker``. Today it is two steps -- diagnosing
+the machine, then bringing the GPU runtime up inside our own WSL distribution.
+Enrolling the machine and running the Worker client arrive with their own
+branches and take the same place.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from .errors import WorkerAlreadyRunningError, WorkerConfigurationError, WorkerE
 from .exit_codes import WorkerExitCode
 from .instance_guard import WorkerInstanceGuard, default_lock_directory
 from .logging_setup import LOGGER_NAME, stamp_the_build, start_debug_log
+from .runtime_check import ensure_runtime
 
 _debug = logging.getLogger(LOGGER_NAME)
 
@@ -45,7 +47,7 @@ def run(
     log_path = start_debug_log(directory)
     stamp_the_build()
     say = out or print
-    run_worker = run_worker or check_environment
+    run_worker = run_worker or start_the_machine
 
     try:
         exit_code = _start(
@@ -173,6 +175,20 @@ def _run_the_worker(
         return int(WorkerExitCode.EXPECTED_FAILURE)
     _debug.info("worker stopped with exit code %s", code)
     return code
+
+
+def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int:
+    """Diagnose the machine, then bring its GPU runtime up.
+
+    Two stages rather than one because they answer different questions and may
+    do different things: the first only looks at a machine nobody may alter,
+    the second installs into a distribution G-shared owns. A machine that fails
+    the first is never acted on.
+    """
+    code = check_environment(settings, say)
+    if code != WorkerExitCode.OK:
+        return code
+    return ensure_runtime(settings, say)
 
 
 def _this_process_owns_the_console() -> bool:
