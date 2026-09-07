@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Blender 자동 백업
+*.blend[0-9]
+
+# Blender 산출물(tools/gpu_model.py 가 생성) — 추적 안 함
+tools/*.blend
