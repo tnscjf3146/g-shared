@@ -22,7 +22,6 @@
   --color-black-soft: #1c1e1a;
   --color-white: #f7f9f4;
   --color-white-dim: #ecefe8;
-  --color-a100-gold: #c8b38a; /* A100 PCIe 쉬라우드 하단 (랜딩 일러스트 전용) */
 
   /* 레이어 배경 (5단 Elevation) */
   --color-surface-0: #ecefe8; /* L0 페이지 배경 */
