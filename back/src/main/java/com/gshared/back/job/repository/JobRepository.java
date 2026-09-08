@@ -42,4 +42,19 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                                 com.gshared.back.job.domain.JobStatus.ASSIGNED)
             """)
     int cancelIfCancellable(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId, @Param("now") LocalDateTime now);
+
+    /**
+     * 원자적 시작(JOB_ACCEPTED): "이 워커에게 배정된 ASSIGNED 상태일 때만" RUNNING 전이.
+     * 엉뚱한 워커의 메시지·중복 메시지는 조건 불일치로 0행 → 무시된다.
+     */
+    @Modifying
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.RUNNING,
+                   j.startedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
+            """)
+    int startIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId, @Param("now") LocalDateTime now);
 }

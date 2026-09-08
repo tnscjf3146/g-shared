@@ -88,4 +88,10 @@ public class Worker extends BaseTimeEntity {
     public void goOffline() {
         this.status = WorkerStatus.OFFLINE;
     }
+
+    /** JOB_ACCEPTED: 작업 시작 → RUNNING + 현재 작업 기록. */
+    public void startJob(String jobId) {
+        this.status = WorkerStatus.RUNNING;
+        this.currentJobId = jobId;
+    }
 }

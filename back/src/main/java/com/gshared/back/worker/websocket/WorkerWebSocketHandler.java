@@ -1,5 +1,6 @@
 package com.gshared.back.worker.websocket;
 
+import com.gshared.back.job.service.JobService;
 import com.gshared.back.worker.service.WorkerService;
 import com.gshared.back.worker.websocket.protocol.WorkerMessage;
 import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
@@ -42,6 +43,7 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final WorkerSessionRegistry sessionRegistry;
     private final WorkerService workerService;
+    private final JobService jobService;
 
     /**
      * 워커가 연결되면 호출. (인증은 이미 인터셉터가 통과시킴)
@@ -141,7 +143,30 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleJobAccepted(String workerId, WorkerMessage msg) {
-        log.info("[WS] JOB_ACCEPTED workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean started = jobService.acceptJob(workerId, jobId);
+        if (started) {
+            log.info("[WS] JOB_ACCEPTED → RUNNING workerId={} jobId={}", workerId, jobId);
+        } else {
+            log.warn("[WS] JOB_ACCEPTED 무시(배정 불일치/중복) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** 봉투의 jobId(문자열) → Long. 없거나 숫자가 아니면 null + 경고. */
+    private Long parseJobId(WorkerMessage msg) {
+        if (msg.jobId() == null) {
+            log.warn("[WS] jobId 없는 {} 메시지 무시", msg.type());
+            return null;
+        }
+        try {
+            return Long.parseLong(msg.jobId());
+        } catch (NumberFormatException e) {
+            log.warn("[WS] 잘못된 jobId={} ({} 메시지 무시)", msg.jobId(), msg.type());
+            return null;
+        }
     }
 
     private void handleJobProgress(String workerId, WorkerMessage msg) {

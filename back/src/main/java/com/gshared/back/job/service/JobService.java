@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import com.gshared.back.user.domain.User;
 import com.gshared.back.user.exception.UserErrorCode;
 import com.gshared.back.user.repository.UserRepository;
+import com.gshared.back.worker.repository.WorkerRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ public class JobService {
 
     private final JobRepository jobRepository;
     private final UserRepository userRepository;
+    private final WorkerRepository workerRepository;
 
     /**
      * 견적 승인 후 Job(주문서) 생성. 생성 직후 상태는 CREATED(예치 확인 대기).
@@ -85,6 +87,22 @@ public class JobService {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
         }
         // TODO: 예치금 환불 트리거(블록체인 연동) — BC 담당과 협의 후
+    }
+
+    /**
+     * JOB_ACCEPTED 수신: Job ASSIGNED→RUNNING + Worker RUNNING 전이.
+     * 조건부 UPDATE 라 엉뚱한 워커의 메시지·중복 메시지는 0행으로 무시된다.
+     * @return 정상 전이 여부
+     */
+    @Transactional
+    public boolean acceptJob(String workerId, Long jobId) {
+        int updated = jobRepository.startIfAssigned(jobId, workerId, java.time.LocalDateTime.now());
+        if (updated == 0) {
+            return false;   // 배정된 적 없거나 이미 시작됨 — 호출자(핸들러)가 로그
+        }
+        workerRepository.findById(workerId)
+                .ifPresent(worker -> worker.startJob(String.valueOf(jobId)));
+        return true;
     }
 
     /** JSON 객체 → 저장용 문자열. null(AUTO)이면 그대로 null. */
