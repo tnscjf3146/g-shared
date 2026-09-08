@@ -11,12 +11,22 @@ Two paths:
   attaches the machine to their account, and the identity it issues is sealed
   to this Windows account.
 
-What is still missing is the **benchmark**. Registration has to state what this
-machine can do (``benchmarkTokensPerSec``), and nothing in this build measures
-that yet. Rather than send a placeholder the scheduler would believe, the new
-machine path stops before the sign-in window and says so. The seam it will
-arrive through is the ``benchmark`` argument below: give it something that
-returns a measured figure and the path completes.
+Registration has to state what this machine can do, so a new machine is
+measured: the fixed fine-tuning workload in
+:mod:`gshared_worker.benchmark_program` runs on the GPU, and the tokens per
+second it managed go into the request. That takes about half a minute, which is
+why it happens **after** somebody signs in rather than before. There is no point
+spending a minute of a GPU for a machine nobody is attaching to an account, and
+somebody who closed the window has not asked for anything.
+
+A machine that has been here before is not measured again. It has an identity,
+its number is already recorded against it, and re-measuring every start would
+spend a minute of somebody GPU time to learn what is already known.
+Re-measuring belongs to the GPU update endpoint, which is a flow of its own.
+
+A benchmark that fails stops registration. There is no fallback figure: an
+invented number is worse than no number, because the scheduler cannot tell it
+from a measured one.
 """
 
 from __future__ import annotations
@@ -25,6 +35,7 @@ import logging
 from typing import Callable
 
 from .backend_client import BackendClient
+from .benchmark import BenchmarkReport, GpuBenchmark
 from .config import WorkerSettings
 from .exit_codes import WorkerExitCode
 from .gui.presenter import AuthPresenter
@@ -37,9 +48,9 @@ from .worker_registry import HttpWorkerRegistry, WorkerRegistrationRequest
 
 _debug = logging.getLogger(LOGGER_NAME)
 
-#: Measures what this machine can do, in tokens per second. Nothing implements
-#: it yet -- see the module docstring.
-Benchmark = Callable[[], float]
+#: Measures what this machine can do. The real one runs a fine-tuning workload
+#: in a container; a test supplies its own.
+Benchmark = Callable[[], BenchmarkReport]
 
 #: Reads this machine for the registration request.
 DescribeMachine = Callable[[], "MachineFacts | None"]
@@ -96,12 +107,12 @@ def authenticate_worker(
     result = service.authenticate(loaded)
 
     if result.state is WorkerAuthState.NEEDS_ENROLLMENT:
-        registration = _describe_this_machine(say, describe, benchmark)
-        if registration is None:
+        facts = _describe_this_machine(say, describe)
+        if facts is None:
             # Said before a window is opened: asking somebody for a password
-            # that cannot be used is worse than not asking.
+            # that could not be used is worse than not asking.
             return int(WorkerExitCode.EXPECTED_FAILURE)
-        result = _enrol(service, settings, say, ask_to_sign_in, registration)
+        result = _enrol(service, settings, say, ask_to_sign_in, facts, benchmark)
 
     return _report(say, result)
 
@@ -112,23 +123,9 @@ def _backend_registry(settings: WorkerSettings) -> HttpWorkerRegistry:
 
 
 def _describe_this_machine(
-    say: Callable[..., None],
-    describe: DescribeMachine | None,
-    benchmark: Benchmark | None,
-) -> WorkerRegistrationRequest | None:
-    """What to register this machine as, or None when it cannot be said.
-
-    Both halves have to be real. The machine describes itself; the benchmark
-    has to be measured, and nothing measures it yet.
-    """
-    if benchmark is None:
-        _debug.info("enrolment stopped: no benchmark to state for this machine")
-        say("")
-        say("G-shared cannot register this machine yet.")
-        say("  Registering states what this GPU can do, and measuring that is")
-        say("  not part of this build. Nothing was changed here.")
-        return None
-
+    say: Callable[..., None], describe: DescribeMachine | None
+) -> MachineFacts | None:
+    """What this machine is, or None when it cannot say."""
     facts = (describe or describe_machine)()
     if facts is None:
         _debug.info("enrolment stopped: this machine could not be described")
@@ -136,8 +133,40 @@ def _describe_this_machine(
         say("G-shared cannot register this machine yet.")
         say("  Its GPU could not be described, so there is nothing to offer.")
         return None
+    say(f"  This machine offers {facts.gpu_model} ({facts.vram_mb} MB).")
+    return facts
 
-    return WorkerRegistrationRequest.describing(facts, benchmark())
+
+def _measure_this_gpu(
+    say: Callable[..., None], benchmark: Benchmark | None
+) -> BenchmarkReport | None:
+    """How fast this GPU fine-tunes, or None when it could not be measured.
+
+    Never a fallback figure. A machine registered with a number nobody measured
+    is a machine the scheduler sends work to on false pretences.
+    """
+    say("")
+    say("Measuring what this GPU can do...")
+    say("  It runs a short fine-tuning workload. This takes about a minute.")
+
+    report = (benchmark or _run_the_benchmark)()
+    if report.succeeded:
+        say(f"  {report.result.summary()}")
+        return report
+
+    _debug.info("benchmark refused: %s -- %s", report.outcome.value, report.detail)
+    say("")
+    say("G-shared could not measure this GPU, so it was not registered.")
+    say(f"  {report.detail}")
+    say("  Nothing was changed here.")
+    return None
+
+
+def _run_the_benchmark() -> BenchmarkReport:
+    """The real measurement, in our own distribution."""
+    import asyncio
+
+    return asyncio.run(GpuBenchmark().measure())
 
 
 def _enrol(
@@ -145,22 +174,34 @@ def _enrol(
     settings: WorkerSettings,
     say: Callable[..., None],
     ask_to_sign_in: Callable[[], str | None] | None,
-    registration: WorkerRegistrationRequest,
+    facts: MachineFacts,
+    benchmark: Benchmark | None,
 ) -> WorkerAuthResult:
-    """Sign a person in, attach this machine to them, and seal what comes back."""
+    """Sign a person in, measure the GPU, and attach the machine to them."""
     say("  This machine is not registered yet. Sign in to attach it to your account.")
-    say(f"  Offering {registration.gpu_model} ({registration.vram_mb} MB).")
 
     ask = ask_to_sign_in or _open_sign_in_window(settings)
     access_token = ask()
     if not access_token:
-        # The window was closed. Not a fault, and nothing was changed.
+        # The window was closed. Not a fault, nothing was changed, and no GPU
+        # time was spent on a machine nobody is registering.
         return WorkerAuthResult(
             WorkerAuthState.NEEDS_ENROLLMENT,
             "Sign-in was cancelled, so this machine is still unregistered.",
         )
 
-    say("  Signed in. Registering this machine...")
+    measured = _measure_this_gpu(say, benchmark)
+    if measured is None:
+        del access_token
+        return WorkerAuthResult(
+            WorkerAuthState.NEEDS_ENROLLMENT,
+            "This GPU could not be measured, so this machine is still unregistered.",
+        )
+    registration = WorkerRegistrationRequest.describing(
+        facts, measured.result.tokens_per_sec)
+
+    say("")
+    say("  Registering this machine...")
     result, credentials = service.register(access_token, registration)
     # The access token has done its one job. It is not written anywhere and
     # nothing below this line can reach it.
