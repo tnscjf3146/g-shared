@@ -127,6 +127,20 @@ public class JobService {
         return true;
     }
 
+    /**
+     * JOB_FAILED 수신: Job FAILED + 사유 기록, Worker 는 다시 대기(ONLINE).
+     * TODO: 환불(블록체인) 트리거 — BC 담당과 협의 후
+     */
+    @Transactional
+    public boolean failJob(String workerId, Long jobId, String failReason) {
+        int updated = jobRepository.failIfRunning(jobId, workerId, failReason, java.time.LocalDateTime.now());
+        if (updated == 0) {
+            return false;
+        }
+        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        return true;
+    }
+
     /** JSON 객체 → 저장용 문자열. null(AUTO)이면 그대로 null. */
     private String toJsonString(JsonNode node) {
         return node == null || node.isNull() ? null : node.toString();

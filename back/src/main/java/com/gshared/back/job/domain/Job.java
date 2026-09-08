@@ -55,6 +55,7 @@ public class Job extends BaseTimeEntity {
     private String assignedWorkerId;  // 배정된 Worker
     private String resultHash;
     private String resultUrl;
+    private String failReason;        // 실패 시 에러코드+메시지 (GPU_OOM 등)
 
     // 진행률 스냅샷 (JOB_PROGRESS 수신 시 갱신)
     private Integer progressPercent;

@@ -216,11 +216,25 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
             return null;
         }
         var node = msg.payload().path(field);
-        return node.isTextual() ? node.asText() : null;
+        return node.isString() ? node.asString() : null;   // Jackson 3: isTextual/asText 의 새 이름
     }
 
     private void handleJobFailed(String workerId, WorkerMessage msg) {
-        log.info("[WS] JOB_FAILED workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        // 사유 = "에러코드: 메시지" 형태로 합쳐 저장 (예: "GPU_OOM: GPU out of memory")
+        String errorCode = textOrNull(msg, "errorCode");
+        String message = textOrNull(msg, "message");
+        String failReason = (errorCode != null ? errorCode : "UNKNOWN") + (message != null ? ": " + message : "");
+
+        boolean failed = jobService.failJob(workerId, jobId, failReason);
+        if (failed) {
+            log.info("[WS] JOB_FAILED → FAILED workerId={} jobId={} reason={}", workerId, jobId, failReason);
+        } else {
+            log.warn("[WS] JOB_FAILED 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
     }
 
     // ── 공통 헬퍼 ───────────────────────────────────────────────
