@@ -2,24 +2,52 @@
 pragma solidity 0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @title GPU 작업 에스크로 컨트랙트 v2
-/// @notice GPU 작업에 대한 대금 예치 및 정산을 온체인에서 안전하게 처리합니다.
+/// @title GPU 작업 에스크로 컨트랙트
+/// @notice GPU 작업 대금을 예치했다가 결과 승인 또는 제한 시간 만료 시점에 정산합니다.
 ///
-/// @dev !!! 이 버전은 SSAFY 체인에 배포할 수 없습니다 !!!
-/// 예치금이 빠져나가는 경로가 approveResult 하나뿐입니다. 아래 세 경우에 대금이 영구히 잠깁니다.
-///   1. FUNDED    - 아무도 수락하지 않는다
-///   2. ASSIGNED  - 공급자가 결과를 제출하지 않는다
-///   3. SUBMITTED - 의뢰자가 승인하지 않는다
-/// 그래서 생성자가 chainid 를 검사해 SSAFY 체인(31221) 배포를 되돌립니다.
-/// 취소·환불·타임아웃을 구현하면 SSAFY_CHAIN_ID 상수와 가드, 그리고 해당 테스트를 함께 제거합니다.
-/// 범위 축소 근거는 blockchain-skeleton.md 5절이며, 타임아웃 기준 시각과 호출 권한,
-/// 정산 방향(공급자 지급인지 의뢰자 환불인지)이 확정되어야 추가할 수 있습니다.
-/// deadline 은 처리 함수가 없는 동안 오해를 부르므로 필드와 이벤트 인자에서 함께 뺐습니다.
+/// @dev 상태 전이와 자금 이동
+/// ```
+///   CREATED  --fundJob-->      FUNDED     대금이 잠긴다
+///   FUNDED   --acceptJob-->    ASSIGNED
+///   ASSIGNED --submitResult--> SUBMITTED  결과 해시가 봉인된다
+///   SUBMITTED --approveResult--> COMPLETED  공급자 지급
 ///
-/// @dev 온체인에는 정산 정보만 보관하며, workloadId, imageDigest, datasetHash 등 작업 상세 정보는 오프체인(백엔드 DB)에 저장됩니다.
-/// 또한 재진입(Reentrancy) 공격을 방어하기 위해 CEI(Checks-Effects-Interactions) 패턴을 준수하여 상태 변경 후 토큰을 전송합니다.
-contract GPUJobEscrow {
+///   FUNDED   --cancelJob-->      CANCELLED  의뢰자 환불
+///   FUNDED   --settleTimeout-->  CANCELLED  미수락 환불
+///   ASSIGNED --settleTimeout-->  CANCELLED  미제출 환불
+///   SUBMITTED --settleTimeout--> COMPLETED  미승인 지급
+/// ```
+/// 대기 상태 셋 모두에 제한 시간과 탈출 경로가 있습니다. 상대가 응답하지 않아도
+/// 자금이 영구히 잠기지 않습니다.
+///
+/// @dev 제한 시간 경계
+/// 정상 전이는 `block.timestamp <= deadline` 에서만, `settleTimeout` 은
+/// `block.timestamp > deadline` 에서만 동작합니다. 같은 블록에 둘이 담겨도
+/// 동시에 유효한 순간이 없으므로 트랜잭션 순서가 결과를 바꾸지 못합니다.
+///
+/// @dev MVP 신뢰 가정
+/// `resultHash` 제출은 올바른 연산을 했다는 증명이 아닙니다. 잘못된 결과의 해시를
+/// 올려도 의뢰자가 승인 기한 안에 대응하지 않으면 공급자가 지급받습니다.
+/// 의뢰자가 기한 안에 결과를 확인한다는 운영 가정 위에 서 있으며, 결과 거절과
+/// 분쟁·중재는 후속 작업입니다. 실제 가치가 걸리기 전에 반드시 추가해야 합니다.
+///
+/// @dev 공급자 선택
+/// 현재는 의뢰자 본인을 제외한 누구나 선착순으로 수락합니다. 공급자 자격 검사나
+/// 매칭 정책은 아직 확정되지 않았습니다.
+///
+/// @dev 안전 장치
+/// 자금이 나가는 함수는 CEI 순서를 지켜 상태를 먼저 바꾸고 토큰을 나중에 보냅니다.
+/// 이것이 주 방어이고, `nonReentrant` 는 교차 함수 재진입까지 막는 이중 안전장치입니다.
+/// 토큰 호출은 `SafeERC20` 을 거칩니다.
+///
+/// @dev 온체인에는 정산 정보만 보관하며, workloadId·imageDigest·datasetHash 등
+/// 작업 상세는 오프체인 DB 를 원본으로 삼습니다.
+contract GPUJobEscrow is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     /// @notice 에스크로 작업의 생명주기를 나타내는 상태 값
     enum JobState { NONE, CREATED, FUNDED, ASSIGNED, SUBMITTED, COMPLETED, CANCELLED }
 
@@ -40,14 +68,14 @@ contract GPUJobEscrow {
     /// @notice 정산에 사용될 ERC20 토큰 컨트랙트
     IERC20 public immutable paymentToken;
 
-    /// @notice FUNDED 상태에서 공급자 수락까지 허용되는 시간(초)
-    uint64 public immutable acceptDeadline;
+    /// @notice FUNDED 상태에서 공급자 수락까지 허용되는 시간 길이(초). 절대 시각이 아니다
+    uint64 public immutable acceptTimeout;
 
-    /// @notice ASSIGNED 상태에서 결과 제출까지 허용되는 시간(초)
-    uint64 public immutable execDeadline;
+    /// @notice ASSIGNED 상태에서 결과 제출까지 허용되는 시간 길이(초)
+    uint64 public immutable executionTimeout;
 
-    /// @notice SUBMITTED 상태에서 의뢰자 승인까지 허용되는 시간(초)
-    uint64 public immutable approveDeadline;
+    /// @notice SUBMITTED 상태에서 의뢰자 승인까지 허용되는 시간 길이(초)
+    uint64 public immutable approvalTimeout;
 
     /// @notice 다음 작업에 부여될 고유 ID
     uint256 public nextJobId = 1;
@@ -93,25 +121,25 @@ contract GPUJobEscrow {
     /// @notice 에스크로 컨트랙트를 초기화합니다.
     /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 취소·환불·타임아웃 구현 후 이 검사를 제거합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
-    /// @param acceptDeadline_ 예치 후 수락까지의 기한(초)
-    /// @param execDeadline_ 수락 후 제출까지의 기한(초)
-    /// @param approveDeadline_ 제출 후 승인까지의 기한(초)
+    /// @param acceptTimeout_ 예치 후 수락까지의 기한(초)
+    /// @param executionTimeout_ 수락 후 제출까지의 기한(초)
+    /// @param approvalTimeout_ 제출 후 승인까지의 기한(초)
     constructor(
         address paymentToken_,
-        uint64  acceptDeadline_,
-        uint64  execDeadline_,
-        uint64  approveDeadline_
+        uint64  acceptTimeout_,
+        uint64  executionTimeout_,
+        uint64  approvalTimeout_
     ) {
         if (block.chainid == SSAFY_CHAIN_ID) revert SsafyDeploymentBlocked();
         require(paymentToken_ != address(0), "Escrow: token is zero");
         require(
-            acceptDeadline_ > 0 && execDeadline_ > 0 && approveDeadline_ > 0,
+            acceptTimeout_ > 0 && executionTimeout_ > 0 && approvalTimeout_ > 0,
             "Escrow: deadline is zero"
         );
         paymentToken    = IERC20(paymentToken_);
-        acceptDeadline  = acceptDeadline_;
-        execDeadline    = execDeadline_;
-        approveDeadline = approveDeadline_;
+        acceptTimeout  = acceptTimeout_;
+        executionTimeout    = executionTimeout_;
+        approvalTimeout = approvalTimeout_;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -141,17 +169,16 @@ contract GPUJobEscrow {
     /// @notice 작업 대금을 에스크로 컨트랙트에 예치합니다.
     /// @dev 호출 전에 반드시 paymentToken.approve를 통해 컨트랙트가 대금을 출금할 수 있도록 허용해야 합니다.
     /// @param jobId 대금을 예치할 작업 ID
-    function fundJob(uint256 jobId) external {
+    function fundJob(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.client == msg.sender, "Escrow: not the client");
         require(job.state == JobState.CREATED, "Escrow: not CREATED");
 
         job.state = JobState.FUNDED;
-        job.deadline = uint64(block.timestamp) + acceptDeadline;
+        job.deadline = uint64(block.timestamp) + acceptTimeout;
 
-        bool ok = paymentToken.transferFrom(msg.sender, address(this), job.price);
-        require(ok, "Escrow: transferFrom failed");
+        paymentToken.safeTransferFrom(msg.sender, address(this), job.price);
 
         emit JobFunded(jobId, job.price, job.deadline);
     }
@@ -160,7 +187,7 @@ contract GPUJobEscrow {
     /// @dev FUNDED 에서만 동작합니다. CREATED 는 예치 전이라 잠길 자금이 없어 이번 범위 밖입니다.
     ///      수락 시한이 지난 뒤에도 호출할 수 있습니다. settleTimeout 과 결과가 같아 경쟁이 무해합니다.
     /// @param jobId 취소할 작업 ID
-    function cancelJob(uint256 jobId) external {
+    function cancelJob(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.client == msg.sender, "Escrow: not the client");
@@ -170,15 +197,14 @@ contract GPUJobEscrow {
 
         job.state = JobState.CANCELLED;
 
-        bool ok = paymentToken.transfer(job.client, refund);
-        require(ok, "Escrow: refund failed");
+        paymentToken.safeTransfer(job.client, refund);
 
         emit JobCancelled(jobId, job.client, refund);
     }
 
     /// @notice 제출된 결과물을 승인하고 대금을 제공자에게 지급합니다.
     /// @param jobId 승인할 작업 ID
-    function approveResult(uint256 jobId) external {
+    function approveResult(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.client == msg.sender, "Escrow: not the client");
@@ -186,8 +212,7 @@ contract GPUJobEscrow {
 
         job.state = JobState.COMPLETED;
 
-        bool ok = paymentToken.transfer(job.provider, job.price);
-        require(ok, "Escrow: payout failed");
+        paymentToken.safeTransfer(job.provider, job.price);
 
         emit JobCompleted(jobId, job.provider, job.price);
     }
@@ -208,7 +233,7 @@ contract GPUJobEscrow {
 
         job.provider = msg.sender;
         job.state = JobState.ASSIGNED;
-        job.deadline = uint64(block.timestamp) + execDeadline;
+        job.deadline = uint64(block.timestamp) + executionTimeout;
 
         emit JobAccepted(jobId, msg.sender, job.deadline);
     }
@@ -227,7 +252,7 @@ contract GPUJobEscrow {
 
         job.resultHash = resultHash;
         job.state = JobState.SUBMITTED;
-        job.deadline = uint64(block.timestamp) + approveDeadline;
+        job.deadline = uint64(block.timestamp) + approvalTimeout;
 
         emit ResultSubmitted(jobId, msg.sender, resultHash, job.deadline);
     }
@@ -244,7 +269,7 @@ contract GPUJobEscrow {
     ///      ASSIGNED  공급자가 결과를 내지 않았다    -> 의뢰자 환불
     ///      SUBMITTED 의뢰자가 승인하지 않았다      -> 공급자 지급
     /// @param jobId 정리할 작업 ID
-    function settleTimeout(uint256 jobId) external {
+    function settleTimeout(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
         JobState fromState = job.state;
 
@@ -259,15 +284,13 @@ contract GPUJobEscrow {
         if (fromState == JobState.SUBMITTED) {
             job.state = JobState.COMPLETED;
 
-            bool ok = paymentToken.transfer(job.provider, job.price);
-            require(ok, "Escrow: payout failed");
+            paymentToken.safeTransfer(job.provider, job.price);
 
             emit JobCompleted(jobId, job.provider, job.price);
         } else {
             job.state = JobState.CANCELLED;
 
-            bool ok = paymentToken.transfer(job.client, job.price);
-            require(ok, "Escrow: refund failed");
+            paymentToken.safeTransfer(job.client, job.price);
 
             emit JobCancelled(jobId, job.client, job.price);
         }

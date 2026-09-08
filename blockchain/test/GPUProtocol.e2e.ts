@@ -16,9 +16,9 @@ describe("GPU Protocol e2e", async () => {
   const PRICE = parseUnits("10", 18);
   const SUPPLY = parseUnits("1000000", 18);
 
-  const ACCEPT_DEADLINE = 7200n;  // 2시간
-  const EXEC_DEADLINE = 3600n;    // 1시간
-  const APPROVE_DEADLINE = 1800n; // 30분
+  const ACCEPT_TIMEOUT = 7200n;  // 2시간
+  const EXECUTION_TIMEOUT = 3600n;    // 1시간
+  const APPROVAL_TIMEOUT = 1800n; // 30분
 
   const RESULT_HASH =
     "0x1111111111111111111111111111111111111111111111111111111111111111" as const;
@@ -29,9 +29,9 @@ describe("GPU Protocol e2e", async () => {
     const token = await viem.deployContract("GCoin", [client.account.address]);
     const escrow = await viem.deployContract("GPUJobEscrow", [
       token.address,
-      ACCEPT_DEADLINE,
-      EXEC_DEADLINE,
-      APPROVE_DEADLINE,
+      ACCEPT_TIMEOUT,
+      EXECUTION_TIMEOUT,
+      APPROVAL_TIMEOUT,
     ]);
 
     return { token, escrow, deployer, client, provider, keeper };
