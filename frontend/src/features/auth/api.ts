@@ -9,7 +9,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 // refresh 쿠키는 HttpOnly 라 JS 가 존재를 알 수 없다 → 로그인 성공 시 "세션 있음" 표시만 남겨 두고(토큰은 저장하지 않음),
 // 표시가 있을 때만 reissue 를 호출한다. 그래야 로그인 전 첫 진입마다 콘솔에 401 이 찍히지 않는다
-const SESSION_FLAG = 'gshared.session'
+export const SESSION_FLAG = 'gshared.session' // 다른 탭의 로그인/로그아웃을 storage 이벤트로 감지하는 키(authProvider)
 const sessionFlag = {
   has: () => {
     try {

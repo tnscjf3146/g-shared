@@ -12,7 +12,7 @@
 | **GPU 모션** (`dark` #333333, sticky — INTRO TOP 동안만 `black` #0d0f0b 바닥 `#deep`) | 91:591 `GpuMotion` — 피그마는 움직이지 않으므로 챕터 10개(인트로 0–2 + 스크롤 3–9, 피그마 컷은 팬/연기/쉬라우드 분리 이전의 12장이라 갱신 필요)를 1440×900 풀스크린 **정지 컷**으로 세로 배치. 각 컷 좌상단 칩 = `번호 · 챕터명 · 설명 · 구간(ms)`. 이미지는 실제 페이지 헤드리스 캡처(§4) | 이 폴더 전체 (`landingScene` 등). Hero 가 위에 붙으므로 인트로는 **sticky 스테이지가 뷰포트에 완전히 들어와 고정되는 순간**(IntersectionObserver, threshold 0.98) 1회 재생하며 **재생 중(5초) 스크롤 잠금**(`html overflow:hidden` + `touchmove` 차단, 끝나면 해제, 건너뛰기 없음). 이미 챕터 구간까지 스크롤된 채 진입(`tl.progress > 0.01`)이면 생략 | 구현됨 |
 | **Footer** (어둠, 80) | 91:588. 배경 `#0d0f0b`, 좌 `G-shared`(Barlow SemiBold 20, `#f7f9f4`), 우 `SSAFY 15기 특화 프로젝트 · E204 · 이용약관 · 개인정보처리방침`(Inter 13, `#5e5c63`), 패딩 28/64 | `_components/siteFooter.tsx` (서버 컴포넌트) | 구현됨 |
 
-- 폰트: **Pretendard 단일 서체**(제목·본문·로고·숫자 모두). 피그마의 Manrope/Inter/Barlow 표기는 굵기·크기만 참고하고 서체는 Pretendard 로 옮긴다. `app/layout.tsx` 에서 `pretendard` 패키지의 가변 woff2 를 `next/font/local` 로 셀프호스팅하고, `globals.css` 의 `--font-sans/-heading/-mono/-logo` 토큰이 전부 그 변수를 가리킨다.
+- 폰트: **Pretendard 단일 서체**(제목·본문·로고·숫자 모두). 피그마의 Manrope/Inter/Barlow 표기는 굵기·크기만 참고하고 서체는 Pretendard 로 옮긴다. `app/layout.tsx` 에서 `pretendard` 패키지의 동적 서브셋 CSS 를 import 해 쓰인 글자 구간만 내려받고(AGENTS.md 서체 절), `globals.css` 의 `--font-sans/-heading/-mono/-logo` 토큰이 전부 그 변수를 가리킨다.
 - 색은 전부 `globals.css` 토큰(`--color-primary` `#76b900`, `--color-black` `#0d0f0b`, `--color-dark` `#333333`, `--color-text-muted` `#5e5c63`, `--color-white` `#f7f9f4`, `--color-accent-mint` `#30e2ad`).
 - Hero/Footer 는 스크롤 연출과 무관한 일반 흐름 요소라 **sticky 캔버스 밖**(형제 섹션)에 둔다. 예전에 검토한 "오버레이 슬롯"은 필요 없어졌다(챕터 카피를 캔버스 위에 얹기로 결정되면 그때 `children` 슬롯 추가).
 

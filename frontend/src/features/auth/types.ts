@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import type * as z from 'zod/mini'
 import type { loginSchema, signupSchema } from './schema'
 
 export type LoginInput = z.infer<typeof loginSchema>

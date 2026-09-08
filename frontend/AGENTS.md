@@ -40,8 +40,8 @@
 
 **Pretendard 하나만 쓴다.** 제목·본문·로고·숫자·모노 자리까지 전부 Pretendard(피그마의 Manrope/Inter/Barlow 표기는 굵기·크기만 따른다).
 
-- 로딩: `pretendard` 패키지의 가변 woff2 를 `app/layout.tsx` 에서 `next/font/local` 로 셀프호스팅(`--font-pretendard`, weight 45~920, `display: swap`). 구글 폰트·CDN 링크를 추가하지 않는다.
-- 토큰: `globals.css` 의 `--font-sans` / `--font-heading` / `--font-mono` / `--font-logo` 가 모두 Pretendard 를 가리킨다. 컴포넌트에서는 서체 이름 대신 역할 토큰(`font-sans`, `font-heading`, `font-logo`)만 쓴다.
+- 로딩: `pretendard` 패키지의 **동적 서브셋 CSS**(`pretendardvariable-dynamic-subset.css`)를 `app/layout.tsx` 에서 import. 가변 폰트를 유니코드 구간별 92조각으로 나눠 `unicode-range` 로 선언하므로 화면에 쓰인 글자 구간(조각당 약 20KB)만 내려받는다. 단일 woff2(2MB)나 구글 폰트·CDN 링크를 쓰지 않는다. 파일은 Next 가 `/_next/static/media` 로 복사해 셀프호스팅.
+- 토큰: `globals.css` 의 `--font-sans` / `--font-heading` / `--font-mono` / `--font-logo` 가 모두 `'Pretendard Variable'` 을 가리킨다. 컴포넌트에서는 서체 이름 대신 역할 토큰(`font-sans`, `font-heading`, `font-logo`)만 쓴다.
 - 굵기: 본문 400, 라벨·메뉴 500, 버튼·소제목 600, 제목 700, display(Hero 56) 800. 숫자 나열(요금·시간·통계)은 `tabular-nums`.
 - 자간은 "반응형" 절의 `tracking-display/-heading/-eyebrow` 규칙을 따른다.
 
