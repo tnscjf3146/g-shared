@@ -12,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -36,8 +35,12 @@ public class JobMatcher {
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 의도적으로 메서드 트랜잭션 없음 — Job 하나당 assignIfFunded(자체 트랜잭션 커밋) 후 전송.
+     * 커밋 후 전송이라 "워커는 받았는데 DB 는 미배정" 불일치가 없고,
+     * Job 별 try/catch 로 깨진 Job 하나가 순찰 전체를 마비시키지 않는다(poison 격리).
+     */
     @Scheduled(fixedDelay = 30_000)
-    @Transactional
     public void match() {
         List<Job> waiting = jobRepository.findByStatusOrderByCreatedAtAsc(JobStatus.FUNDED);
         if (waiting.isEmpty()) {
@@ -50,12 +53,19 @@ public class JobMatcher {
         for (int i = 0; i < pairs; i++) {
             Job job = waiting.get(i);
             Worker worker = available.get(i);
-            job.assign(worker.getId());   // FUNDED → ASSIGNED (더티체킹으로 자동 저장)
-
-            boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
-            log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
-            // 전송 실패(그 찰나 연결 끊김)여도 ASSIGNED 유지 — 워커는 스위퍼가 OFFLINE 처리.
-            // TODO: ASSIGNED 인데 오래 JOB_ACCEPTED 없는 Job 재큐잉(FUNDED 복귀)은 후속 티켓
+            try {
+                // "아직 FUNDED 일 때만" 배정 — 그 사이 취소됐으면 0행으로 건너뜀 (취소 되살림 방지)
+                if (jobRepository.assignIfFunded(job.getId(), worker.getId()) == 0) {
+                    log.info("[MATCH] jobId={} 상태 변경됨(취소 등) — 건너뜀", job.getId());
+                    continue;
+                }
+                boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
+                log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
+                // 전송 실패(그 찰나 연결 끊김)여도 ASSIGNED 유지 — 워커는 스위퍼가 OFFLINE 처리.
+                // TODO: ASSIGNED 인데 오래 JOB_ACCEPTED 없는 Job 재큐잉(FUNDED 복귀)은 후속 티켓
+            } catch (Exception e) {
+                log.error("[MATCH] jobId={} 매칭 실패(다음 Job 계속)", job.getId(), e);
+            }
         }
 
         if (waiting.size() > pairs) {

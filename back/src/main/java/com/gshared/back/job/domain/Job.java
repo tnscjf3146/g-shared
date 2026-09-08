@@ -87,11 +87,6 @@ public class Job extends BaseTimeEntity {
                 trainingMode, trainingConfig, predictedRuntimeSec, estimatedCost);
     }
 
-    // 취소 전이는 경쟁 조건 방지를 위해 JobRepository.cancelIfCancellable(조건부 UPDATE)로만 수행한다.
-
-    /** 매칭: Worker 배정 → ASSIGNED. (FUNDED 상태에서만 호출됨 — JobMatcher가 보장) */
-    public void assign(String workerId) {
-        this.assignedWorkerId = workerId;
-        this.status = JobStatus.ASSIGNED;
-    }
+    // 상태 전이(취소·배정·시작·완료·실패)는 경쟁 조건 방지를 위해
+    // 전부 JobRepository 의 조건부 UPDATE(...IfXxx)로만 수행한다.
 }

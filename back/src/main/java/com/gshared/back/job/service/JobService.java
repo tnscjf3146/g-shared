@@ -84,7 +84,7 @@ public class JobService {
     @Transactional
     public void cancelJob(Long ownerId, Long jobId) {
         // 존재/소유 확인 (없거나 남의 것 → 404)
-        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+        jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
         // 원자적 취소 — 0행이면 그 사이 상태가 바뀐 것 (→ 409)
@@ -93,14 +93,16 @@ public class JobService {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
         }
 
-        // 이미 워커에게 배정된 상태였다면 → "취소됐어" 통지 (JOB_CANCEL)
-        if (job.getAssignedWorkerId() != null) {
-            messageSender.send(job.getAssignedWorkerId(),
-                    WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
-                            String.valueOf(jobId),
-                            java.time.OffsetDateTime.now().toString(),
-                            objectMapper.createObjectNode()));
-        }
+        // 워커에게 배정돼 있었다면 → "취소됐어" 통지 (JOB_CANCEL).
+        // 취소 확정 "후" 재조회 — 확인 시점 스냅샷은 그 사이 매칭이 배정했을 수 있어 못 믿는다.
+        // (clearAutomatically 덕에 1차 캐시가 아닌 DB 최신값을 읽음)
+        jobRepository.findById(jobId)
+                .map(Job::getAssignedWorkerId)
+                .ifPresent(workerId -> messageSender.send(workerId,
+                        WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
+                                String.valueOf(jobId),
+                                java.time.OffsetDateTime.now().toString(),
+                                objectMapper.createObjectNode())));
         // TODO: 예치금 환불 트리거(블록체인 연동) — BC 담당과 협의 후
     }
 

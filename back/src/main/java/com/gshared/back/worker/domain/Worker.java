@@ -89,7 +89,11 @@ public class Worker extends BaseTimeEntity {
         this.status = WorkerStatus.OFFLINE;
     }
 
-    /** JOB_ACCEPTED: 작업 시작 → RUNNING + 현재 작업 기록. */
+    /**
+     * JOB_ACCEPTED: 작업 시작 → RUNNING + 현재 작업 기록.
+     * (스위퍼가 찰나에 OFFLINE 으로 내렸어도 RUNNING 으로 덮는 것은 의도 —
+     *  JOB_ACCEPTED 수신 자체가 연결이 살아있다는 증거)
+     */
     public void startJob(String jobId) {
         this.status = WorkerStatus.RUNNING;
         this.currentJobId = jobId;

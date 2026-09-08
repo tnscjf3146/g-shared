@@ -30,7 +30,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).
      * @return 영향받은 행 수 (1=취소 성공, 0=상태가 이미 바뀌어 취소 불가)
      */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
@@ -47,7 +47,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
      * 원자적 시작(JOB_ACCEPTED): "이 워커에게 배정된 ASSIGNED 상태일 때만" RUNNING 전이.
      * 엉뚱한 워커의 메시지·중복 메시지는 조건 불일치로 0행 → 무시된다.
      */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.RUNNING,
@@ -59,7 +59,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int startIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId, @Param("now") LocalDateTime now);
 
     /** JOB_PROGRESS: "이 워커의 RUNNING Job"일 때만 진행률 갱신. */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.progressPercent = :percent,
@@ -74,7 +74,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                                 @Param("totalEpochs") Integer totalEpochs);
 
     /** JOB_RESULT: "이 워커의 RUNNING Job"일 때만 COMPLETED 전이 + 결과 기록. */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.COMPLETED,
@@ -91,7 +91,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                           @Param("actualRuntimeSec") Integer actualRuntimeSec, @Param("now") LocalDateTime now);
 
     /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유 기록. */
-    @Modifying
+    @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.FAILED,
@@ -103,4 +103,20 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     int failIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
                       @Param("failReason") String failReason, @Param("now") LocalDateTime now);
+
+    /**
+     * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
+     * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.
+     * 매처는 트랜잭션 없이 Job 단위로 호출 → 여기 @Transactional 로 자체 커밋(전송은 커밋 후).
+     */
+    @org.springframework.transaction.annotation.Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED,
+                   j.assignedWorkerId = :workerId
+             WHERE j.id = :jobId
+               AND j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+            """)
+    int assignIfFunded(@Param("jobId") Long jobId, @Param("workerId") String workerId);
 }
