@@ -170,7 +170,28 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleJobProgress(String workerId, WorkerMessage msg) {
-        log.debug("[WS] JOB_PROGRESS workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean applied = jobService.updateProgress(workerId, jobId,
+                intOrNull(msg, "progress"),
+                intOrNull(msg, "currentEpoch"),
+                intOrNull(msg, "totalEpochs"));
+        if (applied) {
+            log.debug("[WS] JOB_PROGRESS workerId={} jobId={} {}%", workerId, jobId, intOrNull(msg, "progress"));
+        } else {
+            log.warn("[WS] JOB_PROGRESS 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** payload 에서 정수 필드 꺼내기. 없거나 숫자가 아니면 null. */
+    private Integer intOrNull(WorkerMessage msg, String field) {
+        if (msg.payload() == null) {
+            return null;
+        }
+        var node = msg.payload().path(field);   // path(): 없어도 예외 대신 missing 노드 반환
+        return node.isNumber() ? node.asInt() : null;
     }
 
     private void handleJobResult(String workerId, WorkerMessage msg) {

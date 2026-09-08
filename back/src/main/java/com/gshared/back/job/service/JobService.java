@@ -105,6 +105,12 @@ public class JobService {
         return true;
     }
 
+    /** JOB_PROGRESS 수신: 진행률 스냅샷 갱신. RUNNING 이 아니면 0행(무시). */
+    @Transactional
+    public boolean updateProgress(String workerId, Long jobId, Integer percent, Integer epoch, Integer totalEpochs) {
+        return jobRepository.updateProgressIfRunning(jobId, workerId, percent, epoch, totalEpochs) > 0;
+    }
+
     /** JSON 객체 → 저장용 문자열. null(AUTO)이면 그대로 null. */
     private String toJsonString(JsonNode node) {
         return node == null || node.isNull() ? null : node.toString();
