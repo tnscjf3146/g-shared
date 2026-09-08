@@ -6,6 +6,7 @@ AUTO와 CUSTOM은 이 값을 *만드는 방법*이 다를 뿐, 만들어진 결�
 같은 표현을 공유한다는 성질이 그 순간 사라진다.
 """
 
+from enum import Enum
 from typing import Annotated
 
 from pydantic import Field
@@ -14,6 +15,29 @@ from app.schemas.base import SchedulerSchema
 
 PositiveInt = Annotated[int, Field(gt=0)]
 PositiveFloat = Annotated[float, Field(gt=0)]
+
+
+class TrainingMode(str, Enum):
+    """사용자가 AUTO에서 고르는 학습 방향.
+
+    Hyperparameter 네 개를 직접 정하는 대신 "무엇을 우선할지"만 고른다.
+    세 값은 같은 축의 세 지점이다 -- 왼쪽 끝이 빨리 끝나는 것, 오른쪽 끝이 잘 배우는 것.
+
+    :class:`TrainingConfig`에는 이 값이 들어가지 않는다. Mode는 설정을 *만들 때*
+    쓰는 요청의 의미이고, 만들어진 설정은 AUTO든 CUSTOM이든 같은 모양이어야 한다.
+
+    ``str`` 을 상속하는 이유는 JSON에 enum 타입이 없어서다. 이렇게 두면 그대로
+    ``"SPEED"`` 로 직렬화되고, 받을 때도 문자열 하나만 오면 된다.
+    """
+
+    #: 결과를 빨리 보는 것이 먼저. 1 epoch, 짧게 자른 시퀀스.
+    SPEED = "SPEED"
+
+    #: 특별한 이유가 없을 때의 선택.
+    BALANCED = "BALANCED"
+
+    #: 잘 배우는 것이 먼저. 오래 걸려도 데이터를 더 많이, 더 여러 번 본다.
+    TRAINING = "TRAINING"
 
 
 class TrainingConfig(SchedulerSchema):
