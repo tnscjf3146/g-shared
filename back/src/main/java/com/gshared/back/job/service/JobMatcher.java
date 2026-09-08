@@ -5,12 +5,18 @@ import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.job.repository.JobRepository;
 import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.repository.WorkerRepository;
+import com.gshared.back.worker.websocket.WorkerMessageSender;
+import com.gshared.back.worker.websocket.protocol.WorkerMessage;
+import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
@@ -27,6 +33,8 @@ public class JobMatcher {
 
     private final JobRepository jobRepository;
     private final WorkerRepository workerRepository;
+    private final WorkerMessageSender messageSender;
+    private final ObjectMapper objectMapper;
 
     @Scheduled(fixedDelay = 30_000)
     @Transactional
@@ -43,12 +51,34 @@ public class JobMatcher {
             Job job = waiting.get(i);
             Worker worker = available.get(i);
             job.assign(worker.getId());   // FUNDED → ASSIGNED (더티체킹으로 자동 저장)
-            log.info("[MATCH] jobId={} → workerId={}", job.getId(), worker.getId());
-            // TODO(-120): 워커에게 JOB_ASSIGN WebSocket 전송
+
+            boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
+            log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
+            // 전송 실패(그 찰나 연결 끊김)여도 ASSIGNED 유지 — 워커는 스위퍼가 OFFLINE 처리.
+            // TODO: ASSIGNED 인데 오래 JOB_ACCEPTED 없는 Job 재큐잉(FUNDED 복귀)은 후속 티켓
         }
 
         if (waiting.size() > pairs) {
             log.info("[MATCH] 워커 부족 — 대기 Job {}건은 다음 순찰에 재시도", waiting.size() - pairs);
         }
+    }
+
+    /**
+     * JOB_ASSIGN 봉투 생성. payload 는 이형동 명세 기준.
+     * dockerImageId·datasetUrl·resultUploadUrl 은 Workload/Dataset 도메인 구현 후 채움(현재는 ID 전달).
+     */
+    private WorkerMessage buildAssignMessage(Job job) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("baseModelId", job.getBaseModelId());
+        payload.put("datasetId", job.getDatasetId());
+        payload.put("gpuId", job.getGpuId());
+        payload.put("trainingMode", job.getTrainingMode());
+        if (job.getTrainingConfig() != null) {
+            payload.set("trainingConfig", objectMapper.readTree(job.getTrainingConfig()));   // 문자열 → JSON 복원
+        }
+        return WorkerMessage.of(WorkerMessageType.JOB_ASSIGN,
+                String.valueOf(job.getId()),          // 명세상 jobId 는 문자열
+                OffsetDateTime.now().toString(),
+                payload);
     }
 }
