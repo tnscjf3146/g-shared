@@ -22,6 +22,9 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     // 본인 Job 단건 (소유권 확인까지 한 번에)
     Optional<Job> findByIdAndOwnerId(Long id, Long ownerId);
 
+    // 매칭 순찰용: 배정 대기(FUNDED) Job을 오래된 순(선착순)으로
+    java.util.List<Job> findByStatusOrderByCreatedAtAsc(JobStatus status);
+
     /**
      * 원자적 취소: "취소 가능한 상태일 때만" UPDATE 가 한 방에 실행된다.
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).

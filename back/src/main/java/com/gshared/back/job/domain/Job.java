@@ -87,4 +87,10 @@ public class Job extends BaseTimeEntity {
     }
 
     // 취소 전이는 경쟁 조건 방지를 위해 JobRepository.cancelIfCancellable(조건부 UPDATE)로만 수행한다.
+
+    /** 매칭: Worker 배정 → ASSIGNED. (FUNDED 상태에서만 호출됨 — JobMatcher가 보장) */
+    public void assign(String workerId) {
+        this.assignedWorkerId = workerId;
+        this.status = JobStatus.ASSIGNED;
+    }
 }
