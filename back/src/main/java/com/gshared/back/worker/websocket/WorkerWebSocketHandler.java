@@ -1,5 +1,6 @@
 package com.gshared.back.worker.websocket;
 
+import com.gshared.back.job.service.JobService;
 import com.gshared.back.worker.service.WorkerService;
 import com.gshared.back.worker.websocket.protocol.WorkerMessage;
 import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
@@ -42,6 +43,7 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper;
     private final WorkerSessionRegistry sessionRegistry;
     private final WorkerService workerService;
+    private final JobService jobService;
 
     /**
      * 워커가 연결되면 호출. (인증은 이미 인터셉터가 통과시킴)
@@ -141,19 +143,101 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void handleJobAccepted(String workerId, WorkerMessage msg) {
-        log.info("[WS] JOB_ACCEPTED workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean started = jobService.acceptJob(workerId, jobId);
+        if (started) {
+            log.info("[WS] JOB_ACCEPTED → RUNNING workerId={} jobId={}", workerId, jobId);
+        } else {
+            log.warn("[WS] JOB_ACCEPTED 무시(배정 불일치/중복) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** 봉투의 jobId(문자열) → Long. 없거나 숫자가 아니면 null + 경고. */
+    private Long parseJobId(WorkerMessage msg) {
+        if (msg.jobId() == null) {
+            log.warn("[WS] jobId 없는 {} 메시지 무시", msg.type());
+            return null;
+        }
+        try {
+            return Long.parseLong(msg.jobId());
+        } catch (NumberFormatException e) {
+            log.warn("[WS] 잘못된 jobId={} ({} 메시지 무시)", msg.jobId(), msg.type());
+            return null;
+        }
     }
 
     private void handleJobProgress(String workerId, WorkerMessage msg) {
-        log.debug("[WS] JOB_PROGRESS workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean applied = jobService.updateProgress(workerId, jobId,
+                intOrNull(msg, "progress"),
+                intOrNull(msg, "currentEpoch"),
+                intOrNull(msg, "totalEpochs"));
+        if (applied) {
+            log.debug("[WS] JOB_PROGRESS workerId={} jobId={} {}%", workerId, jobId, intOrNull(msg, "progress"));
+        } else {
+            log.warn("[WS] JOB_PROGRESS 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** payload 에서 정수 필드 꺼내기. 없거나 숫자가 아니면 null. */
+    private Integer intOrNull(WorkerMessage msg, String field) {
+        if (msg.payload() == null) {
+            return null;
+        }
+        var node = msg.payload().path(field);   // path(): 없어도 예외 대신 missing 노드 반환
+        return node.isNumber() ? node.asInt() : null;
     }
 
     private void handleJobResult(String workerId, WorkerMessage msg) {
-        log.info("[WS] JOB_RESULT workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean completed = jobService.completeJob(workerId, jobId,
+                textOrNull(msg, "resultHash"),
+                textOrNull(msg, "resultUrl"),
+                intOrNull(msg, "actualRuntimeSec"));
+        if (completed) {
+            log.info("[WS] JOB_RESULT → COMPLETED workerId={} jobId={}", workerId, jobId);
+        } else {
+            log.warn("[WS] JOB_RESULT 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** payload 에서 문자열 필드 꺼내기. 없으면 null. */
+    private String textOrNull(WorkerMessage msg, String field) {
+        if (msg.payload() == null) {
+            return null;
+        }
+        var node = msg.payload().path(field);
+        return node.isString() ? node.asString() : null;   // Jackson 3: isTextual/asText 의 새 이름
     }
 
     private void handleJobFailed(String workerId, WorkerMessage msg) {
-        log.info("[WS] JOB_FAILED workerId={} jobId={}", workerId, msg.jobId()); // TODO(4-3)
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        // 사유 = "에러코드: 메시지" 형태로 합쳐 저장 (예: "GPU_OOM: GPU out of memory")
+        String errorCode = textOrNull(msg, "errorCode");
+        String message = textOrNull(msg, "message");
+        String failReason = (errorCode != null ? errorCode : "UNKNOWN") + (message != null ? ": " + message : "");
+        if (failReason.length() > 2000) {
+            failReason = failReason.substring(0, 2000);   // 폭주 메시지 상한 (DB는 TEXT지만 무한 저장 방지)
+        }
+
+        boolean failed = jobService.failJob(workerId, jobId, failReason);
+        if (failed) {
+            log.info("[WS] JOB_FAILED → FAILED workerId={} jobId={} reason={}", workerId, jobId, failReason);
+        } else {
+            log.warn("[WS] JOB_FAILED 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
     }
 
     // ── 공통 헬퍼 ───────────────────────────────────────────────
