@@ -6,14 +6,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 /// @title GPU 작업 에스크로 컨트랙트 v2
 /// @notice GPU 작업에 대한 대금 예치 및 정산을 온체인에서 안전하게 처리합니다.
 ///
-/// @dev !!! 이 버전은 실체인에 배포하지 않습니다 !!!
+/// @dev !!! 이 버전은 SSAFY 체인에 배포할 수 없습니다 !!!
 /// 예치금이 빠져나가는 경로가 approveResult 하나뿐입니다. 아래 세 경우에 대금이 영구히 잠깁니다.
 ///   1. FUNDED    - 아무도 수락하지 않는다
 ///   2. ASSIGNED  - 공급자가 결과를 제출하지 않는다
 ///   3. SUBMITTED - 의뢰자가 승인하지 않는다
-/// cancelJob 과 settleTimeout 을 추가한 뒤에 배포합니다.
+/// 그래서 생성자가 chainid 를 검사해 SSAFY 체인(31221) 배포를 되돌립니다.
+/// 취소·환불·타임아웃을 구현하면 SSAFY_CHAIN_ID 상수와 가드, 그리고 해당 테스트를 함께 제거합니다.
 /// 범위 축소 근거는 blockchain-skeleton.md 5절이며, 타임아웃 기준 시각과 호출 권한,
 /// 정산 방향(공급자 지급인지 의뢰자 환불인지)이 확정되어야 추가할 수 있습니다.
+/// deadline 은 처리 함수가 없는 동안 오해를 부르므로 필드와 이벤트 인자에서 함께 뺐습니다.
 ///
 /// @dev 온체인에는 정산 정보만 보관하며, workloadId, imageDigest, datasetHash 등 작업 상세 정보는 오프체인(백엔드 DB)에 저장됩니다.
 /// 또한 재진입(Reentrancy) 공격을 방어하기 위해 CEI(Checks-Effects-Interactions) 패턴을 준수하여 상태 변경 후 토큰을 전송합니다.
@@ -22,30 +24,34 @@ contract GPUJobEscrow {
     enum JobState { NONE, CREATED, FUNDED, ASSIGNED, SUBMITTED, COMPLETED }
 
     /// @notice 단일 작업(Job)에 대한 구조체
-    /// @dev 변수 배치를 통해 단일 스토리지 슬롯(32바이트)에 맞춤: client(20) + state(1) + deadline(8) = 29 bytes.
+    /// @dev 변수 배치를 통해 단일 스토리지 슬롯(32바이트)에 맞춤: client(20) + state(1) = 21 bytes.
     struct Job {
         address  client;       // 의뢰자 지갑 주소
         JobState state;        // 현재 작업 상태
-        uint64   deadline;     // 상태 변경 시마다 갱신되는 제한 시간(타임스탬프). 기록만 하고 아직 읽지 않는다
         address  provider;     // 작업을 수락한 제공자 (수락 전에는 address(0))
         uint256  price;        // 작업 대금 (결제 토큰 최소 단위)
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
 
+    /// @notice 취소·환불·타임아웃이 없는 이 버전을 배포할 수 없는 체인
+    uint256 private constant SSAFY_CHAIN_ID = 31221;
+
     /// @notice 정산에 사용될 ERC20 토큰 컨트랙트
     IERC20 public immutable paymentToken;
-    
-    /// @notice 작업 수락 후 결과 제출까지 허용되는 최대 시간(초)
-    uint64 public immutable execDeadline;
-    
-    /// @notice 결과 제출 후 의뢰자의 승인까지 허용되는 최대 시간(초)
-    uint64 public immutable approveDeadline;
 
     /// @notice 다음 작업에 부여될 고유 ID
     uint256 public nextJobId = 1;
     
     /// @notice Job ID와 작업 상세 정보 매핑
     mapping(uint256 => Job) public jobs;
+
+    // ─────────────────────────────────────────────────────────────
+    // 오류(Errors)
+    // ─────────────────────────────────────────────────────────────
+
+    /// @notice 취소·환불·타임아웃이 빠진 버전을 SSAFY 체인에 배포하려 할 때 되돌립니다.
+    /// @dev 예치금 회수 경로가 approveResult 하나뿐이라 실자금이 잠길 수 있습니다.
+    error SsafyDeploymentBlocked();
 
     // ─────────────────────────────────────────────────────────────
     // 이벤트(Events)
@@ -56,22 +62,19 @@ contract GPUJobEscrow {
     /// @notice 작업 대금이 에스크로에 예치되었을 때 발생
     event JobFunded(uint256 indexed jobId, uint256 price);
     /// @notice 제공자가 작업을 수락했을 때 발생
-    event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
+    event JobAccepted(uint256 indexed jobId, address indexed provider);
     /// @notice 제공자가 작업 결과를 제출했을 때 발생
-    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash, uint64 deadline);
+    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash);
     /// @notice 작업이 완료되고 대금이 지급되었을 때 발생
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
+    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 취소·환불·타임아웃 구현 후 이 검사를 제거합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
-    /// @param execDeadline_ 작업 수락 후 제출까지의 기한(초)
-    /// @param approveDeadline_ 제출 후 의뢰자 승인까지의 기한(초)
-    constructor(address paymentToken_, uint64 execDeadline_, uint64 approveDeadline_) {
+    constructor(address paymentToken_) {
+        if (block.chainid == SSAFY_CHAIN_ID) revert SsafyDeploymentBlocked();
         require(paymentToken_ != address(0), "Escrow: token is zero");
-        require(execDeadline_ > 0 && approveDeadline_ > 0, "Escrow: deadline is zero");
         paymentToken = IERC20(paymentToken_);
-        execDeadline = execDeadline_;
-        approveDeadline = approveDeadline_;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -89,7 +92,6 @@ contract GPUJobEscrow {
         jobs[jobId] = Job({
             client:     msg.sender,
             state:      JobState.CREATED,
-            deadline:   0,
             provider:   address(0),
             price:      price,
             resultHash: bytes32(0)
@@ -146,9 +148,8 @@ contract GPUJobEscrow {
 
         job.provider = msg.sender;
         job.state = JobState.ASSIGNED;
-        job.deadline = uint64(block.timestamp) + execDeadline;
 
-        emit JobAccepted(jobId, msg.sender, job.deadline);
+        emit JobAccepted(jobId, msg.sender);
     }
 
     /// @notice 작업이 완료되었음을 알리고 결과물에 대한 해시를 등록합니다.
@@ -164,9 +165,8 @@ contract GPUJobEscrow {
 
         job.resultHash = resultHash;
         job.state = JobState.SUBMITTED;
-        job.deadline = uint64(block.timestamp) + approveDeadline;
 
-        emit ResultSubmitted(jobId, msg.sender, resultHash, job.deadline);
+        emit ResultSubmitted(jobId, msg.sender, resultHash);
     }
 
 }
