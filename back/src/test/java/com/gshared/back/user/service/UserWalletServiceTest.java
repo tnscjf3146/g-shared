@@ -252,6 +252,18 @@ class UserWalletServiceTest {
     }
 
     @Test
+    @DisplayName("조회: 미연결이면 null, 연결 후엔 저장된 주소를 돌려준다")
+    void getsWallet() {
+        User user = user();
+        given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
+
+        assertThat(userWalletService.getWallet(USER_ID).walletAddress()).isNull();
+
+        user.linkWallet(ADDRESS);
+        assertThat(userWalletService.getWallet(USER_ID).walletAddress()).isEqualTo(ADDRESS);
+    }
+
+    @Test
     @DisplayName("연결 해제하면 지갑 주소가 비워진다")
     void unlinksWallet() {
         User user = user();

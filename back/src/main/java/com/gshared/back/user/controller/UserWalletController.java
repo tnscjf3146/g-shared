@@ -23,6 +23,12 @@ public class UserWalletController {
 
     private final UserWalletService userWalletService;
 
+    /** 연결 여부 조회. 프론트가 "지갑 대시보드 / 지갑 연결" 화면을 가르는 기준. 미연결이면 walletAddress 가 null. */
+    @GetMapping
+    public ResponseEntity<WalletResponse> get(@AuthenticationPrincipal CustomUserDetails userDetails) {
+        return ResponseEntity.ok(userWalletService.getWallet(userDetails.getId()));
+    }
+
     @PostMapping("/challenge")
     public ResponseEntity<WalletChallengeResponse> issueChallenge(
             @AuthenticationPrincipal CustomUserDetails userDetails,

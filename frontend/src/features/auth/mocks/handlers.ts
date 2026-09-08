@@ -5,10 +5,12 @@ import { MOCK_ACCESS_TOKEN, MOCK_REFRESH_COOKIE, MOCK_USER } from './data'
 
 // 백엔드 에러 포맷 그대로: { code, message }
 const error = (status: number, code: string, message: string) => HttpResponse.json({ code, message }, { status })
+// HttpOnly 를 붙이지 않는다(실서버와 다른 유일한 점): MSW 는 HttpOnly 쿠키를 자기 저장소에만 두고 document.cookie 에 못 쓰므로
+// 브라우저의 실제 페이지 이동에 실리지 않아 proxy.ts 보호 경로(/wallet 등)가 목업 모드에서 항상 /login 으로 튕긴다
 const tokenJson = (setCookie: boolean) =>
   HttpResponse.json(
     { accessToken: MOCK_ACCESS_TOKEN },
-    { headers: setCookie ? { 'Set-Cookie': `${MOCK_REFRESH_COOKIE}=mock-refresh; Path=/; HttpOnly; SameSite=Lax` } : undefined },
+    { headers: setCookie ? { 'Set-Cookie': `${MOCK_REFRESH_COOKIE}=mock-refresh; Path=/; SameSite=Lax` } : undefined },
   )
 
 export const authHandlers = [

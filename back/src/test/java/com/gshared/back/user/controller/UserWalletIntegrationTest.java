@@ -26,6 +26,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -164,6 +165,24 @@ class UserWalletIntegrationTest {
 
         mockMvc.perform(delete(WALLET_URL))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("조회: 연결 전엔 null, 연결 후엔 주소가 온다")
+    void getsWallet() throws Exception {
+        mockMvc.perform(get(WALLET_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.walletAddress").value((Object) null));
+
+        ChallengeView challenge = issueChallenge(ADDRESS);
+        link(challenge.challengeId(), sign(challenge.message(), PRIVATE_KEY))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get(WALLET_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.walletAddress").value(ADDRESS));
     }
 
     @Test
