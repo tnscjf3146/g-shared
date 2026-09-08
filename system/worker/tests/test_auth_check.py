@@ -26,6 +26,11 @@ from gshared_worker.config import (
 )
 from gshared_worker.exit_codes import WorkerExitCode
 from gshared_worker.logging_setup import DEBUG_LOG_NAME, start_debug_log, stop_debug_log
+from gshared_worker.benchmark import (
+    BenchmarkOutcome,
+    BenchmarkReport,
+    BenchmarkResult,
+)
 from gshared_worker.machine_facts import MachineFacts
 from gshared_worker.worker_auth import RegistryAnswer, WorkerAuthState
 from gshared_worker.worker_credentials import WorkerCredentials
@@ -50,8 +55,24 @@ FACTS = MachineFacts(
     driver_version="596.36",
 )
 
-#: Stands in for the measurement this build cannot make yet.
-MEASURED = 41.5
+MEASURED_RATE = 1250.0
+
+
+def measured(rate: float = MEASURED_RATE) -> BenchmarkReport:
+    """A GPU that was measured. The real one runs a container; this does not."""
+    return BenchmarkReport(
+        BenchmarkOutcome.MEASURED, f"{rate:,.0f} tokens/sec over 3 runs",
+        BenchmarkResult(
+            tokens_per_sec=rate, processed_tokens=122880, elapsed_seconds=98.3,
+            measured_steps=60, batch_size=4, sequence_length=512,
+            run_rates=(rate, rate, rate)))
+
+
+def unmeasurable(
+    outcome: BenchmarkOutcome = BenchmarkOutcome.GPU_UNAVAILABLE,
+    detail: str = "BENCHMARK_CUDA_UNAVAILABLE: no CUDA device in the container",
+) -> BenchmarkReport:
+    return BenchmarkReport(outcome, detail)
 
 
 class Registry:
@@ -99,7 +120,7 @@ class StageTestCase(unittest.TestCase):
             "workerId": worker_id, "workerTokenProtected": sealed,
         }), encoding="utf-8")
 
-    def run_stage(self, registry, sign_in="user-jwt", benchmark=lambda: MEASURED):
+    def run_stage(self, registry, sign_in="user-jwt", benchmark=measured):
         return authenticate_worker(
             SETTINGS, self.said.append,
             registry=registry,
@@ -161,7 +182,7 @@ class AnExistingMachineTest(StageTestCase):
             code = authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: asked.append(1) or "jwt",
-                describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                describe=lambda: FACTS, benchmark=measured)
 
         self.assertEqual(code, WorkerExitCode.OK)
         self.assertEqual(asked, [])
@@ -246,7 +267,7 @@ class A404IsNotARevocationTest(StageTestCase):
                     SETTINGS, self.said.append,
                     registry=Registry(verifies=RegistryAnswer(state, "404")),
                     ask_to_sign_in=lambda: asked.append(1) or "jwt",
-                    describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                    describe=lambda: FACTS, benchmark=measured)
 
             self.assertEqual(asked, [])
 
@@ -292,7 +313,7 @@ class AServiceThatIsDownTest(StageTestCase):
             self.code = authenticate_worker(
                 SETTINGS, self.said.append, registry=self.registry,
                 ask_to_sign_in=lambda: self.asked.append(1) or "jwt",
-                describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                describe=lambda: FACTS, benchmark=measured)
 
     def test_it_is_a_transport_failure_not_a_credential_one(self):
         # A launcher reads these differently: one is worth retrying.
@@ -346,7 +367,7 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "a-real-user-jwt",
-                describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                describe=lambda: FACTS, benchmark=measured)
 
         self.assertNotIn("a-real-user-jwt", self.logged)
 
@@ -356,7 +377,7 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "jwt",
-                describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                describe=lambda: FACTS, benchmark=measured)
 
         self.assertNotIn("issued-token", self.logged)
 
@@ -366,7 +387,7 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "a-real-user-jwt",
-                describe=lambda: FACTS, benchmark=lambda: MEASURED)
+                describe=lambda: FACTS, benchmark=measured)
 
         self.assertNotIn("a-real-user-jwt", self.output)
         self.assertNotIn("issued-token", self.output)
@@ -422,7 +443,7 @@ class WhatTheMachineIsRegisteredAsTest(StageTestCase):
         self.assertEqual(self.sent["driverVersion"], "596.36")
 
     def test_the_benchmark_is_the_measured_figure(self):
-        self.assertEqual(self.sent["benchmarkTokensPerSec"], MEASURED)
+        self.assertEqual(self.sent["benchmarkTokensPerSec"], MEASURED_RATE)
 
     def test_no_user_id_is_ever_sent(self):
         # The owner is decided by the Backend from the access token. A client
@@ -433,43 +454,92 @@ class WhatTheMachineIsRegisteredAsTest(StageTestCase):
         self.assertIn("RTX 4070", self.output)
 
 
-class WithoutABenchmarkYetTest(StageTestCase):
-    """What happens today: nothing measures what this GPU can do.
+class AGpuThatCannotBeMeasuredTest(StageTestCase):
+    """No measurement, no registration. There is no fallback figure.
 
-    Registering states ``benchmarkTokensPerSec``. Sending a placeholder would
-    put a number the scheduler believes in front of a machine nobody measured,
-    so the stage stops instead.
+    A machine registered with a number nobody measured is a machine the
+    scheduler sends work to on false pretences, so the flow stops instead.
     """
 
-    def test_it_stops_and_says_so(self):
-        code = self.run_stage(Registry(), benchmark=None)
+    def stopped_by(self, outcome, detail="it did not work"):
+        self.said.clear()
+        registry = Registry()
+        code = self.run_stage(
+            registry, benchmark=lambda: unmeasurable(outcome, detail))
+        return code, registry
+
+    def test_it_is_not_a_fault_and_says_what_happened(self):
+        code, _ = self.stopped_by(BenchmarkOutcome.GPU_UNAVAILABLE,
+                                  "BENCHMARK_CUDA_UNAVAILABLE: no CUDA device")
 
         self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
-        self.assertIn("cannot register this machine yet", self.output)
+        self.assertIn("could not measure this GPU", self.output)
+        self.assertIn("no CUDA device", self.output)
 
-    def test_nobody_is_asked_for_a_password_that_could_not_be_used(self):
-        asked = []
+    def test_no_failure_registers_the_machine_or_writes_anything(self):
+        for outcome in BenchmarkOutcome:
+            if outcome is BenchmarkOutcome.MEASURED:
+                continue
+            _, registry = self.stopped_by(outcome)
 
-        authenticate_worker(
-            SETTINGS, self.said.append, registry=Registry(),
-            ask_to_sign_in=lambda: asked.append(1) or "jwt",
-            describe=lambda: FACTS)
+            self.assertEqual(registry.registered, [], outcome)
+            self.assertFalse(self.path.exists(), outcome)
 
-        self.assertEqual(asked, [])
+    def test_no_invented_number_reaches_the_request(self):
+        _, registry = self.stopped_by(BenchmarkOutcome.FAILED)
 
-    def test_nothing_is_registered_and_nothing_is_written(self):
-        registry = Registry()
+        self.assertEqual(registry.described, [])
 
-        self.run_stage(registry, benchmark=None)
+    def test_the_person_is_told_nothing_was_changed(self):
+        self.stopped_by(BenchmarkOutcome.TIMED_OUT)
 
-        self.assertEqual(registry.registered, [])
-        self.assertFalse(self.path.exists())
+        self.assertIn("Nothing was changed", self.output)
 
-    def test_no_placeholder_figure_appears_anywhere(self):
-        self.run_stage(Registry(), benchmark=None)
 
-        self.assertNotIn("benchmark", self.logged.lower().replace(
-            "no benchmark to state", ""))
+class WhenTheGpuIsMeasuredTest(StageTestCase):
+    """Only a machine somebody is actually registering is measured."""
+
+    def test_a_machine_that_is_already_registered_is_not_measured(self):
+        # Its number is recorded against it already. Spending a minute of
+        # somebody GPU on every start to learn that again would be rude.
+        measurements = []
+
+        with patch("gshared_worker.worker_credentials.unprotect_current_user",
+                   lambda sealed: "the-token"):
+            self.enrolled()
+            code = authenticate_worker(
+                SETTINGS, self.said.append, registry=Registry(),
+                ask_to_sign_in=lambda: "jwt", describe=lambda: FACTS,
+                benchmark=lambda: measurements.append(1) or measured())
+
+        self.assertEqual(code, WorkerExitCode.OK)
+        self.assertEqual(measurements, [])
+
+    def test_nobody_who_closed_the_window_has_their_gpu_measured(self):
+        measurements = []
+
+        code = self.run_stage(
+            Registry(), sign_in=None,
+            benchmark=lambda: measurements.append(1) or measured())
+
+        self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
+        self.assertEqual(measurements, [])
+
+    def test_it_happens_after_signing_in_not_before(self):
+        order = []
+
+        self.run_stage(
+            Registry(),
+            benchmark=lambda: order.append("measured") or measured())
+        # The sign-in line is printed before the measuring line.
+        self.assertLess(self.output.index("Sign in to attach"),
+                        self.output.index("Measuring what this GPU can do"))
+        self.assertEqual(order, ["measured"])
+
+    def test_the_measurement_is_shown_to_the_person(self):
+        self.run_stage(Registry())
+
+        self.assertIn("tokens/sec", self.output)
 
 
 class AMachineThatCannotBeDescribedTest(StageTestCase):
@@ -481,7 +551,7 @@ class AMachineThatCannotBeDescribedTest(StageTestCase):
         code = authenticate_worker(
             SETTINGS, self.said.append, registry=Registry(),
             ask_to_sign_in=lambda: asked.append(1) or "jwt",
-            describe=lambda: None, benchmark=lambda: MEASURED)
+            describe=lambda: None, benchmark=measured)
 
         self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
         self.assertEqual(asked, [])
