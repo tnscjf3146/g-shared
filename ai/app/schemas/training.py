@@ -14,7 +14,12 @@ from pydantic import Field
 from app.schemas.base import SchedulerSchema
 
 PositiveInt = Annotated[int, Field(gt=0)]
-PositiveFloat = Annotated[float, Field(gt=0)]
+
+#: ``gt=0`` 만으로는 ``+Infinity`` 가 통과한다 -- ``inf > 0`` 은 참이기 때문이다.
+#: NaN과 ``-Infinity`` 는 비교에서 걸리지만 ``+Infinity`` 는 그대로 학습 설정이
+#: 되어, 가중치를 무한히 움직이겠다는 설정이 검증을 통과한 값으로 남는다.
+#: ``allow_inf_nan=False`` 로 세 경우를 한 번에 막는다.
+PositiveFloat = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class TrainingMode(str, Enum):
