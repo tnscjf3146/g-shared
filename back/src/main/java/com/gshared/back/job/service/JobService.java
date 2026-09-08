@@ -16,10 +16,14 @@ import com.gshared.back.user.domain.User;
 import com.gshared.back.user.exception.UserErrorCode;
 import com.gshared.back.user.repository.UserRepository;
 import com.gshared.back.worker.repository.WorkerRepository;
+import com.gshared.back.worker.websocket.WorkerMessageSender;
+import com.gshared.back.worker.websocket.protocol.WorkerMessage;
+import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +33,8 @@ public class JobService {
     private final JobRepository jobRepository;
     private final UserRepository userRepository;
     private final WorkerRepository workerRepository;
+    private final WorkerMessageSender messageSender;
+    private final ObjectMapper objectMapper;
 
     /**
      * 견적 승인 후 Job(주문서) 생성. 생성 직후 상태는 CREATED(예치 확인 대기).
@@ -78,13 +84,22 @@ public class JobService {
     @Transactional
     public void cancelJob(Long ownerId, Long jobId) {
         // 존재/소유 확인 (없거나 남의 것 → 404)
-        jobRepository.findByIdAndOwnerId(jobId, ownerId)
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
         // 원자적 취소 — 0행이면 그 사이 상태가 바뀐 것 (→ 409)
         int updated = jobRepository.cancelIfCancellable(jobId, ownerId, java.time.LocalDateTime.now());
         if (updated == 0) {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+
+        // 이미 워커에게 배정된 상태였다면 → "취소됐어" 통지 (JOB_CANCEL)
+        if (job.getAssignedWorkerId() != null) {
+            messageSender.send(job.getAssignedWorkerId(),
+                    WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
+                            String.valueOf(jobId),
+                            java.time.OffsetDateTime.now().toString(),
+                            objectMapper.createObjectNode()));
         }
         // TODO: 예치금 환불 트리거(블록체인 연동) — BC 담당과 협의 후
     }
