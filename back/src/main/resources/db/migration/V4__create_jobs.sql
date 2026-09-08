@@ -21,7 +21,7 @@ CREATE TABLE jobs (
     assigned_worker_id    VARCHAR(64)  NULL,               -- 배정된 Worker (workers.worker_id)
     result_hash           VARCHAR(255) NULL,
     result_url            VARCHAR(500) NULL,
-    fail_reason           VARCHAR(255) NULL,               -- 실패 시 에러코드+메시지 (GPU_OOM 등)
+    fail_reason           TEXT         NULL,               -- 실패 시 에러코드+메시지 (긴 에러 대비 TEXT)
 
     -- 진행률 스냅샷 (JOB_PROGRESS 수신 시 갱신)
     progress_percent      INT          NULL,

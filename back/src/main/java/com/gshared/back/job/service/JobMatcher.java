@@ -31,6 +31,7 @@ import java.util.List;
 public class JobMatcher {
 
     private final JobRepository jobRepository;
+    private final JobService jobService;
     private final WorkerRepository workerRepository;
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
@@ -54,8 +55,8 @@ public class JobMatcher {
             Job job = waiting.get(i);
             Worker worker = available.get(i);
             try {
-                // "아직 FUNDED 일 때만" 배정 — 그 사이 취소됐으면 0행으로 건너뜀 (취소 되살림 방지)
-                if (jobRepository.assignIfFunded(job.getId(), worker.getId()) == 0) {
+                // "아직 FUNDED 일 때만" 배정(서비스 트랜잭션) — 그 사이 취소됐으면 건너뜀 (취소 되살림 방지)
+                if (!jobService.assignJob(job.getId(), worker.getId())) {
                     log.info("[MATCH] jobId={} 상태 변경됨(취소 등) — 건너뜀", job.getId());
                     continue;
                 }

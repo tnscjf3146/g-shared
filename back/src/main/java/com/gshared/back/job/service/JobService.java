@@ -107,6 +107,15 @@ public class JobService {
     }
 
     /**
+     * 매칭: "아직 FUNDED 일 때만" Worker 배정(ASSIGNED). 그 사이 취소됐으면 0행 → false.
+     * JobMatcher 가 Job 단위로 호출 — 이 트랜잭션이 커밋된 뒤 JOB_ASSIGN 을 전송한다.
+     */
+    @Transactional
+    public boolean assignJob(Long jobId, String workerId) {
+        return jobRepository.assignIfFunded(jobId, workerId) > 0;
+    }
+
+    /**
      * JOB_ACCEPTED 수신: Job ASSIGNED→RUNNING + Worker RUNNING 전이.
      * 조건부 UPDATE 라 엉뚱한 워커의 메시지·중복 메시지는 0행으로 무시된다.
      * @return 정상 전이 여부

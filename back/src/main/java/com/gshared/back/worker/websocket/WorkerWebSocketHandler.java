@@ -228,6 +228,9 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
         String errorCode = textOrNull(msg, "errorCode");
         String message = textOrNull(msg, "message");
         String failReason = (errorCode != null ? errorCode : "UNKNOWN") + (message != null ? ": " + message : "");
+        if (failReason.length() > 2000) {
+            failReason = failReason.substring(0, 2000);   // 폭주 메시지 상한 (DB는 TEXT지만 무한 저장 방지)
+        }
 
         boolean failed = jobService.failJob(workerId, jobId, failReason);
         if (failed) {

@@ -107,9 +107,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
      * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.
-     * 매처는 트랜잭션 없이 Job 단위로 호출 → 여기 @Transactional 로 자체 커밋(전송은 커밋 후).
+     * 트랜잭션 경계는 서비스 계층(JobService.assignJob)에서 관리.
      */
-    @org.springframework.transaction.annotation.Transactional
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
