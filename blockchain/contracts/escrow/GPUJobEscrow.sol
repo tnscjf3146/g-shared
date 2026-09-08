@@ -5,18 +5,28 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title GPU 작업 에스크로 컨트랙트 v2
 /// @notice GPU 작업에 대한 대금 예치 및 정산을 온체인에서 안전하게 처리합니다.
+///
+/// @dev !!! 이 버전은 실체인에 배포하지 않습니다 !!!
+/// 예치금이 빠져나가는 경로가 approveResult 하나뿐입니다. 아래 세 경우에 대금이 영구히 잠깁니다.
+///   1. FUNDED    - 아무도 수락하지 않는다
+///   2. ASSIGNED  - 공급자가 결과를 제출하지 않는다
+///   3. SUBMITTED - 의뢰자가 승인하지 않는다
+/// cancelJob 과 settleTimeout 을 추가한 뒤에 배포합니다.
+/// 범위 축소 근거는 blockchain-skeleton.md 5절이며, 타임아웃 기준 시각과 호출 권한,
+/// 정산 방향(공급자 지급인지 의뢰자 환불인지)이 확정되어야 추가할 수 있습니다.
+///
 /// @dev 온체인에는 정산 정보만 보관하며, workloadId, imageDigest, datasetHash 등 작업 상세 정보는 오프체인(백엔드 DB)에 저장됩니다.
 /// 또한 재진입(Reentrancy) 공격을 방어하기 위해 CEI(Checks-Effects-Interactions) 패턴을 준수하여 상태 변경 후 토큰을 전송합니다.
 contract GPUJobEscrow {
     /// @notice 에스크로 작업의 생명주기를 나타내는 상태 값
-    enum JobState { NONE, CREATED, FUNDED, ASSIGNED, SUBMITTED, COMPLETED, CANCELLED }
+    enum JobState { NONE, CREATED, FUNDED, ASSIGNED, SUBMITTED, COMPLETED }
 
     /// @notice 단일 작업(Job)에 대한 구조체
     /// @dev 변수 배치를 통해 단일 스토리지 슬롯(32바이트)에 맞춤: client(20) + state(1) + deadline(8) = 29 bytes.
     struct Job {
         address  client;       // 의뢰자 지갑 주소
         JobState state;        // 현재 작업 상태
-        uint64   deadline;     // 상태 변경 시마다 갱신되는 제한 시간(타임스탬프)
+        uint64   deadline;     // 상태 변경 시마다 갱신되는 제한 시간(타임스탬프). 기록만 하고 아직 읽지 않는다
         address  provider;     // 작업을 수락한 제공자 (수락 전에는 address(0))
         uint256  price;        // 작업 대금 (결제 토큰 최소 단위)
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
@@ -45,16 +55,12 @@ contract GPUJobEscrow {
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 price);
     /// @notice 작업 대금이 에스크로에 예치되었을 때 발생
     event JobFunded(uint256 indexed jobId, uint256 price);
-    /// @notice 작업이 취소되어 환불되었을 때 발생
-    event JobCancelled(uint256 indexed jobId, address indexed client, uint256 refund);
     /// @notice 제공자가 작업을 수락했을 때 발생
     event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
     /// @notice 제공자가 작업 결과를 제출했을 때 발생
     event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash, uint64 deadline);
     /// @notice 작업이 완료되고 대금이 지급되었을 때 발생
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
-    /// @notice 제한 시간 초과로 작업 상태가 강제로 정리되었을 때 발생
-    event JobTimedOut(uint256 indexed jobId, JobState fromState);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
@@ -107,31 +113,6 @@ contract GPUJobEscrow {
         require(ok, "Escrow: transferFrom failed");
 
         emit JobFunded(jobId, job.price);
-    }
-
-    /// @notice 아직 수락되지 않은 작업을 취소합니다.
-    /// @dev 대금이 예치(FUNDED)된 상태라면 의뢰자에게 환불됩니다.
-    /// @param jobId 취소할 작업 ID
-    function cancelJob(uint256 jobId) external {
-        Job storage job = jobs[jobId];
-
-        require(job.client == msg.sender, "Escrow: not the client");
-        require(
-            job.state == JobState.CREATED || job.state == JobState.FUNDED,
-            "Escrow: not cancellable"
-        );
-
-        bool wasFunded = job.state == JobState.FUNDED;
-        uint256 refund = wasFunded ? job.price : 0;
-
-        job.state = JobState.CANCELLED;
-
-        if (wasFunded) {
-            bool ok = paymentToken.transfer(job.client, refund);
-            require(ok, "Escrow: refund failed");
-        }
-
-        emit JobCancelled(jobId, job.client, refund);
     }
 
     /// @notice 제출된 결과물을 승인하고 대금을 제공자에게 지급합니다.
@@ -188,39 +169,4 @@ contract GPUJobEscrow {
         emit ResultSubmitted(jobId, msg.sender, resultHash, job.deadline);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // 공용(Public/Anyone) 기능
-    // ─────────────────────────────────────────────────────────────
-
-    /// @notice 지정된 제한 시간이 지난 작업을 정리합니다 (누구나 호출 가능).
-    /// @dev ASSIGNED(제출 시한 초과) -> 의뢰자에게 환불 / SUBMITTED(승인 시한 초과) -> 공급자에게 강제 지급
-    /// @param jobId 정리할 작업 ID
-    function settleTimeout(uint256 jobId) external {
-        Job storage job = jobs[jobId];
-        JobState fromState = job.state;
-
-        require(
-            fromState == JobState.ASSIGNED || fromState == JobState.SUBMITTED,
-            "Escrow: not settleable"
-        );
-        require(block.timestamp >= job.deadline, "Escrow: deadline not reached");
-
-        if (fromState == JobState.ASSIGNED) {
-            job.state = JobState.CANCELLED;
-
-            bool ok = paymentToken.transfer(job.client, job.price);
-            require(ok, "Escrow: refund failed");
-
-            emit JobCancelled(jobId, job.client, job.price);
-        } else {
-            job.state = JobState.COMPLETED;
-
-            bool ok = paymentToken.transfer(job.provider, job.price);
-            require(ok, "Escrow: payout failed");
-
-            emit JobCompleted(jobId, job.provider, job.price);
-        }
-
-        emit JobTimedOut(jobId, fromState);
-    }
 }
