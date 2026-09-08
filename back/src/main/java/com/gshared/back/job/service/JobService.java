@@ -111,6 +111,22 @@ public class JobService {
         return jobRepository.updateProgressIfRunning(jobId, workerId, percent, epoch, totalEpochs) > 0;
     }
 
+    /**
+     * JOB_RESULT 수신: Job COMPLETED + 결과 기록, Worker 는 다시 대기(ONLINE).
+     * TODO: 정산(블록체인 지급) 트리거 — BC 담당과 협의 후
+     */
+    @Transactional
+    public boolean completeJob(String workerId, Long jobId,
+                               String resultHash, String resultUrl, Integer actualRuntimeSec) {
+        int updated = jobRepository.completeIfRunning(jobId, workerId,
+                resultHash, resultUrl, actualRuntimeSec, java.time.LocalDateTime.now());
+        if (updated == 0) {
+            return false;
+        }
+        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        return true;
+    }
+
     /** JSON 객체 → 저장용 문자열. null(AUTO)이면 그대로 null. */
     private String toJsonString(JsonNode node) {
         return node == null || node.isNull() ? null : node.toString();

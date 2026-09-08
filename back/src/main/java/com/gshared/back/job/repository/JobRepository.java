@@ -72,4 +72,21 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int updateProgressIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
                                 @Param("percent") Integer percent, @Param("epoch") Integer epoch,
                                 @Param("totalEpochs") Integer totalEpochs);
+
+    /** JOB_RESULT: "이 워커의 RUNNING Job"일 때만 COMPLETED 전이 + 결과 기록. */
+    @Modifying
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.COMPLETED,
+                   j.resultHash = :resultHash,
+                   j.resultUrl = :resultUrl,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
+            """)
+    int completeIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                          @Param("resultHash") String resultHash, @Param("resultUrl") String resultUrl,
+                          @Param("actualRuntimeSec") Integer actualRuntimeSec, @Param("now") LocalDateTime now);
 }

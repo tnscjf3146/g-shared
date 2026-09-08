@@ -94,4 +94,10 @@ public class Worker extends BaseTimeEntity {
         this.status = WorkerStatus.RUNNING;
         this.currentJobId = jobId;
     }
+
+    /** JOB_RESULT/FAILED: 작업 종료 → 다시 대기(ONLINE) + 현재 작업 비움. */
+    public void finishJob() {
+        this.status = WorkerStatus.ONLINE;
+        this.currentJobId = null;
+    }
 }
