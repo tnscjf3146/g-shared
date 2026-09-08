@@ -118,4 +118,19 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                AND j.status = com.gshared.back.job.domain.JobStatus.FUNDED
             """)
     int assignIfFunded(@Param("jobId") Long jobId, @Param("workerId") String workerId);
+
+    /**
+     * 배정 되돌리기: JOB_ASSIGN 전송 실패(죽은 워커 등) 시 FUNDED 로 복귀 → 다음 순찰에 재매칭.
+     * "그 워커에게 ASSIGNED 인 상태일 때만" — 이미 JOB_ACCEPTED 로 RUNNING 이 됐으면 건드리지 않는다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.FUNDED,
+                   j.assignedWorkerId = null
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
+            """)
+    int unassignIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId);
 }

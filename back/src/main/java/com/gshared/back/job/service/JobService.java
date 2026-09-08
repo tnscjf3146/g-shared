@@ -116,6 +116,15 @@ public class JobService {
     }
 
     /**
+     * 배정 되돌리기(JOB_ASSIGN 전송 실패 시): ASSIGNED → FUNDED 복귀, 다음 순찰에 재매칭.
+     * 이미 RUNNING(워커가 수락)이면 0행 — 되돌리지 않는다.
+     */
+    @Transactional
+    public boolean unassignJob(Long jobId, String workerId) {
+        return jobRepository.unassignIfAssigned(jobId, workerId) > 0;
+    }
+
+    /**
      * JOB_ACCEPTED 수신: Job ASSIGNED→RUNNING + Worker RUNNING 전이.
      * 조건부 UPDATE 라 엉뚱한 워커의 메시지·중복 메시지는 0행으로 무시된다.
      * @return 정상 전이 여부
