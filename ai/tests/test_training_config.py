@@ -4,6 +4,8 @@
 없다는 것도 함께 고정한다 -- 상한은 이 계층이 아니라 실행 가능성 검증의 몫이다.
 """
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
@@ -105,6 +107,22 @@ class TestLearningRate:
     def test_the_very_small_values_this_field_normally_holds_are_fine(self):
         # 1e-5 규모가 이 필드의 보통 값이다. 하한을 gt=0 말고 더 두면 정상값이 막힌다.
         assert config(learningRate=1e-6).learning_rate == 1e-6
+
+    def test_an_ordinary_rate_is_accepted(self):
+        assert config(learningRate=0.0002).learning_rate == 0.0002
+
+    def test_infinity_is_not_a_rate(self):
+        # gt=0 만으로는 통과한다 -- inf > 0 은 참이다. 명시적으로 막혀 있어야 한다.
+        assert errors_for(
+            {**VALID, "learningRate": math.inf})[0]["loc"] == ("learningRate",)
+
+    def test_negative_infinity_is_not_a_rate(self):
+        assert errors_for(
+            {**VALID, "learningRate": -math.inf})[0]["loc"] == ("learningRate",)
+
+    def test_nan_is_not_a_rate(self):
+        assert errors_for(
+            {**VALID, "learningRate": math.nan})[0]["loc"] == ("learningRate",)
 
 
 class TestMaxLength:
