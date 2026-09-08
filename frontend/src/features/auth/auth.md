@@ -44,7 +44,7 @@ src/
   features/auth/
     auth.md                         이 문서
     api.ts                          login / reissue(단일 비행) / logout / authFetch(Bearer + 401 재발급 1회 → 실패 시 /login?next=&reason=expired)  ✅
-    schema.ts                       emailSchema · passwordSchema(6~20, 영문+숫자) · nicknameSchema(2~15) · signupSchema(확인 일치 refine) · loginSchema · tokenResponseSchema  ✅
+    schema.ts                       zod/mini(함수형 체크, 트리셰이킹 — zod 본체 370KB 를 전 페이지에서 제거) · emailSchema · passwordSchema(6~20, 영문+숫자) · nicknameSchema(2~15) · signupSchema(확인 일치 refine) · loginSchema · tokenResponseSchema  ✅
     types.ts                        z.infer 타입 + AuthState                                                                                   ✅
     errors.ts                       코드 → 문구 표(§6) + RETRYABLE_401                                                                          ✅
     store.ts                        authStore(메모리) + useAuth() — useSyncExternalStore, zustand 없음                                          ✅

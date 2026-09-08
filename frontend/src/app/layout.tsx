@@ -1,16 +1,11 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import { Providers } from "./providers";
 import "./globals.css";
 
-// 서체는 Pretendard 하나만 쓴다(본문·제목·로고·숫자). globals.css 의 --font-sans/-heading/-logo/-mono 가 이 변수를 읽는다
-// pretendard 패키지의 가변 woff2 를 next/font/local 로 셀프호스팅 → 외부 요청 없음, 100~900 전 굵기
-const pretendard = localFont({
-  src: "../../node_modules/pretendard/dist/web/variable/woff2/PretendardVariable.woff2",
-  variable: "--font-pretendard",
-  weight: "45 920",
-  display: "swap",
-});
+// 서체는 Pretendard 하나만 쓴다(본문·제목·로고·숫자). globals.css 의 --font-sans/-heading/-logo/-mono 가 'Pretendard Variable' 을 읽는다.
+// pretendard 패키지의 동적 서브셋 CSS: 가변 폰트를 유니코드 구간별 92조각으로 나눠 unicode-range 로 선언 → 브라우저가 화면에 쓰인 글자 구간만 내려받는다
+// (단일 woff2 는 2MB, 서브셋은 한글 랜딩 기준 수백 KB). 파일은 Next 가 /_next/static/media 로 복사해 셀프호스팅
 
 export const metadata: Metadata = {
   title: "G-shared — 유휴 GPU 공유 플랫폼",
@@ -21,7 +16,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ko"
-      className={`${pretendard.variable} h-full antialiased`}
+      className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
         <Providers>{children}</Providers>

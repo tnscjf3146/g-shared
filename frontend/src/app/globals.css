@@ -78,8 +78,8 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  /* 폰트 — Pretendard 단일 서체(app/layout.tsx 에서 next/font/local 로 주입). 역할별 토큰은 유지해 나중에 서체를 바꿀 때 한 곳만 고친다 */
-  --font-sans: var(--font-pretendard, "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif);
+  /* 폰트 — Pretendard 단일 서체(app/layout.tsx 에서 동적 서브셋 CSS import). 역할별 토큰은 유지해 나중에 서체를 바꿀 때 한 곳만 고친다 */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   --font-heading: var(--font-sans);
   --font-mono: var(--font-sans); /* 숫자 정렬은 tabular-nums 로 (Pretendard 는 tnum 지원) */
   --font-logo: var(--font-sans); /* 로고 워드마크 */

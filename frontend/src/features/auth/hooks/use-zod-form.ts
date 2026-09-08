@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import type { z } from 'zod'
+import type * as z from 'zod/mini'
 
 // 로그인/회원가입 폼 공통: 값·필드 오류·폼 오류·제출 중 상태 + zod 검사.
 // 제출 시 전체 검사 → 필드별 첫 메시지. 한 번 오류 난 필드는 입력 중 재검사(AGENTS.md 검증 타이밍).
-export function useZodForm<S extends z.ZodType<Record<string, unknown>>>(schema: S, initial: z.input<S>) {
+export function useZodForm<S extends z.ZodMiniType<Record<string, unknown>>>(schema: S, initial: z.input<S>) {
   type Values = z.input<S>
   type Errors = Partial<Record<keyof Values & string, string>>
   const [values, setValues] = useState<Values>(initial)
