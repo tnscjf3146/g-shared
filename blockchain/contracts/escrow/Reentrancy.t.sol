@@ -19,16 +19,16 @@ contract ReentrancyTest is Test {
     address internal victim   = address(0x71C71);
     address internal honestC  = address(0xC11E27);
 
-    uint64  internal constant ACCEPT_DEADLINE  = 2 hours;
-    uint64  internal constant EXEC_DEADLINE    = 1 hours;
-    uint64  internal constant APPROVE_DEADLINE = 30 minutes;
+    uint64  internal constant ACCEPT_TIMEOUT  = 2 hours;
+    uint64  internal constant EXECUTION_TIMEOUT    = 1 hours;
+    uint64  internal constant APPROVAL_TIMEOUT = 30 minutes;
     uint256 internal constant PRICE            = 10 ether;
     uint256 internal constant SEED             = 1_000 ether;
     bytes32 internal constant RESULT_HASH      = keccak256("result");
 
     function setUp() public {
         token  = new ReentrantToken(1_000_000 ether);
-        escrow = new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
+        escrow = new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
 
         atkClient   = new ReentrantClient(address(escrow), address(token));
         atkProvider = new ReentrantProvider(address(escrow));
@@ -147,5 +147,26 @@ contract ReentrancyTest is Test {
 
         assertEq(token.balanceOf(address(atkProvider)), PRICE);
         assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    // ── 교차 함수 재진입 ─────────────────────────────────────────
+
+    /// @dev fundJob 이 transferFrom 을 도는 동안 cancelJob 을 부른다.
+    ///      그 시점에 상태는 이미 FUNDED 이고 호출자도 job.client 본인이라
+    ///      CEI 검사 둘을 모두 통과한다. nonReentrant 가 없으면 성공한다.
+    function test_fundJob_crossFunctionReentrancyIsBlocked() public {
+        uint256 before = token.balanceOf(address(atkClient));
+
+        uint256 jobId = atkClient.attackFundThenCancel(PRICE);
+
+        assertGt(atkClient.crossCallbackCount(), 0, "sender callback never fired");
+        assertGt(atkClient.crossReenterCount(), 0, "no cross-function reentry attempted");
+        assertTrue(atkClient.crossReenterFailed(), "cross-function reentrancy was NOT blocked");
+
+        // 예치는 정상적으로 끝나고 취소되지 않았다
+        (, GPUJobEscrow.JobState st, , , , ) = escrow.jobs(jobId);
+        assertEq(uint8(st), uint8(GPUJobEscrow.JobState.FUNDED));
+        assertEq(token.balanceOf(address(escrow)), PRICE);
+        assertEq(token.balanceOf(address(atkClient)), before - PRICE);
     }
 }

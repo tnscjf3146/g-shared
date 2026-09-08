@@ -47,6 +47,41 @@ contract ReentrantClient {
         armed = false;
     }
 
+    // ── 교차 함수 재진입 ──────────────────────────────────────
+    // fundJob 이 transferFrom 을 도는 동안 cancelJob 을 부른다.
+    // CEI 만으로는 막히지 않는다. fundJob 이 상태를 이미 FUNDED 로 바꿔 놓았고
+    // 호출자도 job.client 본인이라 두 검사를 모두 통과하기 때문이다.
+    // nonReentrant 가 여기서 일한다.
+
+    bool    public crossArmed;
+    uint256 public crossCallbackCount;
+    uint256 public crossReenterCount;
+    bool    public crossReenterFailed;
+
+    function attackFundThenCancel(uint256 price) external returns (uint256) {
+        jobId = escrow.createJob(price);
+        token.approve(address(escrow), price);
+
+        crossArmed = true;
+        escrow.fundJob(jobId);
+        crossArmed = false;
+
+        return jobId;
+    }
+
+    /// @notice 토큰을 보내는 순간 호출된다. 교차 함수 재진입 통로다.
+    function onTokenSent(address, uint256) external {
+        if (!crossArmed) return;
+        crossCallbackCount++;
+
+        crossReenterCount++;
+        try escrow.cancelJob(jobId) {
+            // nonReentrant 가 없다면 여기 도달한다. 예치와 동시에 취소된다.
+        } catch {
+            crossReenterFailed = true;
+        }
+    }
+
     /// @notice 토큰을 받는 순간 호출된다. 재진입 통로다.
     function onTokenReceived(address, uint256) external {
         if (!armed) return;

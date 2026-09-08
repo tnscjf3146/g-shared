@@ -17,9 +17,9 @@ contract GPUJobEscrowTest is Test {
     address internal stranger = address(0x57A9E7);
 
     uint256 internal constant SSAFY_CHAIN_ID = 31221;
-    uint64  internal constant ACCEPT_DEADLINE  = 2 hours;
-    uint64  internal constant EXEC_DEADLINE    = 1 hours;
-    uint64  internal constant APPROVE_DEADLINE = 30 minutes;
+    uint64  internal constant ACCEPT_TIMEOUT  = 2 hours;
+    uint64  internal constant EXECUTION_TIMEOUT    = 1 hours;
+    uint64  internal constant APPROVAL_TIMEOUT = 30 minutes;
     uint256 internal constant PRICE          = 10 ether; // 10 GSC
     bytes32 internal constant RESULT_HASH    = keccak256("result");
 
@@ -33,7 +33,7 @@ contract GPUJobEscrowTest is Test {
 
     function setUp() public {
         token  = new GCoin(client);
-        escrow = new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
+        escrow = new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
     }
 
     // ── 보조 함수 ────────────────────────────────────────────────
@@ -77,25 +77,25 @@ contract GPUJobEscrowTest is Test {
 
     function test_constructor_rejectsZeroToken() public {
         vm.expectRevert(bytes("Escrow: token is zero"));
-        new GPUJobEscrow(address(0), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
+        new GPUJobEscrow(address(0), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
     }
 
     function test_constructor_storesPaymentToken() public view {
         assertEq(address(escrow.paymentToken()), address(token));
-        assertEq(escrow.acceptDeadline(), ACCEPT_DEADLINE);
-        assertEq(escrow.execDeadline(), EXEC_DEADLINE);
-        assertEq(escrow.approveDeadline(), APPROVE_DEADLINE);
+        assertEq(escrow.acceptTimeout(), ACCEPT_TIMEOUT);
+        assertEq(escrow.executionTimeout(), EXECUTION_TIMEOUT);
+        assertEq(escrow.approvalTimeout(), APPROVAL_TIMEOUT);
     }
 
     function test_constructor_rejectsZeroDeadline() public {
         vm.expectRevert(bytes("Escrow: deadline is zero"));
-        new GPUJobEscrow(address(token), 0, EXEC_DEADLINE, APPROVE_DEADLINE);
+        new GPUJobEscrow(address(token), 0, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
 
         vm.expectRevert(bytes("Escrow: deadline is zero"));
-        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, 0, APPROVE_DEADLINE);
+        new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, 0, APPROVAL_TIMEOUT);
 
         vm.expectRevert(bytes("Escrow: deadline is zero"));
-        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, 0);
+        new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, 0);
     }
 
     /// @dev 취소·환불·타임아웃 구현이 끝나면 이 테스트와 컨트랙트의 가드를 함께 지운다.
@@ -103,13 +103,13 @@ contract GPUJobEscrowTest is Test {
         vm.chainId(SSAFY_CHAIN_ID);
 
         vm.expectRevert(GPUJobEscrow.SsafyDeploymentBlocked.selector);
-        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
+        new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
     }
 
     function test_constructor_allowsOtherChains() public {
         vm.chainId(31337);
 
-        GPUJobEscrow local = new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
+        GPUJobEscrow local = new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT, APPROVAL_TIMEOUT);
         assertEq(address(local.paymentToken()), address(token));
     }
 
@@ -186,7 +186,7 @@ contract GPUJobEscrowTest is Test {
         token.approve(address(escrow), PRICE);
 
         vm.expectEmit(true, false, false, true);
-        emit JobFunded(jobId, PRICE, uint64(block.timestamp) + ACCEPT_DEADLINE);
+        emit JobFunded(jobId, PRICE, uint64(block.timestamp) + ACCEPT_TIMEOUT);
 
         vm.prank(client);
         escrow.fundJob(jobId);
@@ -203,7 +203,7 @@ contract GPUJobEscrowTest is Test {
         (, GPUJobEscrow.JobState s, uint64 dl, address p, , ) = escrow.jobs(jobId);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.ASSIGNED));
         assertEq(p, provider);
-        assertEq(dl, uint64(block.timestamp) + EXEC_DEADLINE);
+        assertEq(dl, uint64(block.timestamp) + EXECUTION_TIMEOUT);
     }
 
     function test_acceptJob_rejectsBeforeFunding() public {
@@ -234,7 +234,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _funded();
 
         vm.expectEmit(true, true, false, true);
-        emit JobAccepted(jobId, provider, uint64(block.timestamp) + EXEC_DEADLINE);
+        emit JobAccepted(jobId, provider, uint64(block.timestamp) + EXECUTION_TIMEOUT);
 
         vm.prank(provider);
         escrow.acceptJob(jobId);
@@ -251,7 +251,7 @@ contract GPUJobEscrowTest is Test {
         (, GPUJobEscrow.JobState s, uint64 dl, , , bytes32 rh) = escrow.jobs(jobId);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.SUBMITTED));
         assertEq(rh, RESULT_HASH);
-        assertEq(dl, uint64(block.timestamp) + APPROVE_DEADLINE);
+        assertEq(dl, uint64(block.timestamp) + APPROVAL_TIMEOUT);
     }
 
     function test_submitResult_rejectsNonProvider() public {
@@ -282,7 +282,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _assigned();
 
         vm.expectEmit(true, true, false, true);
-        emit ResultSubmitted(jobId, provider, RESULT_HASH, uint64(block.timestamp) + APPROVE_DEADLINE);
+        emit ResultSubmitted(jobId, provider, RESULT_HASH, uint64(block.timestamp) + APPROVAL_TIMEOUT);
 
         vm.prank(provider);
         escrow.submitResult(jobId, RESULT_HASH);
