@@ -17,18 +17,23 @@ contract GPUJobEscrowTest is Test {
     address internal stranger = address(0x57A9E7);
 
     uint256 internal constant SSAFY_CHAIN_ID = 31221;
+    uint64  internal constant ACCEPT_DEADLINE  = 2 hours;
+    uint64  internal constant EXEC_DEADLINE    = 1 hours;
+    uint64  internal constant APPROVE_DEADLINE = 30 minutes;
     uint256 internal constant PRICE          = 10 ether; // 10 GSC
     bytes32 internal constant RESULT_HASH    = keccak256("result");
 
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 price);
-    event JobFunded(uint256 indexed jobId, uint256 price);
-    event JobAccepted(uint256 indexed jobId, address indexed provider);
-    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash);
+    event JobFunded(uint256 indexed jobId, uint256 price, uint64 deadline);
+    event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
+    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash, uint64 deadline);
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
+    event JobCancelled(uint256 indexed jobId, address indexed client, uint256 refund);
+    event JobTimedOut(uint256 indexed jobId, GPUJobEscrow.JobState fromState);
 
     function setUp() public {
         token  = new GCoin(client);
-        escrow = new GPUJobEscrow(address(token));
+        escrow = new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
     }
 
     // ── 보조 함수 ────────────────────────────────────────────────
@@ -59,19 +64,38 @@ contract GPUJobEscrowTest is Test {
     }
 
     function _state(uint256 jobId) internal view returns (GPUJobEscrow.JobState) {
-        (, GPUJobEscrow.JobState s, , , ) = escrow.jobs(jobId);
+        (, GPUJobEscrow.JobState s, , , , ) = escrow.jobs(jobId);
         return s;
+    }
+
+    function _deadline(uint256 jobId) internal view returns (uint64) {
+        (, , uint64 dl, , , ) = escrow.jobs(jobId);
+        return dl;
     }
 
     // ── 생성자 ───────────────────────────────────────────────────
 
     function test_constructor_rejectsZeroToken() public {
         vm.expectRevert(bytes("Escrow: token is zero"));
-        new GPUJobEscrow(address(0));
+        new GPUJobEscrow(address(0), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
     }
 
     function test_constructor_storesPaymentToken() public view {
         assertEq(address(escrow.paymentToken()), address(token));
+        assertEq(escrow.acceptDeadline(), ACCEPT_DEADLINE);
+        assertEq(escrow.execDeadline(), EXEC_DEADLINE);
+        assertEq(escrow.approveDeadline(), APPROVE_DEADLINE);
+    }
+
+    function test_constructor_rejectsZeroDeadline() public {
+        vm.expectRevert(bytes("Escrow: deadline is zero"));
+        new GPUJobEscrow(address(token), 0, EXEC_DEADLINE, APPROVE_DEADLINE);
+
+        vm.expectRevert(bytes("Escrow: deadline is zero"));
+        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, 0, APPROVE_DEADLINE);
+
+        vm.expectRevert(bytes("Escrow: deadline is zero"));
+        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, 0);
     }
 
     /// @dev 취소·환불·타임아웃 구현이 끝나면 이 테스트와 컨트랙트의 가드를 함께 지운다.
@@ -79,13 +103,13 @@ contract GPUJobEscrowTest is Test {
         vm.chainId(SSAFY_CHAIN_ID);
 
         vm.expectRevert(GPUJobEscrow.SsafyDeploymentBlocked.selector);
-        new GPUJobEscrow(address(token));
+        new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
     }
 
     function test_constructor_allowsOtherChains() public {
         vm.chainId(31337);
 
-        GPUJobEscrow local = new GPUJobEscrow(address(token));
+        GPUJobEscrow local = new GPUJobEscrow(address(token), ACCEPT_DEADLINE, EXEC_DEADLINE, APPROVE_DEADLINE);
         assertEq(address(local.paymentToken()), address(token));
     }
 
@@ -94,10 +118,11 @@ contract GPUJobEscrowTest is Test {
     function test_createJob_movesToCreated() public {
         uint256 jobId = _created();
 
-        (address c, GPUJobEscrow.JobState s, address p, uint256 price, bytes32 rh) = escrow.jobs(jobId);
+        (address c, GPUJobEscrow.JobState s, uint64 dl, address p, uint256 price, bytes32 rh) = escrow.jobs(jobId);
         assertEq(jobId, 1);
         assertEq(c, client);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.CREATED));
+        assertEq(dl, 0);
         assertEq(p, address(0));
         assertEq(price, PRICE);
         assertEq(rh, bytes32(0));
@@ -161,7 +186,7 @@ contract GPUJobEscrowTest is Test {
         token.approve(address(escrow), PRICE);
 
         vm.expectEmit(true, false, false, true);
-        emit JobFunded(jobId, PRICE);
+        emit JobFunded(jobId, PRICE, uint64(block.timestamp) + ACCEPT_DEADLINE);
 
         vm.prank(client);
         escrow.fundJob(jobId);
@@ -175,9 +200,10 @@ contract GPUJobEscrowTest is Test {
         vm.prank(provider);
         escrow.acceptJob(jobId);
 
-        (, GPUJobEscrow.JobState s, address p, , ) = escrow.jobs(jobId);
+        (, GPUJobEscrow.JobState s, uint64 dl, address p, , ) = escrow.jobs(jobId);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.ASSIGNED));
         assertEq(p, provider);
+        assertEq(dl, uint64(block.timestamp) + EXEC_DEADLINE);
     }
 
     function test_acceptJob_rejectsBeforeFunding() public {
@@ -208,7 +234,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _funded();
 
         vm.expectEmit(true, true, false, true);
-        emit JobAccepted(jobId, provider);
+        emit JobAccepted(jobId, provider, uint64(block.timestamp) + EXEC_DEADLINE);
 
         vm.prank(provider);
         escrow.acceptJob(jobId);
@@ -222,9 +248,10 @@ contract GPUJobEscrowTest is Test {
         vm.prank(provider);
         escrow.submitResult(jobId, RESULT_HASH);
 
-        (, GPUJobEscrow.JobState s, , , bytes32 rh) = escrow.jobs(jobId);
+        (, GPUJobEscrow.JobState s, uint64 dl, , , bytes32 rh) = escrow.jobs(jobId);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.SUBMITTED));
         assertEq(rh, RESULT_HASH);
+        assertEq(dl, uint64(block.timestamp) + APPROVE_DEADLINE);
     }
 
     function test_submitResult_rejectsNonProvider() public {
@@ -255,7 +282,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _assigned();
 
         vm.expectEmit(true, true, false, true);
-        emit ResultSubmitted(jobId, provider, RESULT_HASH);
+        emit ResultSubmitted(jobId, provider, RESULT_HASH, uint64(block.timestamp) + APPROVE_DEADLINE);
 
         vm.prank(provider);
         escrow.submitResult(jobId, RESULT_HASH);
@@ -320,5 +347,295 @@ contract GPUJobEscrowTest is Test {
 
     function test_unknownJob_isNone() public view {
         assertEq(uint8(_state(999)), uint8(GPUJobEscrow.JobState.NONE));
+    }
+
+    // ── cancelJob ────────────────────────────────────────────────
+
+    function test_cancelJob_refundsClientAndCancels() public {
+        uint256 before = token.balanceOf(client);
+        uint256 jobId  = _funded();
+
+        vm.prank(client);
+        escrow.cancelJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+        assertEq(token.balanceOf(client), before);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_cancelJob_rejectsNonClient() public {
+        uint256 jobId = _funded();
+
+        vm.prank(stranger);
+        vm.expectRevert(bytes("Escrow: not the client"));
+        escrow.cancelJob(jobId);
+    }
+
+    function test_cancelJob_rejectsBeforeFunding() public {
+        uint256 jobId = _created();
+
+        vm.prank(client);
+        vm.expectRevert(bytes("Escrow: not FUNDED"));
+        escrow.cancelJob(jobId);
+    }
+
+    function test_cancelJob_rejectsAfterAccept() public {
+        uint256 jobId = _assigned();
+
+        vm.prank(client);
+        vm.expectRevert(bytes("Escrow: not FUNDED"));
+        escrow.cancelJob(jobId);
+    }
+
+    /// @dev 취소와 만료 정산은 결과가 같으므로 시한 뒤에도 취소가 열려 있다.
+    function test_cancelJob_stillWorksAfterAcceptDeadline() public {
+        uint256 jobId = _funded();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(client);
+        escrow.cancelJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_cancelJob_emitsJobCancelled() public {
+        uint256 jobId = _funded();
+
+        vm.expectEmit(true, true, false, true);
+        emit JobCancelled(jobId, client, PRICE);
+
+        vm.prank(client);
+        escrow.cancelJob(jobId);
+    }
+
+    function test_cancelJob_cannotBeCalledTwice() public {
+        uint256 jobId = _funded();
+
+        vm.prank(client);
+        escrow.cancelJob(jobId);
+
+        vm.prank(client);
+        vm.expectRevert(bytes("Escrow: not FUNDED"));
+        escrow.cancelJob(jobId);
+    }
+
+    // ── settleTimeout · 만료 전 호출 실패 ────────────────────────
+
+    function test_settleTimeout_rejectsBeforeAcceptDeadline() public {
+        uint256 jobId = _funded();
+
+        vm.expectRevert(GPUJobEscrow.DeadlineNotReached.selector);
+        escrow.settleTimeout(jobId);
+    }
+
+    function test_settleTimeout_rejectsBeforeExecDeadline() public {
+        uint256 jobId = _assigned();
+
+        vm.expectRevert(GPUJobEscrow.DeadlineNotReached.selector);
+        escrow.settleTimeout(jobId);
+    }
+
+    function test_settleTimeout_rejectsBeforeApproveDeadline() public {
+        uint256 jobId = _submitted();
+
+        vm.expectRevert(GPUJobEscrow.DeadlineNotReached.selector);
+        escrow.settleTimeout(jobId);
+    }
+
+    function test_settleTimeout_rejectsOnTerminalState() public {
+        uint256 jobId = _submitted();
+        vm.prank(client);
+        escrow.approveResult(jobId);
+
+        vm.expectRevert(bytes("Escrow: not settleable"));
+        escrow.settleTimeout(jobId);
+    }
+
+    // ── 경계 · 정각에는 정상 함수만 ──────────────────────────────
+
+    function test_boundary_atDeadline_acceptSucceedsSettleFails() public {
+        uint256 jobId = _funded();
+        vm.warp(_deadline(jobId));
+
+        vm.expectRevert(GPUJobEscrow.DeadlineNotReached.selector);
+        escrow.settleTimeout(jobId);
+
+        vm.prank(provider);
+        escrow.acceptJob(jobId);
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.ASSIGNED));
+    }
+
+    function test_boundary_atDeadline_submitSucceedsSettleFails() public {
+        uint256 jobId = _assigned();
+        vm.warp(_deadline(jobId));
+
+        vm.expectRevert(GPUJobEscrow.DeadlineNotReached.selector);
+        escrow.settleTimeout(jobId);
+
+        vm.prank(provider);
+        escrow.submitResult(jobId, RESULT_HASH);
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.SUBMITTED));
+    }
+
+    // ── 경계 · 직후에는 타임아웃만 ───────────────────────────────
+
+    function test_boundary_afterDeadline_acceptFailsSettleSucceeds() public {
+        uint256 jobId = _funded();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(provider);
+        vm.expectRevert(GPUJobEscrow.DeadlineExpired.selector);
+        escrow.acceptJob(jobId);
+
+        escrow.settleTimeout(jobId);
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+    }
+
+    function test_boundary_afterDeadline_submitFailsSettleSucceeds() public {
+        uint256 jobId = _assigned();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(provider);
+        vm.expectRevert(GPUJobEscrow.DeadlineExpired.selector);
+        escrow.submitResult(jobId, RESULT_HASH);
+
+        escrow.settleTimeout(jobId);
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+    }
+
+    // ── 만료 정산 · 상태별 방향과 잔액 ───────────────────────────
+
+    function test_settleTimeout_fundedRefundsClient() public {
+        uint256 before = token.balanceOf(client);
+        uint256 jobId  = _funded();
+        vm.warp(_deadline(jobId) + 1);
+
+        escrow.settleTimeout(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+        assertEq(token.balanceOf(client), before);
+        assertEq(token.balanceOf(provider), 0);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_settleTimeout_assignedRefundsClient() public {
+        uint256 before = token.balanceOf(client);
+        uint256 jobId  = _assigned();
+        vm.warp(_deadline(jobId) + 1);
+
+        escrow.settleTimeout(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CANCELLED));
+        assertEq(token.balanceOf(client), before);
+        assertEq(token.balanceOf(provider), 0);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_settleTimeout_submittedPaysProvider() public {
+        uint256 before = token.balanceOf(client);
+        uint256 jobId  = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+
+        escrow.settleTimeout(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.COMPLETED));
+        assertEq(token.balanceOf(client), before - PRICE);
+        assertEq(token.balanceOf(provider), PRICE);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    // ── 호출 권한 ────────────────────────────────────────────────
+
+    /// @dev 당사자가 아닌 제3자가 불러도 결과가 같아야 한다.
+    function test_settleTimeout_callableByStranger() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(stranger);
+        escrow.settleTimeout(jobId);
+
+        assertEq(token.balanceOf(provider), PRICE);
+    }
+
+    /// @dev 호출자는 jobId 만 넘긴다. 수령자·금액·방향을 바꿀 수단이 없다.
+    function test_settleTimeout_callerGetsNothing() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(stranger);
+        escrow.settleTimeout(jobId);
+
+        assertEq(token.balanceOf(stranger), 0);
+        assertEq(token.balanceOf(provider), PRICE);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    // ── 만료 이후 정상 함수 차단 ─────────────────────────────────
+
+    function test_afterTimeout_approveResultRejected() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+        escrow.settleTimeout(jobId);
+
+        vm.prank(client);
+        vm.expectRevert(bytes("Escrow: not SUBMITTED"));
+        escrow.approveResult(jobId);
+    }
+
+    function test_afterTimeout_acceptJobRejected() public {
+        uint256 jobId = _funded();
+        vm.warp(_deadline(jobId) + 1);
+        escrow.settleTimeout(jobId);
+
+        vm.prank(provider);
+        vm.expectRevert(bytes("Escrow: not FUNDED"));
+        escrow.acceptJob(jobId);
+    }
+
+    function test_afterTimeout_submitResultRejected() public {
+        uint256 jobId = _assigned();
+        vm.warp(_deadline(jobId) + 1);
+        escrow.settleTimeout(jobId);
+
+        vm.prank(provider);
+        vm.expectRevert(bytes("Escrow: not ASSIGNED"));
+        escrow.submitResult(jobId, RESULT_HASH);
+    }
+
+    // ── 중복 차단 ────────────────────────────────────────────────
+
+    function test_settleTimeout_cannotBeCalledTwice() public {
+        uint256 jobId = _assigned();
+        vm.warp(_deadline(jobId) + 1);
+
+        escrow.settleTimeout(jobId);
+
+        vm.expectRevert(bytes("Escrow: not settleable"));
+        escrow.settleTimeout(jobId);
+
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    // ── 이벤트 ───────────────────────────────────────────────────
+
+    function test_settleTimeout_emitsJobTimedOutWithFromState() public {
+        uint256 jobId = _assigned();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.expectEmit(true, false, false, true);
+        emit JobTimedOut(jobId, GPUJobEscrow.JobState.ASSIGNED);
+
+        escrow.settleTimeout(jobId);
+    }
+
+    function test_settleTimeout_submittedEmitsJobCompleted() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.expectEmit(true, true, false, true);
+        emit JobCompleted(jobId, provider, PRICE);
+
+        escrow.settleTimeout(jobId);
     }
 }
