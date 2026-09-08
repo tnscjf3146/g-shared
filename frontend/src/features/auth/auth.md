@@ -40,7 +40,7 @@ src/
       signup/page.tsx               <AuthBackdrop variant="signup"/> + <SignupForm/>                  ✅
       _components/authBackdrop.tsx  초록 블러 원 2개(login: 좌상·우하 / signup: 우상·좌하)                  ✅
     providers.tsx                   <MswProvider><AuthProvider>…                                          ✅
-  proxy.ts                          (Next 16: middleware 대체) 보호 경로 가드                              ⬜ (app) 그룹 생길 때
+  proxy.ts                          (Next 16: middleware 대체) 보호 경로 가드 — refreshToken 쿠키 없으면 /login?next=   ✅ (PROTECTED=/dashboard, 페이지 생기면 목록·matcher 확장)
   features/auth/
     auth.md                         이 문서
     api.ts                          login / reissue(단일 비행) / logout / authFetch(Bearer + 401 재발급 1회 → 실패 시 /login?next=&reason=expired)  ✅
@@ -77,7 +77,7 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 
 - access 토큰을 localStorage 에 넣지 않는다(XSS 노출). 탭마다 새로고침 시 reissue 로 복구되므로 충분하다.
 - reissue 동시 호출 방지: 진행 중인 reissue Promise 를 하나만 두고 공유(요청 3개가 동시에 401 나도 재발급은 1번).
-- `proxy.ts` 는 쿠키 **존재 여부**만 본다(서명 검증은 백엔드). 보호 경로 목록은 `(app)` 그룹이 생길 때 matcher 에 추가. 지금은 `/dashboard` 하나(페이지는 아직 없음 → 로그인 성공 후 이동 목적지는 §8).
+- `proxy.ts` 는 `refreshToken` 쿠키 **존재 여부**만 본다(서명 검증은 백엔드). 없으면 `/login?next=<경로>` 로 307. 보호 경로는 `PROTECTED` 배열 + `config.matcher` 두 곳에 같이 추가(지금은 `/dashboard`, 페이지는 아직 없음). 쿠키가 있어도 만료일 수 있으므로 통과 뒤 클라이언트 `reissue` 가 최종 판정.
 - 로그인/회원가입 페이지에 이미 로그인된 상태로 오면 `next` 또는 `/` 로 보낸다.
 
 ## 5. 목업(MSW)
@@ -132,13 +132,14 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 
 - [x] **비밀번호 규칙 불일치**: zod 는 백엔드(6~20)를 따름(`passwordSchema`). 로그인 폼은 형식 검사 없이 존재만 확인(규칙 노출 방지). 회원가입 플레이스홀더는 `6~20자, 영문+숫자` 로 → 디자이너에게 피그마 수정 요청 남음.
 - [x] **로그인 후 이동 목적지**: `?next=` 가 있으면 그곳, 없으면 `/`(임시). `/dashboard` 가 생기면 기본값만 바꾼다.
+- [x] **다중 탭 동기화**: `AuthProvider` 가 `storage` 이벤트로 `gshared.session` 변화를 감지 — 다른 탭 로그아웃이면 이 탭도 즉시 guest, 다른 탭 로그인이면 reissue 로 authed.
 - [x] **오픈 리다이렉트 차단**: `next` 는 `next-path.ts` 의 `safeNextPath` 로 검증 — 같은 오리진 절대 경로(`/`로 시작)만 통과, `//evil.com`·`/\evil.com`·절대 URL·스킴은 `/` 로. loginForm(소비)과 api.ts `toLogin`(생성) 양쪽에서 적용(코드 리뷰 반영, 2026-09-07).
 - [ ] **내 정보(닉네임) 표시**: 백엔드에 `GET /api/users/me` 가 없어 헤더에 닉네임을 못 띄운다. 백엔드에 요청할지(추천), 우선 토큰의 `role` 만 쓸지.
 - [ ] **refresh 쿠키 SameSite**: 백엔드 `CookieUtil` 이 SameSite 를 지정하지 않아 브라우저 기본(Lax). 같은 오리진 구조에선 문제없지만, 배포 도메인이 프론트/백 분리되면 `None; Secure` 필요 → 백엔드에 전달.
 - [x] **토스트**: 폼 상단 인라인 메시지로 구현. 토스트 스토어가 생기면 교체.
 - [ ] **약관 페이지**: 푸터의 `이용약관`/`개인정보처리방침` 링크 대상이 없다. 우선 홈(`/`)으로 보내고 문서 페이지는 별도.
 
-## 9. 작업 순서 (커밋 단위) — 1~4 완료 (2026-09-07). 남은 것: proxy.ts 는 보호할 (app) 페이지가 생길 때
+## 9. 작업 순서 (커밋 단위) — 1~4 완료 (2026-09-07), proxy.ts 가드·다중 탭 로그아웃 동기화 추가 (2026-09-08)
 
 1. `[fe-chore] API 오리진 통일` — next.config rewrite, fetcher 기본 URL `/api`, `.env.example`
 2. `[fe-feature] 인증 스키마·API·스토어` — schema/types/errors/api/store, MSW 핸들러 + fixture (화면 없이 목업으로 호출 검증)
