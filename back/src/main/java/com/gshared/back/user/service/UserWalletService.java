@@ -38,6 +38,12 @@ public class UserWalletService {
     private final EthereumSignatureVerifier ethereumSignatureVerifier;
     private final WalletAuthProperties walletAuthProperties;
 
+    public WalletResponse getWallet(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        return WalletResponse.of(user.getWalletAddress());
+    }
+
     /**
      * 서명할 문장을 만들어 Redis 에 보관하고 사용자에게 돌려준다.
      * 이 단계에서는 DB 가 바뀌지 않는다. 서명하지 않고 이탈하면 TTL 로 사라진다.
