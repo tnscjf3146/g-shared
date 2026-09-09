@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 
 import { network } from "hardhat";
-import { parseUnits } from "viem";
+import { parseEventLogs, parseUnits } from "viem";
 
 /**
  * GCoin 과 GPUJobEscrow 를 함께 배포해 전체 사용자 흐름만 검증한다.
@@ -37,16 +37,37 @@ describe("GPU Protocol e2e", async () => {
     return { token, escrow, deployer, client, provider, keeper };
   }
 
-  /** 작업을 만들고 대금을 예치한다. 승인과 예치가 트랜잭션 두 번인 것을 그대로 보여준다. */
+  /**
+   * 작업을 만들고 대금을 예치한다. 승인과 예치가 트랜잭션 두 번인 것을 그대로 보여준다.
+   *
+   * jobId 는 반드시 JobCreated 이벤트에서 읽는다. nextJobId 를 미리 읽어 두면
+   * 다른 사용자의 createJob 이 사이에 끼어들 때 다른 작업을 가리키게 된다.
+   * 프론트와 백엔드도 같은 방식으로 읽어야 한다.
+   */
   async function createAndFund(ctx: Awaited<ReturnType<typeof deployProtocol>>) {
     const { token, escrow, client } = ctx;
 
-    const jobId = await escrow.read.nextJobId();
-    await escrow.write.createJob([PRICE], { account: client.account });
+    const hash = await escrow.write.createJob([PRICE], { account: client.account });
+    const jobId = await jobIdFrom(hash, escrow);
+
     await token.write.approve([escrow.address, PRICE], { account: client.account });
     await escrow.write.fundJob([jobId], { account: client.account });
 
     return jobId;
+  }
+
+  /** createJob 영수증의 JobCreated 로그에서 실제 jobId 를 꺼낸다. */
+  async function jobIdFrom(hash: `0x${string}`, escrow: any): Promise<bigint> {
+    const publicClient = await viem.getPublicClient();
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    const events = parseEventLogs({
+      abi: escrow.abi,
+      logs: receipt.logs,
+      eventName: "JobCreated",
+    }) as unknown as Array<{ args: { jobId: bigint } }>;
+    const event = events[0];
+    assert.ok(event, "JobCreated 이벤트를 찾지 못했습니다");
+    return event.args.jobId;
   }
 
   async function stateOf(escrow: any, jobId: bigint): Promise<number> {

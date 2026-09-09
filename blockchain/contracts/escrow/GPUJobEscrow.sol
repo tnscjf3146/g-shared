@@ -35,12 +35,14 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// 분쟁·중재는 후속 작업입니다. 실제 가치가 걸리기 전에 반드시 추가해야 합니다.
 ///
 /// @dev 공급자 선택
-/// 현재는 의뢰자 본인을 제외한 누구나 선착순으로 수락합니다. 공급자 자격 검사나
-/// 매칭 정책은 아직 확정되지 않았습니다.
+/// 현재는 의뢰자 본인을 제외한 누구나 선착순으로 수락합니다. 백엔드가 배정한
+/// 공급자만 수락하도록 하는 검증은 아직 구현되지 않았습니다.
 ///
 /// @dev 안전 장치
 /// 자금이 나가는 함수는 CEI 순서를 지켜 상태를 먼저 바꾸고 토큰을 나중에 보냅니다.
 /// 이것이 주 방어이고, `nonReentrant` 는 교차 함수 재진입까지 막는 이중 안전장치입니다.
+/// 상태를 바꾸는 외부 함수 전부에 적용해, 훅을 실행하는 토큰이 들어와도 함수 사이를
+/// 넘나드는 재진입이 성립하지 않습니다.
 /// 토큰 호출은 `SafeERC20` 을 거칩니다.
 ///
 /// @dev 온체인에는 정산 정보만 보관하며, workloadId·imageDigest·datasetHash 등
@@ -62,7 +64,7 @@ contract GPUJobEscrow is ReentrancyGuard {
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
 
-    /// @notice 취소·환불·타임아웃이 없는 이 버전을 배포할 수 없는 체인
+    /// @notice 공급자 매칭 검증이 갖춰지기 전까지 배포를 막아 둔 체인
     uint256 private constant SSAFY_CHAIN_ID = 31221;
 
     /// @notice 정산에 사용될 ERC20 토큰 컨트랙트
@@ -79,7 +81,7 @@ contract GPUJobEscrow is ReentrancyGuard {
 
     /// @notice 다음 작업에 부여될 고유 ID
     uint256 public nextJobId = 1;
-    
+
     /// @notice Job ID와 작업 상세 정보 매핑
     mapping(uint256 => Job) public jobs;
 
@@ -87,8 +89,10 @@ contract GPUJobEscrow is ReentrancyGuard {
     // 오류(Errors)
     // ─────────────────────────────────────────────────────────────
 
-    /// @notice 취소·환불·타임아웃이 빠진 버전을 SSAFY 체인에 배포하려 할 때 되돌립니다.
-    /// @dev 예치금 회수 경로가 approveResult 하나뿐이라 실자금이 잠길 수 있습니다.
+    /// @notice 공급자 매칭 검증이 없는 버전을 SSAFY 체인에 배포하려 할 때 되돌립니다.
+    /// @dev 취소·환불·타임아웃은 구현을 마쳤습니다. 지금 가드가 남아 있는 이유는
+    ///      acceptJob 이 선착순이라, 가스가 0 인 SSAFY 체인에서 악성 주소가
+    ///      작업을 비용 없이 선점할 수 있기 때문입니다.
     error SsafyDeploymentBlocked();
 
     /// @notice 제한 시간이 지난 뒤에 정상 경로 함수를 부를 때 되돌립니다.
@@ -119,7 +123,7 @@ contract GPUJobEscrow is ReentrancyGuard {
     event JobTimedOut(uint256 indexed jobId, JobState fromState);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
-    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 취소·환불·타임아웃 구현 후 이 검사를 제거합니다.
+    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 공급자 매칭 검증을 구현한 뒤 이 검사를 제거합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
     /// @param acceptTimeout_ 예치 후 수락까지의 기한(초)
     /// @param executionTimeout_ 수락 후 제출까지의 기한(초)
@@ -149,7 +153,7 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @notice 새로운 작업을 생성합니다 (토큰 이동 없음).
     /// @param price 지급할 작업 대금
     /// @return jobId 생성된 작업의 고유 ID
-    function createJob(uint256 price) external returns (uint256 jobId) {
+    function createJob(uint256 price) external nonReentrant returns (uint256 jobId) {
         require(price > 0, "Escrow: price is zero");
 
         jobId = nextJobId++;
@@ -224,7 +228,7 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @notice 예치된 일감을 수락하여 작업을 배정받습니다.
     /// @dev 선착순으로 처리되며, 늦게 도착한 트랜잭션은 revert 처리됩니다 (정상 상황).
     /// @param jobId 수락할 작업 ID
-    function acceptJob(uint256 jobId) external {
+    function acceptJob(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.state == JobState.FUNDED, "Escrow: not FUNDED");
@@ -242,7 +246,7 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @dev 백엔드가 서명하지 않고 공급자가 직접 트랜잭션을 발생시켜 부인 방지(Non-repudiation)를 달성합니다.
     /// @param jobId 결과물을 제출할 작업 ID
     /// @param resultHash 결과물에 대한 해시값
-    function submitResult(uint256 jobId, bytes32 resultHash) external {
+    function submitResult(uint256 jobId, bytes32 resultHash) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.provider == msg.sender, "Escrow: not the provider");
