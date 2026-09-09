@@ -50,6 +50,15 @@ public class JobController {
         return ResponseEntity.ok(jobService.getJobs(userDetails.getId(), status, pageable));
     }
 
+    @PostMapping("/{jobId}/fund")
+    public ResponseEntity<Void> fundJob(
+            @PathVariable Long jobId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        jobService.fundJob(userDetails.getId(), jobId);
+        return ResponseEntity.ok().build();
+    }
+
     @PostMapping("/{jobId}/cancel")
     public ResponseEntity<Void> cancelJob(
             @PathVariable Long jobId,

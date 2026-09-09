@@ -77,6 +77,25 @@ public class JobService {
     }
 
     /**
+     * 예치 확인 → 매칭 대기(FUNDED)로 전이. 본인 Job이면서 CREATED 상태일 때만 가능.
+     *
+     * TODO: 현재는 개발용 수동 전이. BC 연동 시 이 메서드 안에서
+     *       온체인 예치 여부를 확인한 뒤 전이하도록 교체한다.
+     */
+    @Transactional
+    public void fundJob(Long ownerId, Long jobId) {
+        // 존재/소유 확인 (없거나 남의 것 → 404)
+        jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+
+        // 원자적 전이 — 0행이면 이미 FUNDED거나 취소/진행 중 (→ 409)
+        int updated = jobRepository.fundIfCreated(jobId, ownerId);
+        if (updated == 0) {
+            throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+    }
+
+    /**
      * Job 취소. 본인 Job이면서 RUNNING 진입 전(CREATED/FUNDED/ASSIGNED)만 취소 가능.
      * "취소 가능할 때만 바꾸는" 조건부 UPDATE 한 방(원자적)이라,
      * 매칭이 동시에 상태를 올리는 경쟁 상황에서도 안전하다.
