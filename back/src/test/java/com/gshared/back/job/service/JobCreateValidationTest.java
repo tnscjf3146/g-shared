@@ -28,7 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * Job 생성의 검증·오류 경로 테스트. (V6 seed 의 qlora-sft-v1 / qwen2.5-7b 카탈로그 사용)
+ * Job 생성의 검증·오류 경로 테스트. (V8 seed 카탈로그 qlora-sft-v1 / qwen2.5-7b 를 slug 로 조회해 사용)
  * SchedulerClient 는 목으로 대체 — 외부 AI 없이 오류 매핑을 검증한다.
  */
 @SpringBootTest
@@ -49,8 +49,15 @@ class JobCreateValidationTest {
     @MockitoBean
     private SchedulerClient schedulerClient;   // 외부 AI 를 목으로 — 백엔드가 AI 없이도 검증 가능한 이유
 
+    @Autowired
+    private com.gshared.back.workload.repository.WorkloadRepository workloadRepository;
+    @Autowired
+    private com.gshared.back.workload.repository.BaseModelRepository baseModelRepository;
+
     private User owner;
     private Long datasetId;
+    private Long workloadId;   // V8 seed 카탈로그 정수 PK (slug 로 조회)
+    private Long baseModelId;
 
     @BeforeEach
     void setUp() {
@@ -58,10 +65,12 @@ class JobCreateValidationTest {
                 "create-" + UUID.randomUUID() + "@gshared.io", "encoded", "생성테스터"));
         datasetId = datasetRepository.save(Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null)).getId();
+        workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
     }
 
     private CreateJobRequest customRequest(String configJson) {
-        return new CreateJobRequest("qlora-sft-v1", "qwen2.5-7b", datasetId,
+        return new CreateJobRequest(workloadId, baseModelId, datasetId,
                 "CUSTOM", null, configJson == null ? null : objectMapper.readTree(configJson));
     }
 

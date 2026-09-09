@@ -45,9 +45,16 @@ class JobFundIntegrationTest {
     @Autowired
     private com.gshared.back.dataset.repository.DatasetRepository datasetRepository;
 
+    @Autowired
+    private com.gshared.back.workload.repository.WorkloadRepository workloadRepository;
+    @Autowired
+    private com.gshared.back.workload.repository.BaseModelRepository baseModelRepository;
+
     private User owner;
     private String ownerToken;
     private Long datasetId;   // jobs.dataset_id FK 만족용
+    private Long workloadId;  // V8 seed 카탈로그 정수 PK (slug 로 조회)
+    private Long baseModelId;
 
     @BeforeEach
     void setUp() {
@@ -55,6 +62,8 @@ class JobFundIntegrationTest {
         ownerToken = jwtProvider.createAccessToken(owner.getId(), owner.getRole());
         datasetId = datasetRepository.save(com.gshared.back.dataset.domain.Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null)).getId();
+        workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
     }
 
     private User saveUser(String prefix) {
@@ -64,7 +73,7 @@ class JobFundIntegrationTest {
 
     private Job saveJob(User jobOwner) {
         return jobRepository.save(Job.create(
-                jobOwner, "qlora-sft-v1", "qwen2.5-7b", datasetId,
+                jobOwner, workloadId, baseModelId, datasetId,
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
     }
 

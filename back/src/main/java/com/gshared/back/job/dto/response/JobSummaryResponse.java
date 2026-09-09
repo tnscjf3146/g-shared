@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 public record JobSummaryResponse(
         Long jobId,
         JobStatus status,
-        String workloadId,
+        Long workloadId,
         Integer progressPercent,
         Long estimatedCost,
         LocalDateTime createdAt

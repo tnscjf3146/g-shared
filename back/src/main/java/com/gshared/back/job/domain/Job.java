@@ -25,11 +25,11 @@ public class Job extends BaseTimeEntity {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
-    // 카탈로그 참조 (문자열 ID — Scheduler 규격과 동일)
-    @Column(nullable = false, length = 32)
-    private String workloadId;        // "qlora-sft-v1" = Scheduler dockerImageId
-    @Column(nullable = false, length = 64)
-    private String baseModelId;       // "qwen2.5-7b"  = Scheduler modelId
+    // 카탈로그 참조 (정수 PK — Scheduler 규격과 동일, V8)
+    @Column(nullable = false)
+    private Long workloadId;          // workloads PK = Scheduler dockerImageId
+    @Column(nullable = false)
+    private Long baseModelId;         // base_models PK = Scheduler modelId
     @Column(nullable = false)
     private Long datasetId;
 
@@ -77,7 +77,7 @@ public class Job extends BaseTimeEntity {
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
 
-    private Job(User owner, String workloadId, String baseModelId, Long datasetId,
+    private Job(User owner, Long workloadId, Long baseModelId, Long datasetId,
                 String trainingMode, Integer epochs, Integer batchSize, Double learningRate, Integer maxLength,
                 Double predictedRuntimeSec, String schedulerModelVersion, String recommendedWorkerId,
                 Long estimatedCost) {
@@ -97,7 +97,7 @@ public class Job extends BaseTimeEntity {
         this.status = JobStatus.CREATED;   // 생성 직후엔 예치 확인 대기 — 이 행이 곧 견적서
     }
 
-    public static Job create(User owner, String workloadId, String baseModelId, Long datasetId,
+    public static Job create(User owner, Long workloadId, Long baseModelId, Long datasetId,
                              String trainingMode, Integer epochs, Integer batchSize,
                              Double learningRate, Integer maxLength,
                              Double predictedRuntimeSec, String schedulerModelVersion,

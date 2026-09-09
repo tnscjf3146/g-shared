@@ -113,8 +113,8 @@ public class JobMatcher {
      */
     private WorkerMessage buildAssignMessage(Job job) {
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("dockerImageId", job.getWorkloadId());   // "qlora-sft-v1"
-        payload.put("modelId", job.getBaseModelId());        // "qwen2.5-7b"
+        payload.put("dockerImageId", job.getWorkloadId());   // workloads PK (V8 — 정수)
+        payload.put("modelId", job.getBaseModelId());        // base_models PK
         payload.put("datasetId", job.getDatasetId());
         payload.put("trainingMode", job.getTrainingMode());
 
