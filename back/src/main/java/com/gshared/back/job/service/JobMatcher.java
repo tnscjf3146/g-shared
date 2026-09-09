@@ -49,17 +49,30 @@ public class JobMatcher {
         }
 
         List<Worker> available = workerRepository.findAvailableWorkers();
-        int pairs = Math.min(waiting.size(), available.size());
+        if (available.isEmpty()) {
+            log.info("[MATCH] 가용 워커 없음 — 대기 Job {}건은 다음 순찰에 재시도", waiting.size());
+            return;
+        }
+        java.util.Map<String, Worker> availableById = new java.util.HashMap<>();
+        available.forEach(w -> availableById.put(w.getId(), w));
+        java.util.Set<String> takenThisSweep = new java.util.HashSet<>();   // 이번 순찰에서 이미 배정된 워커
 
-        for (int i = 0; i < pairs; i++) {
-            Job job = waiting.get(i);
-            Worker worker = available.get(i);
+        for (Job job : waiting) {
+            Worker worker = pickWorker(job, availableById, takenThisSweep);
+            if (worker == null) {
+                // 추천 워커가 바쁘거나 오프라인 → 배정 보류, 다음 순찰에 재시도
+                // TODO: N회 연속 보류 시 재예측 (1 Job = 1 Prediction 은 이중 계산 방지 취지일 뿐)
+                log.info("[MATCH] jobId={} 추천 워커({}) 사용 불가 — 다음 순찰 재시도",
+                        job.getId(), job.getRecommendedWorkerId());
+                continue;
+            }
             try {
                 // "아직 FUNDED 일 때만" 배정(서비스 트랜잭션) — 그 사이 취소됐으면 건너뜀 (취소 되살림 방지)
                 if (!jobService.assignJob(job.getId(), worker.getId())) {
                     log.info("[MATCH] jobId={} 상태 변경됨(취소 등) — 건너뜀", job.getId());
                     continue;
                 }
+                takenThisSweep.add(worker.getId());
                 boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
                 log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
                 if (!sent) {
@@ -72,10 +85,24 @@ public class JobMatcher {
                 log.error("[MATCH] jobId={} 매칭 실패(다음 Job 계속)", job.getId(), e);
             }
         }
+    }
 
-        if (waiting.size() > pairs) {
-            log.info("[MATCH] 워커 부족 — 대기 Job {}건은 다음 순찰에 재시도", waiting.size() - pairs);
+    /**
+     * 배정할 워커 선택 — Scheduler 추천 우선.
+     * 추천 워커가 지금 가용하면 그 워커, 아니면 null(보류 → 다음 순찰).
+     * 추천이 없는 Job(구버전 데이터 등)만 아무 가용 워커로 폴백.
+     */
+    private Worker pickWorker(Job job, java.util.Map<String, Worker> availableById,
+                              java.util.Set<String> takenThisSweep) {
+        String recommended = job.getRecommendedWorkerId();
+        if (recommended != null) {
+            Worker w = availableById.get(recommended);
+            return (w != null && !takenThisSweep.contains(recommended)) ? w : null;
         }
+        return availableById.values().stream()
+                .filter(w -> !takenThisSweep.contains(w.getId()))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
