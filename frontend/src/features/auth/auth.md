@@ -69,7 +69,7 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 ```
 로그인 성공 ─→ accessToken 은 메모리(store), refreshToken 은 HttpOnly 쿠키(브라우저가 관리, JS 접근 불가)
 새로고침    ─→ AuthProvider 가 reissue 1회. 단, localStorage 의 세션 표시(`gshared.session`, 로그인 성공 시 기록·로그아웃/실패 시 삭제)가 있을 때만 실제 호출
-             → 200 이면 authed, 401 이면 표시 지우고 guest. 표시가 없으면 호출 없이 바로 guest(로그인 전 콘솔 401 노이즈 방지). 그동안 status='loading'
+             → 200 이면 authed, 401 이면 표시 지우고 guest. 그 외 실패(네트워크·429·5xx)는 표시 유지 + guest(다음 로드/authFetch 에서 재시도, 2026-09-09). 표시가 없으면 호출 없이 바로 guest(로그인 전 콘솔 401 노이즈 방지). 그동안 status='loading'
 보호 API    ─→ authFetch: Bearer 붙여 호출 → 401(EXPIRED_TOKEN|INVALID_TOKEN|UNAUTHORIZED) 이면 reissue 1회 후 재시도
              → 그래도 401 이면 store 비우고 /login?next=<현재경로> 로
 로그아웃    ─→ POST /logout(Bearer) → 성공/실패 무관하게 store 비우고 / 로
@@ -84,7 +84,7 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 
 `NEXT_PUBLIC_API_MOCKING=enabled` 일 때만. 핸들러 경로는 `${API_BASE_URL}/auth/...` 상수 사용.
 
-- fixture: `user01@example.com / pass1234 / 유저일` (schema.parse 통과). 비밀번호 검사도 fixture 와 비교.
+- fixture: `user1 / 1234 / 유저일` (2026-09-08 변경, 짧게 타이핑하려고). 로그인 폼은 이메일·비밀번호 모두 존재만 검사(형식 X)라 통과하고, 서버 `LoginRequest` 도 형식을 보지 않는다. 회원가입 목업은 여전히 규칙(이메일 형식·6~20자)을 검사한다.
 - `signup`: fixture 이메일이면 `409 DUPLICATE_EMAIL`, 규칙 위반이면 `400 INVALID_INPUT` + 서버와 같은 문장, 아니면 `201`.
 - `login`: 일치하면 `200 { accessToken: 'mock-access' }` + `Set-Cookie: refreshToken=mock-refresh; Path=/; HttpOnly`, 아니면 `401 INVALID_CREDENTIALS`.
 - `reissue`: 요청 쿠키에 `refreshToken` 있으면 200, 없으면 `401 INVALID_TOKEN`.
@@ -122,7 +122,7 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 회원가입 카드 순서(구현): 로고 → `계정을 만들고 GPU를 쓰거나, 공유해 보세요` → 닉네임 → 이메일 → 비밀번호(플레이스홀더 `6~20자, 영문+숫자`, 보기 토글은 확인 필드와 공유) → 비밀번호 확인 → **[계정 만들기]** Primary → `이미 계정이 있으신가요? 로그인 →` → `가입 후 지갑을 연결하면 예치·정산 기능이 활성화됩니다.` 성공 시 `/login?signup=done` 으로 이동해 로그인 카드 상단에 초록 안내.
 
 동작
-- 검증 타이밍: 제출 시 zod 전체 검사 → 필드별 인라인 오류. 한 번 오류 난 필드는 입력 중 재검사. 비밀번호 확인은 프론트에서만 검사(서버 요청엔 안 보냄). 약관 동의 체크박스는 백엔드(`SignupRequest`)가 받지 않아 두지 않는다(2026-09-07 제거).
+- 검증 타이밍: 제출 시 zod 전체 검사 → 필드별 인라인 오류. 로그인 폼은 두 필드 존재만(이메일 형식 검사도 2026-09-08 제거 — 서버가 형식을 안 보고, 틀리면 INVALID_CREDENTIALS 로 같은 결과). 한 번 오류 난 필드는 입력 중 재검사. 비밀번호 확인은 프론트에서만 검사(서버 요청엔 안 보냄). 약관 동의 체크박스는 백엔드(`SignupRequest`)가 받지 않아 두지 않는다(2026-09-07 제거).
 - 성공: 로그인 → `next` 로, 회원가입 → 로그인 페이지로 이동하며 "가입 완료" 안내.
 - 접근성: `<label htmlFor>`, 오류 `aria-describedby`, 비밀번호 보기 토글은 버튼.
 - **지갑 연결 버튼**은 지갑 기능 브랜치에서 — 이번엔 카드에서 뺐다(안내 문구만 유지).
