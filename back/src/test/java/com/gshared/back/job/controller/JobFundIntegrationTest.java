@@ -103,6 +103,23 @@ class JobFundIntegrationTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 Job 은 404")
+    void fund_missing_job_returns_404() throws Exception {
+        mockMvc.perform(post(fundUrl(999_999L))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("토큰 없는 요청은 401")
+    void fund_without_token_returns_401() throws Exception {
+        Job job = saveJob(owner);
+
+        mockMvc.perform(post(fundUrl(job.getId())))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("취소된 Job 은 409 — 취소를 되살리지 않는다")
     void fund_cancelled_job_returns_409() throws Exception {
         Job job = saveJob(owner);

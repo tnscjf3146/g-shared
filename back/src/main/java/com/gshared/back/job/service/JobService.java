@@ -80,7 +80,8 @@ public class JobService {
      * 예치 확인 → 매칭 대기(FUNDED)로 전이. 본인 Job이면서 CREATED 상태일 때만 가능.
      *
      * TODO: 현재는 개발용 수동 전이. BC 연동 시 이 메서드 안에서
-     *       온체인 예치 여부를 확인한 뒤 전이하도록 교체한다.
+     *       온체인 예치 여부를 확인한 뒤 전이하도록 교체한다. (fundedAt 시각 기록도 그때 추가)
+     * ⚠️ 운영 배포 전 반드시 교체 — 실제 예치 없이 FUNDED 가능한 개발용 API.
      */
     @Transactional
     public void fundJob(Long ownerId, Long jobId) {
