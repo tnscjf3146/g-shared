@@ -40,7 +40,7 @@ public class Worker extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     private WorkerStatus status;
 
-    private String currentJobId;
+    private Long currentJobId;        // jobs.job_id 와 타입 일치 (BIGINT)
     private LocalDateTime lastHeartbeatAt;
 
     private Worker(String id, User owner, String workerToken,
@@ -107,7 +107,7 @@ public class Worker extends BaseTimeEntity {
      * (스위퍼가 찰나에 OFFLINE 으로 내렸어도 RUNNING 으로 덮는 것은 의도 —
      *  JOB_ACCEPTED 수신 자체가 연결이 살아있다는 증거)
      */
-    public void startJob(String jobId) {
+    public void startJob(Long jobId) {
         this.status = WorkerStatus.RUNNING;
         this.currentJobId = jobId;
     }

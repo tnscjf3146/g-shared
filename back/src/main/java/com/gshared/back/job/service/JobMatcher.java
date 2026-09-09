@@ -49,22 +49,36 @@ public class JobMatcher {
         }
 
         List<Worker> available = workerRepository.findAvailableWorkers();
-        int pairs = Math.min(waiting.size(), available.size());
+        if (available.isEmpty()) {
+            log.info("[MATCH] 가용 워커 없음 — 대기 Job {}건은 다음 순찰에 재시도", waiting.size());
+            return;
+        }
+        java.util.Map<String, Worker> availableById = new java.util.HashMap<>();
+        available.forEach(w -> availableById.put(w.getId(), w));
+        java.util.Set<String> takenThisSweep = new java.util.HashSet<>();   // 이번 순찰에서 이미 배정된 워커
 
-        for (int i = 0; i < pairs; i++) {
-            Job job = waiting.get(i);
-            Worker worker = available.get(i);
+        for (Job job : waiting) {
+            Worker worker = pickWorker(job, availableById, takenThisSweep);
+            if (worker == null) {
+                // 추천 워커가 바쁘거나 오프라인 → 배정 보류, 다음 순찰에 재시도
+                // TODO: N회 연속 보류 시 재예측 (1 Job = 1 Prediction 은 이중 계산 방지 취지일 뿐)
+                log.info("[MATCH] jobId={} 추천 워커({}) 사용 불가 — 다음 순찰 재시도",
+                        job.getId(), job.getRecommendedWorkerId());
+                continue;
+            }
             try {
                 // "아직 FUNDED 일 때만" 배정(서비스 트랜잭션) — 그 사이 취소됐으면 건너뜀 (취소 되살림 방지)
                 if (!jobService.assignJob(job.getId(), worker.getId())) {
                     log.info("[MATCH] jobId={} 상태 변경됨(취소 등) — 건너뜀", job.getId());
                     continue;
                 }
+                takenThisSweep.add(worker.getId());
                 boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
                 log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
                 if (!sent) {
                     // 죽은 워커(스위퍼 처리 전)에 배정된 경우 → 즉시 FUNDED 복귀, 다음 순찰에 재매칭
                     jobService.unassignJob(job.getId(), worker.getId());
+                    takenThisSweep.remove(worker.getId());   // 배정 되돌렸으니 이번 순찰 점유도 해제
                     log.info("[MATCH] jobId={} 전송 실패 → 배정 되돌림(재매칭 대기)", job.getId());
                 }
                 // TODO: 전송은 됐지만 JOB_ACCEPTED 가 오래 안 오는 Job 재큐잉은 후속 티켓
@@ -72,25 +86,44 @@ public class JobMatcher {
                 log.error("[MATCH] jobId={} 매칭 실패(다음 Job 계속)", job.getId(), e);
             }
         }
+    }
 
-        if (waiting.size() > pairs) {
-            log.info("[MATCH] 워커 부족 — 대기 Job {}건은 다음 순찰에 재시도", waiting.size() - pairs);
+    /**
+     * 배정할 워커 선택 — Scheduler 추천 우선.
+     * 추천 워커가 지금 가용하면 그 워커, 아니면 null(보류 → 다음 순찰).
+     * 추천이 없는 Job(구버전 데이터 등)만 아무 가용 워커로 폴백.
+     */
+    private Worker pickWorker(Job job, java.util.Map<String, Worker> availableById,
+                              java.util.Set<String> takenThisSweep) {
+        String recommended = job.getRecommendedWorkerId();
+        if (recommended != null) {
+            Worker w = availableById.get(recommended);
+            return (w != null && !takenThisSweep.contains(recommended)) ? w : null;
         }
+        return availableById.values().stream()
+                .filter(w -> !takenThisSweep.contains(w.getId()))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
      * JOB_ASSIGN 봉투 생성. payload 는 이형동 명세 기준.
-     * dockerImageId·datasetUrl·resultUploadUrl 은 Workload/Dataset 도메인 구현 후 채움(현재는 ID 전달).
+     * TODO: dockerImageId 는 workloads.image_digest 로 교체 (실제 digest 를 System 담당에게 받은 뒤)
+     *       datasetUrl·resultUploadUrl 은 스토리지 정책 확정 후 추가.
      */
     private WorkerMessage buildAssignMessage(Job job) {
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("baseModelId", job.getBaseModelId());
+        payload.put("dockerImageId", job.getWorkloadId());   // "qlora-sft-v1"
+        payload.put("modelId", job.getBaseModelId());        // "qwen2.5-7b"
         payload.put("datasetId", job.getDatasetId());
-        payload.put("gpuId", job.getGpuId());
         payload.put("trainingMode", job.getTrainingMode());
-        if (job.getTrainingConfig() != null) {
-            payload.set("trainingConfig", objectMapper.readTree(job.getTrainingConfig()));   // 문자열 → JSON 복원
-        }
+
+        ObjectNode config = payload.putObject("trainingConfig");
+        config.put("epochs", job.getEpochs());
+        config.put("batchSize", job.getBatchSize());
+        config.put("learningRate", job.getLearningRate());
+        config.put("maxLength", job.getMaxLength());
+
         return WorkerMessage.of(WorkerMessageType.JOB_ASSIGN,
                 String.valueOf(job.getId()),          // 명세상 jobId 는 문자열
                 OffsetDateTime.now().toString(),

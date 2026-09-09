@@ -25,34 +25,45 @@ public class Job extends BaseTimeEntity {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
-    // 참조 ID (해당 도메인 테이블 추후 생성 → 지금은 값만 보관)
-    @Column(nullable = false)
-    private Long workloadId;
-    @Column(nullable = false)
-    private Long baseModelId;
+    // 카탈로그 참조 (문자열 ID — Scheduler 규격과 동일)
+    @Column(nullable = false, length = 32)
+    private String workloadId;        // "qlora-sft-v1" = Scheduler dockerImageId
+    @Column(nullable = false, length = 64)
+    private String baseModelId;       // "qwen2.5-7b"  = Scheduler modelId
     @Column(nullable = false)
     private Long datasetId;
-    @Column(nullable = false)
-    private Long gpuId;
 
     @Column(nullable = false, length = 10)
-    private String trainingMode;      // AUTO / CUSTOM
+    private String trainingMode;      // AUTO / CUSTOM — "누가 정했는가" 기록용
 
-    @Column(columnDefinition = "TEXT")
-    private String trainingConfig;    // CUSTOM 학습설정 JSON (없으면 null)
-
+    // 학습 설정 4종 — AUTO/CUSTOM 모두 확정값을 항상 채운다 (Scheduler 필수 입력)
     @Column(nullable = false)
-    private Integer predictedRuntimeSec;
+    private Integer epochs;
+    @Column(nullable = false)
+    private Integer batchSize;
+    @Column(nullable = false)
+    private Double learningRate;
+    @Column(nullable = false)
+    private Integer maxLength;
+
+    // Scheduler 예측 결과 (DOUBLE — 정밀도 보존, 예측 오차 평가용)
+    @Column(nullable = false)
+    private Double predictedRuntimeSec;
+    @Column(length = 50)
+    private String schedulerModelVersion;   // 어느 모델이 예측했나 — 실측 대조·개선 평가용
+    @Column(length = 64)
+    private String recommendedWorkerId;     // 추천 ≠ 배정 확정 (배정은 assignedWorkerId)
+
     @Column(nullable = false)
     private Long estimatedCost;
-    private Integer actualRuntimeSec;
+    private Double actualRuntimeSec;
     private Long actualCost;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private JobStatus status;
 
-    private String assignedWorkerId;  // 배정된 Worker
+    private String assignedWorkerId;  // 배정 확정된 Worker
     private String resultHash;
     private String resultUrl;
     @Column(columnDefinition = "TEXT")
@@ -66,26 +77,34 @@ public class Job extends BaseTimeEntity {
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
 
-    private Job(User owner, Long workloadId, Long baseModelId, Long datasetId, Long gpuId,
-                String trainingMode, String trainingConfig,
-                Integer predictedRuntimeSec, Long estimatedCost) {
+    private Job(User owner, String workloadId, String baseModelId, Long datasetId,
+                String trainingMode, Integer epochs, Integer batchSize, Double learningRate, Integer maxLength,
+                Double predictedRuntimeSec, String schedulerModelVersion, String recommendedWorkerId,
+                Long estimatedCost) {
         this.owner = owner;
         this.workloadId = workloadId;
         this.baseModelId = baseModelId;
         this.datasetId = datasetId;
-        this.gpuId = gpuId;
         this.trainingMode = trainingMode;
-        this.trainingConfig = trainingConfig;
+        this.epochs = epochs;
+        this.batchSize = batchSize;
+        this.learningRate = learningRate;
+        this.maxLength = maxLength;
         this.predictedRuntimeSec = predictedRuntimeSec;
+        this.schedulerModelVersion = schedulerModelVersion;
+        this.recommendedWorkerId = recommendedWorkerId;
         this.estimatedCost = estimatedCost;
-        this.status = JobStatus.CREATED;   // 생성 직후엔 예치 확인 대기
+        this.status = JobStatus.CREATED;   // 생성 직후엔 예치 확인 대기 — 이 행이 곧 견적서
     }
 
-    public static Job create(User owner, Long workloadId, Long baseModelId, Long datasetId, Long gpuId,
-                             String trainingMode, String trainingConfig,
-                             Integer predictedRuntimeSec, Long estimatedCost) {
-        return new Job(owner, workloadId, baseModelId, datasetId, gpuId,
-                trainingMode, trainingConfig, predictedRuntimeSec, estimatedCost);
+    public static Job create(User owner, String workloadId, String baseModelId, Long datasetId,
+                             String trainingMode, Integer epochs, Integer batchSize,
+                             Double learningRate, Integer maxLength,
+                             Double predictedRuntimeSec, String schedulerModelVersion,
+                             String recommendedWorkerId, Long estimatedCost) {
+        return new Job(owner, workloadId, baseModelId, datasetId,
+                trainingMode, epochs, batchSize, learningRate, maxLength,
+                predictedRuntimeSec, schedulerModelVersion, recommendedWorkerId, estimatedCost);
     }
 
     // 상태 전이(취소·배정·시작·완료·실패)는 경쟁 조건 방지를 위해

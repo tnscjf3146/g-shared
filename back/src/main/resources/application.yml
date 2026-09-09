@@ -45,3 +45,10 @@ management:
 
 cookie:
   secure: true
+
+# AI Scheduler (FastAPI) 호출 설정.
+# 타임아웃 필수 — 없으면 Scheduler 가 느려질 때 Job 생성 스레드가 전부 묶인다.
+scheduler:
+  base-url: ${SCHEDULER_BASE_URL:http://localhost:8000}
+  connect-timeout: 2s
+  read-timeout: 5s
