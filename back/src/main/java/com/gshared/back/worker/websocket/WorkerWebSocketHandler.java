@@ -202,12 +202,21 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
         boolean completed = jobService.completeJob(workerId, jobId,
                 textOrNull(msg, "resultHash"),
                 textOrNull(msg, "resultUrl"),
-                intOrNull(msg, "actualRuntimeSec"));
+                doubleOrNull(msg, "actualRuntimeSec"));
         if (completed) {
             log.info("[WS] JOB_RESULT → COMPLETED workerId={} jobId={}", workerId, jobId);
         } else {
             log.warn("[WS] JOB_RESULT 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
         }
+    }
+
+    /** payload 에서 실수 필드 꺼내기. 없거나 숫자가 아니면 null. */
+    private Double doubleOrNull(WorkerMessage msg, String field) {
+        if (msg.payload() == null) {
+            return null;
+        }
+        var node = msg.payload().path(field);
+        return node.isNumber() ? node.asDouble() : null;
     }
 
     /** payload 에서 문자열 필드 꺼내기. 없으면 null. */

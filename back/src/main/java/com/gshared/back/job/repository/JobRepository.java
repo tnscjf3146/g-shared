@@ -88,7 +88,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     int completeIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
                           @Param("resultHash") String resultHash, @Param("resultUrl") String resultUrl,
-                          @Param("actualRuntimeSec") Integer actualRuntimeSec, @Param("now") LocalDateTime now);
+                          @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
     /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유 기록. */
     @Modifying(clearAutomatically = true)

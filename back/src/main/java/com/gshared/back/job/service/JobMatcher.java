@@ -80,17 +80,22 @@ public class JobMatcher {
 
     /**
      * JOB_ASSIGN 봉투 생성. payload 는 이형동 명세 기준.
-     * dockerImageId·datasetUrl·resultUploadUrl 은 Workload/Dataset 도메인 구현 후 채움(현재는 ID 전달).
+     * TODO: dockerImageId 는 workloads.image_digest 로 교체 (실제 digest 를 System 담당에게 받은 뒤)
+     *       datasetUrl·resultUploadUrl 은 스토리지 정책 확정 후 추가.
      */
     private WorkerMessage buildAssignMessage(Job job) {
         ObjectNode payload = objectMapper.createObjectNode();
-        payload.put("baseModelId", job.getBaseModelId());
+        payload.put("dockerImageId", job.getWorkloadId());   // "qlora-sft-v1"
+        payload.put("modelId", job.getBaseModelId());        // "qwen2.5-7b"
         payload.put("datasetId", job.getDatasetId());
-        payload.put("gpuId", job.getGpuId());
         payload.put("trainingMode", job.getTrainingMode());
-        if (job.getTrainingConfig() != null) {
-            payload.set("trainingConfig", objectMapper.readTree(job.getTrainingConfig()));   // 문자열 → JSON 복원
-        }
+
+        ObjectNode config = payload.putObject("trainingConfig");
+        config.put("epochs", job.getEpochs());
+        config.put("batchSize", job.getBatchSize());
+        config.put("learningRate", job.getLearningRate());
+        config.put("maxLength", job.getMaxLength());
+
         return WorkerMessage.of(WorkerMessageType.JOB_ASSIGN,
                 String.valueOf(job.getId()),          // 명세상 jobId 는 문자열
                 OffsetDateTime.now().toString(),
