@@ -83,6 +83,28 @@ class JobCreateValidationTest {
     }
 
     @Test
+    @DisplayName("존재하지 않는 workloadId(정수 PK)면 WORKLOAD_NOT_FOUND (404)")
+    void nonexistent_workload_id() {
+        assertThatThrownBy(() -> jobService.create(owner.getId(),
+                new CreateJobRequest(999_999L, baseModelId, datasetId,
+                        "AUTO", "BALANCED", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode",
+                        com.gshared.back.workload.exception.WorkloadErrorCode.WORKLOAD_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 baseModelId(정수 PK)면 BASE_MODEL_NOT_FOUND (404)")
+    void nonexistent_base_model_id() {
+        assertThatThrownBy(() -> jobService.create(owner.getId(),
+                new CreateJobRequest(workloadId, 999_999L, datasetId,
+                        "AUTO", "BALANCED", null)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode",
+                        com.gshared.back.workload.exception.WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("CUSTOM 설정이 누락되면 INVALID_TRAINING_CONFIG")
     void custom_config_missing_field() {
         assertThatThrownBy(() -> jobService.create(owner.getId(),
