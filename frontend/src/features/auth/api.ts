@@ -56,8 +56,10 @@ export function reissue(): Promise<string | null> {
       authStore.signIn(accessToken)
       return accessToken
     })
-    .catch(() => {
-      sessionFlag.set(false)
+    .catch((e) => {
+      // 401(쿠키 없음·만료·무효)만 진짜 세션 종료. 네트워크 오류·429·5xx 는 서버 토큰이 살아 있으니 표시를 남겨 두고
+      // 이번엔 guest 로만 둔다 → 다음 로드/authFetch 에서 다시 시도해 복구된다(자동 재시도는 429 를 악화시키므로 안 함)
+      if (e instanceof ApiError && e.status === 401) sessionFlag.set(false)
       authStore.signOut()
       return null
     })
@@ -83,15 +85,21 @@ export async function authFetch<T>(path: string, init: RequestInit = {}): Promis
   const call = (token: string) =>
     fetcher<T>(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), Authorization: `Bearer ${token}` } })
   const token = authStore.get().accessToken ?? (await reissue())
-  if (!token) return toLogin()
+  if (!token) return reissueFailed()
   try {
     return await call(token)
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 401 && RETRYABLE_401.has(e.code))) throw e
     const fresh = await reissue()
-    if (!fresh) return toLogin()
+    if (!fresh) return reissueFailed()
     return call(fresh)
   }
+}
+
+// reissue 가 null 인데 세션 표시가 남아 있으면 401 이 아닌 일시 장애(네트워크·429·5xx) → 로그인으로 보내지 않고 호출자에게 실패만 알린다
+function reissueFailed(): never {
+  if (sessionFlag.has()) throw new ApiError(503, 'SERVICE_UNAVAILABLE', '잠시 후 다시 시도해 주세요.')
+  return toLogin()
 }
 
 function toLogin(): never {

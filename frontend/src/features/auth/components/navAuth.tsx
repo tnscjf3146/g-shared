@@ -6,16 +6,24 @@ import { useState } from 'react'
 import { logout } from '../api'
 import { useAuth } from '../store'
 
-// 네비 우측: [지갑] + (guest → 로그인 / authed → 로그아웃). 전부 같은 회색 헤어라인 버튼(globals.css .nav-btn)
-// 지갑은 로그인 여부와 무관하게 항상 — guest 가 누르면 proxy.ts 가 /login?next=/wallet 로 보낸다
+// 네비 우측: guest → [로그인] / authed → [워커][지갑][로그아웃]. 전부 같은 회색 헤어라인 버튼(globals.css .nav-btn)
+// 워커·지갑 탭은 로그인한 뒤에만 보인다(2026-09-08 결정). URL 로 직접 오면 proxy.ts 가 /login?next= 로 보낸다
 // loading 중엔 깜빡임 방지로 로그인 버튼 유지
 export function NavAuth() {
   const { status } = useAuth()
   const router = useRouter()
   const [pending, setPending] = useState(false)
 
+  if (status !== 'authed') return <LoginLink />
   return (
     <>
+      <Link href="/workers" className="nav-btn">
+        <svg aria-hidden width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="3" width="12" height="7" rx="1.5" />
+          <path d="M5 13h6M8 10v3" />
+        </svg>
+        워커
+      </Link>
       <Link href="/wallet" className="nav-btn">
         <svg aria-hidden width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <rect x="2" y="4" width="12" height="9" rx="1.5" />
@@ -23,7 +31,7 @@ export function NavAuth() {
         </svg>
         지갑
       </Link>
-      {status !== 'authed' ? <LoginLink /> : <LogoutButton pending={pending} setPending={setPending} onDone={() => router.refresh()} />}
+      <LogoutButton pending={pending} setPending={setPending} onDone={() => router.refresh()} />
     </>
   )
 }

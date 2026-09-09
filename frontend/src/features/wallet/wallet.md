@@ -46,7 +46,7 @@ develop 에는 "지갑이 있는지" 알 방법이 없었다(`/users/me` 없음,
         └─ walletAddress      → <WalletDashboard/>
 ```
 
-- 네비 `지갑` 은 **로그인 여부와 무관하게 항상 보인다**(사용자 요구: 로그인 옆). guest 가 눌러도 로그인 → `next` 로 돌아오므로 별도 처리 없음. `navAuth.tsx` 안에서 로그인/로그아웃 버튼 **왼쪽**에 `<Link href="/wallet" className="nav-btn">지갑</Link>` 하나 추가(같은 `nav-btn`, 색은 회색 토큰만 — AGENTS.md 버튼 규칙). `siteNav.tsx` 의 `MENU` 는 건드리지 않는다(마케팅 링크).
+- 네비 `지갑` 은 **로그인한 뒤에만 보인다**(2026-09-08 변경, 처음엔 항상 표시였음). guest 가 URL 로 직접 `/wallet` 에 오면 proxy 가 로그인 → `next` 로 돌려보낸다. `navAuth.tsx` 안에서 authed 일 때 로그아웃 버튼 **왼쪽**에 `<Link href="/wallet" className="nav-btn">지갑</Link>` 하나 추가(같은 `nav-btn`, 색은 회색 토큰만 — AGENTS.md 버튼 규칙). `siteNav.tsx` 의 `MENU` 는 건드리지 않는다(마케팅 링크).
 - `/wallet` 은 `proxy.ts` 의 `PROTECTED` 와 `config.matcher` 두 곳에 추가(auth.md §4 규칙). 쿠키가 있어도 만료일 수 있으니 최종 판정은 `authFetch` 의 401 → reissue → 실패 시 `/login?next=/wallet&reason=expired` (이미 구현된 흐름).
 - 연결 성공 → 같은 페이지에서 상태만 대시보드로 바꾼다(라우트 이동 없음). 해제 성공 → 연결 카드로.
 
@@ -60,7 +60,7 @@ src/
       wallet/page.tsx                   h1 + <WalletPage/>('use client' 는 잎으로)                                              ✅
       wallet/loading.tsx                <WalletSkeleton/>                                                                        ✅
   proxy.ts                              PROTECTED += '/wallet', matcher += '/wallet/:path*'                                      ✅
-  features/auth/components/navAuth.tsx  [지갑] 링크(항상) + 로그인/로그아웃 — 같은 nav-btn                                        ✅
+  features/auth/components/navAuth.tsx  authed 일 때만 [지갑] 링크 + 로그아웃, guest 는 로그인만 — 같은 nav-btn                                        ✅
   features/auth/mocks/handlers.ts       목업 refresh 쿠키에서 HttpOnly 제거(§7 이유)                                              ✅
   features/wallet/
     wallet.md                           이 문서
@@ -163,7 +163,7 @@ src/
   2. fixture 로그인 → `/wallet` 복귀, MetaMask 없음 안내 + 설치 링크, 네비 [지갑][로그아웃]
   3. 가짜 프로바이더 주입 → [MetaMask 지갑 연결] → `eth_requestAccounts → eth_chainId → wallet_switchEthereumChain → personal_sign` 순서 호출, 서명 원문 = 서버(목업) SIWE 문장 그대로 → 대시보드(`0xf39f…2266`, SSAFY · 31221, GSC/ETH 잔액은 실제 SSAFY RPC 값)
   4. [지갑 연결 해제] → 연결 카드
-  5. 랜딩 네비: `서비스 소개 | 이용 방법 | GPU 목록 | 지갑 | 로그인`
+  5. 랜딩 네비: guest `서비스 소개 | 이용 방법 | GPU 목록 | 로그인`, authed `… | 지갑 | 로그아웃`
 - **실서버 검증(2026-09-08, 목업 off, 로컬 백엔드 `bootRun` + 도커 MySQL/Redis)**: 테스트 계정 `wallet-test01@example.com` 가입 → 로그인 → `GET` 200 `{ walletAddress: null }` → 연결 카드 → challenge → Hardhat 테스트 키로 **실제 서명**(viem) → link 200 → 대시보드(`0xf39f…2266`) → 새로고침 후 대시보드 유지(DB) → 해제 → 연결 카드. 콘솔 오류 0.
 - **남은 수동 확인**: 진짜 MetaMask 팝업 UX(계정 선택·네트워크 전환·서명 거절 문구). GSC 를 배포자 지갑에서 조금 보내 두면 0 이 아닌 잔액 확인 가능(`blockchain/README.md`).
 - 참고: dev 모드에선 React Strict Mode 로 `GET` 이 마운트 시 2번 나간다(백엔드 로그). 프로덕션 빌드에선 1번.
