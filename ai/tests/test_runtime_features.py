@@ -28,7 +28,7 @@ CANDIDATE = GpuCandidate(
     vram_mb=8188, benchmark_tokens_per_sec=36521.7)
 
 
-def features(candidate=CANDIDATE, model_id="qwen2.5-7b"):
+def features(candidate=CANDIDATE, model_id=3):
     return build_runtime_features(
         dataset=DATASET, training=TRAINING, model_id=model_id, candidate=candidate)
 
@@ -83,7 +83,7 @@ class TestTheOrderIsFixedInOnePlace:
     def test_the_vector_follows_the_declared_order(self):
         categories = CategoryMapping({
             "gpu_model": {CANDIDATE.gpu_model: 0},
-            "model_id": {"qwen2.5-7b": 0},
+            "model_id": {"3": 0},
         })
 
         vector = features().as_vector(categories)
@@ -114,8 +114,8 @@ class TestCategoryMapping:
 
     def test_it_is_learned_from_the_data(self):
         rows = [
-            {"gpu_model": "B", "model_id": "y"},
-            {"gpu_model": "A", "model_id": "x"},
+            {"gpu_model": "B", "model_id": 2},
+            {"gpu_model": "A", "model_id": 1},
         ]
 
         mapping = CategoryMapping.learned_from(rows)
@@ -124,7 +124,7 @@ class TestCategoryMapping:
 
     def test_the_same_data_always_gives_the_same_codes(self):
         # 정렬해서 번호를 매기므로 실행마다 달라지지 않는다. 파이썬 hash()는 달라진다.
-        rows = [{"gpu_model": "B", "model_id": "y"}, {"gpu_model": "A", "model_id": "x"}]
+        rows = [{"gpu_model": "B", "model_id": 2}, {"gpu_model": "A", "model_id": 1}]
 
         first = CategoryMapping.learned_from(rows).as_payload()
         second = CategoryMapping.learned_from(list(reversed(rows))).as_payload()
@@ -132,7 +132,7 @@ class TestCategoryMapping:
         assert first == second
 
     def test_an_unknown_value_is_refused_rather_than_guessed(self):
-        mapping = CategoryMapping({"gpu_model": {"A": 0}, "model_id": {"x": 0}})
+        mapping = CategoryMapping({"gpu_model": {"A": 0}, "model_id": {"1": 0}})
 
         with pytest.raises(UnknownCategoryError) as raised:
             mapping.code_of("gpu_model", "a GPU nobody trained on")

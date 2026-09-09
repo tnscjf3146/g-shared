@@ -39,8 +39,8 @@ PATH = "/scheduler/runtime/predict"
 
 def body(**overrides):
     payload = {
-        "modelId": "qwen2.5-7b",
-        "dockerImageId": "qlora-sft-v1",
+        "modelId": 3,
+        "dockerImageId": 1,
         "dataset": DATASET,
         "trainingConfig": TRAINING,
         "gpuCandidates": [FAST],
@@ -188,7 +188,7 @@ class TestRequestsThatAreRefused:
         assert response.json()["detail"][0]["type"] == "unknown_category"
 
     def test_an_unknown_base_model_is_refused(self, client):
-        response = client.post(PATH, json=body(modelId="a-model-nobody-has-seen"))
+        response = client.post(PATH, json=body(modelId=9999))
 
         assert response.status_code == 422
 

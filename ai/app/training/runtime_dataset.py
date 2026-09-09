@@ -76,21 +76,27 @@ _GPUS: tuple[_Gpu, ...] = (
 
 @dataclass(frozen=True)
 class _Model:
-    """SYNTHETIC. 파라미터 수는 모델의 사실이고, 여기서는 토큰당 비용을 정한다."""
+    """SYNTHETIC. 파라미터 수는 모델의 사실이고, 여기서는 토큰당 비용을 정한다.
 
-    model_id: str
+    ``model_id`` 는 Backend의 ``base_models`` PK와 같은 정수다. 값의 크기에는
+    의미가 없고(1번이 2번보다 작은 모델이라는 뜻이 아니다) 어느 모델인지를
+    가리킬 뿐이라, 학습에서도 범주로 다뤄진다. 여기 적힌 파라미터 수는 그
+    id가 어떤 모델을 뜻하는지에 대한 이 생성기의 가정이다.
+    """
+
+    model_id: int
     params: int
 
 
 _MODELS: tuple[_Model, ...] = (
-    _Model("qwen2.5-1.5b", 1_500_000_000),
-    _Model("qwen2.5-3b", 3_000_000_000),
-    _Model("qwen2.5-7b", 7_000_000_000),
+    _Model(1, 1_500_000_000),   # qwen2.5-1.5b 급
+    _Model(2, 3_000_000_000),   # qwen2.5-3b 급
+    _Model(3, 7_000_000_000),   # qwen2.5-7b 급
 )
 
 #: 현재 승인된 이미지는 하나다. 계약에는 있지만 feature에는 들어가지 않는 이유가
 #: 이것이다 -- 모든 행에서 같은 값인 열은 정보가 없다.
-DOCKER_IMAGE_ID = "qlora-sft-v1"
+DOCKER_IMAGE_ID = 1
 
 
 def _effective_rate(

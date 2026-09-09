@@ -8,6 +8,14 @@
 AUTO 설정 생성은 Runtime 모델과 아무 상관이 없고, 그것들까지 같이 못 쓰게 만들
 이유가 없다. 대신 Runtime 예측 엔드포인트만 왜 못 쓰는지 말하며 거절한다.
 가짜 예측으로 대신하지 않는다.
+
+**맞지 않는 모델은 그렇게 다루지 않는다.** 학습되지 않은 것은 학습을 돌리면 풀리는
+운영 상태지만, 지금 빌드와 다른 계약으로 학습된 artifact가 놓여 있는 것은 배포가
+잘못 물렸다는 뜻이다. 그것을 "없는 것"과 같이 취급하면 앱은 멀쩡히 뜨고 ``/health``
+도 통과하는데 예측을 부를 때마다 실패한다 -- 문제는 기동 환경에 있는데 드러나는
+곳은 요청이라, 보는 쪽은 요청을 의심하게 된다. 그래서
+:class:`~app.scheduler.runtime_predictor.IncompatibleModelError` 만은 붙잡지 않고
+올려 보내 **시작 자체를 실패시킨다.**
 """
 
 from __future__ import annotations
@@ -17,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.scheduler.runtime_predictor import (
+    IncompatibleModelError,
     ModelUnavailableError,
     RuntimePredictor,
     load_runtime_predictor,
@@ -49,6 +58,9 @@ class LoadedRuntimeModel:
     def load_from(cls, directory: Path) -> "LoadedRuntimeModel":
         try:
             return cls(load_runtime_predictor(directory), None)
+        except IncompatibleModelError:
+            # 이것만은 붙잡지 않는다. 이유는 이 파일 맨 위에 적었다.
+            raise
         except ModelUnavailableError as error:
             # 실패는 실패로 남긴다. 예측을 요청받을 때 이 문장을 그대로 돌려준다.
             return cls(None, str(error))
