@@ -65,6 +65,19 @@ public class Worker extends BaseTimeEntity {
                 vramMb, driverVersion, benchmarkTokensPerSec);
     }
 
+    /**
+     * GPU 정보 갱신. 그래픽카드 교체·드라이버 갱신·벤치마크 재측정 시 워커가 다시 알려준다.
+     * 신원(id·토큰·주인)과 실시간 상태(status·currentJobId)는 건드리지 않는다 —
+     * 여기서 바뀌는 것은 "이 워커가 무엇을 제공하는가" 뿐이다.
+     */
+    public void updateGpu(String gpuModel, Integer vramMb,
+                          String driverVersion, Double benchmarkTokensPerSec) {
+        this.gpuModel = gpuModel;
+        this.vramMb = vramMb;
+        this.driverVersion = driverVersion;
+        this.benchmarkTokensPerSec = benchmarkTokensPerSec;
+    }
+
     /** REGISTER 수신: 연결됨 + 작업 없음 상태로. */
     public void goOnline(LocalDateTime now) {
         this.status = WorkerStatus.ONLINE;
