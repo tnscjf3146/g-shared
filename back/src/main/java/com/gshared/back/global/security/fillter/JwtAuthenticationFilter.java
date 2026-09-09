@@ -17,16 +17,35 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.AntPathMatcher;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @Slf4j
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /**
+     * 워커 토큰(JWT 아님)으로 인증하는 경로. 여기서는 JWT 파싱을 아예 시도하지 않는다.
+     * 시도하면 워커가 접속할 때마다 파싱 실패가 ERROR 로그로 남아 진짜 오류를 덮는다.
+     * ⚠ SecurityConfig 의 permitAll 목록과 같이 유지해야 한다.
+     */
+    private static final List<String> WORKER_TOKEN_PATHS = List.of(
+            "/api/workers/authenticate",
+            "/api/workers/*/gpu");
+
+    private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
+
     private final JwtProvider jwtProvider;
     private final TokenBlacklistRepository tokenBlacklistRepository;
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        return WORKER_TOKEN_PATHS.stream().anyMatch(pattern -> PATH_MATCHER.match(pattern, path));
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
