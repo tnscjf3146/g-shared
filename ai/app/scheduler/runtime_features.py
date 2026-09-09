@@ -55,9 +55,17 @@ RUNTIME_FEATURE_NAMES: tuple[str, ...] = (
 #: 이 목록을 기준으로 한다.
 CATEGORICAL_FEATURE_NAMES: tuple[str, ...] = ("gpu_model", "model_id")
 
-#: Feature 구성이 바뀌면 올린다. 이 버전이 다른 모델은 지금 코드가 만드는 열과
-#: 다른 열로 학습된 것이므로 불러오지 않는다.
-FEATURE_SCHEMA_VERSION = "runtime-features-v1"
+#: Feature 구성이 바뀌면 올린다. 열 이름과 개수만이 아니라 **값의 의미**가 바뀔
+#: 때도 올린다. 이 버전이 다른 모델은 지금 코드가 만드는 것과 다른 열로 학습된
+#: 것이므로 불러오지 않는다.
+#:
+#: ``v1`` -> ``v2``: ``model_id`` 가 모델 이름 문자열(``"qwen2.5-7b"``)에서
+#: Backend ``base_models`` PK 정수(``1``, ``2``, ``3``)로 바뀌었다. 열 이름도
+#: 개수도 그대로라 :data:`RUNTIME_FEATURE_NAMES` 비교로는 걸러지지 않는다 --
+#: 버전을 올리지 않으면 v1 artifact가 아무 말 없이 로드되고, 그 뒤로 정수
+#: ``modelId`` 가 올 때마다 "본 적 없는 값"이라며 요청이 거절된다. 문제는
+#: 배포에 있는데 요청이 잘못된 것처럼 보이는 셈이다.
+FEATURE_SCHEMA_VERSION = "runtime-features-v2"
 
 #: 학습이 맞히려는 값. Feature에 절대 들어가면 안 되는 이름이기도 하다.
 TARGET_NAME = "actual_runtime_sec"
@@ -103,7 +111,7 @@ class RuntimeFeatures:
     batch_size: int
     max_length: int
     # Workload
-    model_id: str
+    model_id: int
 
     def as_mapping(self) -> dict[str, object]:
         """이름 → 값. 순서는 :data:`RUNTIME_FEATURE_NAMES` 를 따른다."""
@@ -134,6 +142,11 @@ class CategoryMapping:
 
     코드는 정수지만 XGBoost에는 카테고리 열로 알려 주므로 "4070 < 4090" 같은
     순서로 해석되지 않는다. 트리는 값의 집합을 나누는 방식으로 쪼갠다.
+
+    ``model_id`` 처럼 값 자체가 이미 정수(DB PK)인 열도 같은 길을 지난다. PK의
+    크기에는 아무 의미가 없기 때문이다 -- 1번 모델과 2번 모델 사이에 "2가 더
+    크다"고 할 만한 것이 없다. 그래서 숫자를 그대로 트리에 넘기지 않고 표를 거쳐
+    범주로 만든다. ``str(value)`` 로 조회하므로 문자열이든 정수든 같은 코드를 지난다.
     """
 
     def __init__(self, tables: Mapping[str, Mapping[str, int]]) -> None:
@@ -173,7 +186,7 @@ def build_runtime_features(
     *,
     dataset: RuntimeDatasetMetadata,
     training: TrainingConfig,
-    model_id: str,
+    model_id: int,
     candidate: GpuCandidate,
 ) -> RuntimeFeatures:
     """작업 하나와 GPU 하나를 합쳐 한 줄로 만든다.

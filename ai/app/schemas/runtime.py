@@ -17,6 +17,8 @@ from app.schemas.base import SchedulerSchema
 from app.schemas.dataset import DatasetMetadata
 from app.schemas.training import TrainingConfig
 
+#: DB PK로 오는 값도 이 타입을 쓴다. 0과 음수인 PK는 없으므로 ``gt=0`` 이 곧
+#: "실재하는 행을 가리키는가"에 대한 검사가 된다.
 PositiveInt = Annotated[int, Field(gt=0)]
 
 #: ``gt=0`` 만으로는 무한대가 통과한다 -- ``inf > 0`` 은 참이다. NaN은 비교가 모두
@@ -82,18 +84,19 @@ class GpuCandidate(SchedulerSchema):
 class RuntimePredictionRequest(SchedulerSchema):
     """Backend → AI Scheduler. 작업 하나와 그 작업을 돌릴 수 있는 GPU들."""
 
-    model_id: str = Field(
-        min_length=1,
+    model_id: PositiveInt = Field(
         description=(
-            "학습할 기반 모델. 파라미터 수가 실행 시간을 크게 좌우하므로 "
-            "예측에 쓰인다."
+            "Base Model database identifier. Backend의 base_models PK 그대로다. "
+            "학습할 기반 모델이 무엇인지가 실행 시간을 크게 좌우하므로 예측에 쓰인다. "
+            "정수지만 크기에 의미는 없다 -- 1보다 2가 큰 모델이라는 뜻이 아니라서 "
+            "범주형으로 다룬다(app.scheduler.runtime_features 참고)."
         ),
     )
-    docker_image_id: str = Field(
-        min_length=1,
+    docker_image_id: PositiveInt = Field(
         description=(
-            "학습을 돌릴 승인된 이미지. 계약에는 남기지만 현재 모델의 feature에는 "
-            "들어가지 않는다 -- 이유는 app.scheduler.runtime_features 참고."
+            "Approved Docker Image database identifier. Backend의 workloads PK 그대로다. "
+            "계약에는 남기지만 현재 모델의 feature에는 들어가지 않는다 -- "
+            "이유는 app.scheduler.runtime_features 참고."
         ),
     )
     dataset: RuntimeDatasetMetadata = Field(description="학습에 쓸 데이터셋")

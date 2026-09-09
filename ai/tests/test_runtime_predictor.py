@@ -24,7 +24,7 @@ FAST = GpuCandidate(
     vram_mb=24564, benchmark_tokens_per_sec=72000.0)
 
 
-def rows(*candidates, model_id="qwen2.5-7b"):
+def rows(*candidates, model_id=3):
     return [
         build_runtime_features(
             dataset=DATASET, training=TRAINING, model_id=model_id, candidate=candidate)
@@ -81,7 +81,7 @@ class TestTheDirectionOfTheAnswer:
             dataset=DATASET,
             training=TrainingConfig(
                 epochs=5, batch_size=8, learning_rate=0.0002, max_length=1024),
-            model_id="qwen2.5-7b", candidate=FAST)
+            model_id=3, candidate=FAST)
 
         assert predictor.predict([longer])[0] > predictor.predict(rows(FAST))[0]
 
@@ -91,7 +91,7 @@ class TestTheDirectionOfTheAnswer:
                 dataset_size_bytes=52428800, sample_count=40000,
                 total_tokens=14000000, effective_tokens=11496400,
                 avg_seq_length=350.0, max_seq_length=1800),
-            training=TRAINING, model_id="qwen2.5-7b", candidate=FAST)
+            training=TRAINING, model_id=3, candidate=FAST)
 
         assert predictor.predict([bigger])[0] > predictor.predict(rows(FAST))[0]
 
@@ -114,7 +114,7 @@ class TestWhatIsRefused:
 
     def test_a_base_model_nobody_trained_on(self, predictor):
         with pytest.raises(UnknownCategoryError) as raised:
-            predictor.predict(rows(FAST, model_id="a-model-nobody-has-seen"))
+            predictor.predict(rows(FAST, model_id=9999))
 
         assert raised.value.feature == "model_id"
 

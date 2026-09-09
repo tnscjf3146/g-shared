@@ -29,7 +29,7 @@ PREDICT_PATH = "/scheduler/runtime/predict"
 
 def body(**overrides):
     payload = {
-        "modelId": "qwen2.5-7b", "dockerImageId": "qlora-sft-v1",
+        "modelId": 3, "dockerImageId": 1,
         "dataset": DATASET, "trainingConfig": TRAINING,
         "gpuCandidates": [SLOW, MIDDLE, FAST],
     }
@@ -160,9 +160,19 @@ class TestRequestsThatAreRefused:
         assert response.status_code == 422
         assert response.json()["detail"][0]["type"] == "unknown_category"
 
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_an_id_that_cannot_be_a_primary_key(self, client, field, bad):
+        assert client.post(PATH, json=body(**{field: bad})).status_code == 422
+
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    def test_a_numeric_string_id(self, client, field):
+        # strict 정책이라 "3" 은 3으로 고쳐 주지 않는다.
+        assert client.post(PATH, json=body(**{field: "3"})).status_code == 422
+
     def test_an_unknown_base_model(self, client):
         assert client.post(
-            PATH, json=body(modelId="a-model-nobody-has-seen")).status_code == 422
+            PATH, json=body(modelId=9999)).status_code == 422
 
     def test_a_zero_benchmark(self, client):
         broken = dict(MIDDLE, benchmarkTokensPerSec=0.0)

@@ -26,7 +26,7 @@ def candidate(worker_id, benchmark=36521.7, gpu_model="NVIDIA GeForce RTX 4070 L
 
 def request_for(*worker_ids, **overrides):
     payload = {
-        "modelId": "qwen2.5-7b", "dockerImageId": "qlora-sft-v1",
+        "modelId": 3, "dockerImageId": 1,
         "dataset": DATASET, "trainingConfig": TRAINING,
         "gpuCandidates": [candidate(worker_id) for worker_id in worker_ids],
     }
