@@ -8,7 +8,7 @@ import com.gshared.back.global.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -30,8 +30,11 @@ public class SchedulerClient {
     private final RestClient restClient;
 
     public SchedulerClient(SchedulerProperties properties) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(properties.connectTimeout());
+        // 자바 내장 HttpClient 기반 팩토리. connect 는 HttpClient 가, read 는 팩토리가 담당.
+        java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(properties.connectTimeout())
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(properties.readTimeout());
 
         this.restClient = RestClient.builder()
@@ -60,7 +63,7 @@ public class SchedulerClient {
         } catch (RestClientResponseException e) {
             // detail 은 로그로 남긴다 (원인 추적용) — 응답 메시지는 ErrorCode 의 고정 문구
             log.warn("[Scheduler] {} 응답 {} body={}", path, e.getStatusCode(), e.getResponseBodyAsString());
-            if (e.getStatusCode() == HttpStatus.UNPROCESSABLE_ENTITY) {
+            if (e.getStatusCode() == HttpStatus.UNPROCESSABLE_CONTENT) {
                 throw new BusinessException(SchedulerErrorCode.SCHEDULER_REJECTED);
             }
             throw new BusinessException(SchedulerErrorCode.SCHEDULER_UNAVAILABLE);   // 503 포함 그 외 전부
