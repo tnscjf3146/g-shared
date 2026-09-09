@@ -8,6 +8,10 @@ import jakarta.validation.constraints.Size;
  * Dataset 메타데이터 등록 요청.
  * Scheduler 입력 6개는 전부 필수(하나라도 없으면 예측 불가 → 422).
  * Frontend 가 업로드 시 분석해서 보낸다.
+ *
+ * ponytail: 신뢰 경계 — effectiveTokens 등은 과금·예측의 근거인데 현재는 클라이언트 신고값을
+ *           그대로 믿는다(원본 분석 파이프라인이 서버에 없음). 업로드 스토리지 확정 후
+ *           서버측 재분석 또는 dataHash 대조 검증으로 교체할 것 (과금 검증 티켓과 연결).
  */
 public record CreateDatasetRequest(
 

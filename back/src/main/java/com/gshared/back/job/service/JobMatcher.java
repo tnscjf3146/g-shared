@@ -78,6 +78,7 @@ public class JobMatcher {
                 if (!sent) {
                     // 죽은 워커(스위퍼 처리 전)에 배정된 경우 → 즉시 FUNDED 복귀, 다음 순찰에 재매칭
                     jobService.unassignJob(job.getId(), worker.getId());
+                    takenThisSweep.remove(worker.getId());   // 배정 되돌렸으니 이번 순찰 점유도 해제
                     log.info("[MATCH] jobId={} 전송 실패 → 배정 되돌림(재매칭 대기)", job.getId());
                 }
                 // TODO: 전송은 됐지만 JOB_ACCEPTED 가 오래 안 오는 Job 재큐잉은 후속 티켓

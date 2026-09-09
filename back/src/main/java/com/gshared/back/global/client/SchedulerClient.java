@@ -7,7 +7,6 @@ import com.gshared.back.global.client.dto.SchedulerTrainingConfigRequest;
 import com.gshared.back.global.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -55,18 +54,25 @@ public class SchedulerClient {
 
     private <T> T call(String path, Object body, Class<T> responseType) {
         try {
-            return restClient.post()
+            T response = restClient.post()
                     .uri(path)
                     .body(body)
                     .retrieve()
                     .body(responseType);
+            if (response == null) {
+                // 2xx 인데 body 없음 — 계약 위반. 미매핑 500 으로 새지 않게 여기서 차단
+                log.warn("[Scheduler] {} 2xx 응답이지만 body 없음", path);
+                throw new BusinessException(SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
+            }
+            return response;
         } catch (RestClientResponseException e) {
             // detail 은 로그로 남긴다 (원인 추적용) — 응답 메시지는 ErrorCode 의 고정 문구
             log.warn("[Scheduler] {} 응답 {} body={}", path, e.getStatusCode(), e.getResponseBodyAsString());
-            if (e.getStatusCode() == HttpStatus.UNPROCESSABLE_CONTENT) {
+            if (e.getStatusCode().is4xxClientError()) {
+                // 422(검증 거절)뿐 아니라 400·404(경로/계약 불일치)도 "재시도로 해결 안 됨" 쪽으로
                 throw new BusinessException(SchedulerErrorCode.SCHEDULER_REJECTED);
             }
-            throw new BusinessException(SchedulerErrorCode.SCHEDULER_UNAVAILABLE);   // 503 포함 그 외 전부
+            throw new BusinessException(SchedulerErrorCode.SCHEDULER_UNAVAILABLE);   // 5xx
         } catch (ResourceAccessException e) {
             // 연결 거부·타임아웃
             log.warn("[Scheduler] {} 연결 실패: {}", path, e.getMessage());

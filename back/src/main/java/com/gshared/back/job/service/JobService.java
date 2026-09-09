@@ -65,8 +65,12 @@ public class JobService {
                 .orElseThrow(() -> new BusinessException(DatasetErrorCode.DATASET_NOT_FOUND));
         workloadRepository.findByIdAndEnabledTrue(request.workloadId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
-        baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
+        var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
+        // 모델이 요청한 이미지(workload)에 속하는지 — 불일치 조합이 Worker 까지 흘러가지 않게
+        if (!baseModel.getWorkload().getId().equals(request.workloadId())) {
+            throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
+        }
 
         SchedulerRecommendRequest.DatasetMeta datasetMeta = new SchedulerRecommendRequest.DatasetMeta(
                 dataset.getSizeBytes(), dataset.getSampleCount(),
@@ -90,6 +94,10 @@ public class JobService {
         // ④ Scheduler 추천 (트랜잭션 밖 — 외부 HTTP)
         SchedulerRecommendResponse rec = schedulerClient.recommend(new SchedulerRecommendRequest(
                 request.baseModelId(), request.workloadId(), datasetMeta, config, candidates));
+        // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
+        if (rec.recommendedWorkerId() == null || rec.rankings() == null || rec.rankings().isEmpty()) {
+            throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);
+        }
 
         // ⑤ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
         Job job = Job.create(
@@ -113,12 +121,25 @@ public class JobService {
                     || !c.path("learningRate").isNumber() || !c.path("maxLength").isNumber()) {
                 throw new BusinessException(JobErrorCode.INVALID_TRAINING_CONFIG);
             }
-            return new SchedulerTrainingConfig(
+            SchedulerTrainingConfig config = new SchedulerTrainingConfig(
                     c.path("epochs").asInt(), c.path("batchSize").asInt(),
                     c.path("learningRate").asDouble(), c.path("maxLength").asInt());
+            // 양수 검증 — Scheduler 의 422 에만 기대지 않고 우리도 막는다 (0 epochs → 1 TOKEN 견적 방지)
+            if (config.epochs() <= 0 || config.batchSize() <= 0
+                    || config.learningRate() <= 0 || config.maxLength() <= 0) {
+                throw new BusinessException(JobErrorCode.INVALID_TRAINING_CONFIG);
+            }
+            return config;
         }
         String priority = request.trainingPriority() != null ? request.trainingPriority() : "BALANCED";
-        return schedulerClient.trainingConfig(new SchedulerTrainingConfigRequest(datasetMeta, priority));
+        SchedulerTrainingConfig config = schedulerClient.trainingConfig(
+                new SchedulerTrainingConfigRequest(datasetMeta, priority));
+        // AUTO 응답 형태 검증 — null 필드가 NOT NULL 컬럼 저장에서 터지지 않게
+        if (config.epochs() == null || config.batchSize() == null
+                || config.learningRate() == null || config.maxLength() == null) {
+            throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
+        }
+        return config;
     }
 
     /** 추천 워커의 예상 실행시간 (rankings 에서 추출, 없으면 1등). */
