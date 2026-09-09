@@ -8,6 +8,7 @@ API 테스트와 실제 실행에서 확인한다.
 import pytest
 
 from app.schemas.recommendation import RecommendationRequest
+from app.scheduler.feasibility import NoFeasibleGpuError
 from app.scheduler.ranking import RankingError
 from app.scheduler.recommendation import recommend_worker
 from app.scheduler.runtime_features import UnknownCategoryError
@@ -19,15 +20,21 @@ DATASET = {
 TRAINING = {"epochs": 3, "batchSize": 8, "learningRate": 0.0002, "maxLength": 1024}
 
 
-def candidate(worker_id, benchmark=36521.7, gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU"):
+def candidate(worker_id, benchmark=36521.7, vram=8188,
+              gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU"):
     return {"workerId": worker_id, "gpuModel": gpu_model,
-            "vramMb": 8188, "benchmarkTokensPerSec": benchmark}
+            "vramMb": vram, "benchmarkTokensPerSec": benchmark}
+
+
+#: 후보 전부가 통과하는 요구량. 걸러내기를 확인하는 테스트만 이 값을 올린다.
+LOW_REQUIREMENT = {"minVramMb": 8000}
 
 
 def request_for(*worker_ids, **overrides):
     payload = {
         "modelId": 3, "dockerImageId": 1,
         "dataset": DATASET, "trainingConfig": TRAINING,
+        "requirements": LOW_REQUIREMENT,
         "gpuCandidates": [candidate(worker_id) for worker_id in worker_ids],
     }
     payload.update(overrides)
@@ -99,6 +106,94 @@ class TestTheWiring:
         recommend_worker(request_for("worker-a"), predictor)
 
         assert "worker_id" not in predictor.rows[0].as_mapping()
+
+
+class TestFeasibilityRunsFirst:
+    """예측기에 닿기 전에 걸러진다.
+
+    최종 응답만 보면 "예측한 뒤에 지우는" 구현도 통과한다. 그래서 여기서는
+    예측기가 **무엇을 받았는지**를 본다 -- 그것이 순서를 증명하는 유일한 자리다.
+    """
+
+    def test_an_infeasible_candidate_never_reaches_the_predictor(self):
+        predictor = Predictor(1000.0)
+
+        recommend_worker(
+            RecommendationRequest(
+                modelId=3, dockerImageId=1, dataset=DATASET, trainingConfig=TRAINING,
+                requirements={"minVramMb": 12000},
+                gpuCandidates=[candidate("worker-8g", vram=8192),
+                               candidate("worker-24g", vram=24576)]),
+            predictor)
+
+        assert len(predictor.rows) == 1
+
+    def test_the_row_that_arrives_is_the_feasible_one(self):
+        predictor = Predictor(1000.0)
+
+        recommend_worker(
+            RecommendationRequest(
+                modelId=3, dockerImageId=1, dataset=DATASET, trainingConfig=TRAINING,
+                requirements={"minVramMb": 12000},
+                gpuCandidates=[candidate("worker-8g", vram=8192),
+                               candidate("worker-24g", vram=24576)]),
+            predictor)
+
+        assert predictor.rows[0].as_mapping()["vram_mb"] == 24576
+
+    def test_the_predictor_is_not_called_at_all_when_nothing_fits(self):
+        # 돌지 않을 GPU의 실행 시간을 묻지 않는다. 한 번도.
+        predictor = Predictor(1000.0)
+
+        with pytest.raises(NoFeasibleGpuError):
+            recommend_worker(
+                RecommendationRequest(
+                    modelId=3, dockerImageId=1, dataset=DATASET,
+                    trainingConfig=TRAINING,
+                    requirements={"minVramMb": 40960},
+                    gpuCandidates=[candidate("worker-8g", vram=8192),
+                                   candidate("worker-24g", vram=24576)]),
+                predictor)
+
+        assert predictor.rows is None
+
+    def test_the_dropped_candidate_is_not_in_the_rankings(self):
+        chosen = recommend_worker(
+            RecommendationRequest(
+                modelId=3, dockerImageId=1, dataset=DATASET, trainingConfig=TRAINING,
+                requirements={"minVramMb": 12000},
+                gpuCandidates=[candidate("worker-8g", vram=8192),
+                               candidate("worker-12g", vram=12288),
+                               candidate("worker-24g", vram=24576)]),
+            Predictor(500.0, 2000.0))
+
+        assert [entry.worker_id for entry in chosen.rankings] == [
+            "worker-12g", "worker-24g"]
+
+    def test_the_recommendation_is_never_an_infeasible_gpu(self):
+        # 8GB가 제일 빠르다고 나와도 돌릴 수 없으면 추천이 아니다.
+        chosen = recommend_worker(
+            RecommendationRequest(
+                modelId=3, dockerImageId=1, dataset=DATASET, trainingConfig=TRAINING,
+                requirements={"minVramMb": 12000},
+                gpuCandidates=[candidate("worker-8g", vram=8192, benchmark=99000.0),
+                               candidate("worker-24g", vram=24576)]),
+            Predictor(1.0))
+
+        assert chosen.recommended_worker_id == "worker-24g"
+
+    def test_a_boundary_candidate_is_predicted(self):
+        predictor = Predictor(1000.0)
+
+        chosen = recommend_worker(
+            RecommendationRequest(
+                modelId=3, dockerImageId=1, dataset=DATASET, trainingConfig=TRAINING,
+                requirements={"minVramMb": 12288},
+                gpuCandidates=[candidate("worker-exact", vram=12288)]),
+            predictor)
+
+        assert len(predictor.rows) == 1
+        assert chosen.recommended_worker_id == "worker-exact"
 
 
 class TestDeterminism:
