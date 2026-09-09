@@ -5,6 +5,12 @@
   AUTO가 만든 것이든 사용자가 직접 넣은 것이든 여기로 온다.
 - ``POST /scheduler/runtime/predict`` : 작업 하나와 GPU 후보들을 받아 후보마다
   실행 시간을 예측한다. 순위도 추천도 없다.
+- ``POST /scheduler/recommend``       : 같은 입력으로 예측하고, 그 결과를 줄
+  세워 하나를 추천한다.
+
+뒤의 두 개를 나눈 이유는 답의 성격이 다르기 때문이다. 예측은 "이 GPU에서 얼마나
+걸리나"라는 사실이고, 추천은 "그래서 어디로 보낼까"라는 결정이다. Backend가 순위
+없이 예측만 원할 때 추천까지 받아 무시해야 할 이유가 없다.
 
 Pydantic이 이미 각 필드를 검증했으므로 핸들러에는 필드 검사가 없다.
 ``/scheduler/input`` 은 설정과 데이터셋을 함께 보는 정책 검사도 한 번 거치는데,
@@ -14,6 +20,11 @@ Pydantic이 이미 각 필드를 검증했으므로 핸들러에는 필드 검�
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from app.schemas.recommendation import (
+    RankedPrediction,
+    RecommendationRequest,
+    RecommendationResponse,
+)
 from app.schemas.runtime import (
     RuntimePrediction,
     RuntimePredictionRequest,
@@ -28,6 +39,8 @@ from app.schemas.training import TrainingConfig
 from app.scheduler.auto_config import build_auto_config
 from app.scheduler.features import build_dataset_features
 from app.scheduler.policy import PolicyReport, check_training_policy
+from app.scheduler.ranking import RankingError
+from app.scheduler.recommendation import recommend_worker
 from app.scheduler.runtime_features import UnknownCategoryError, build_runtime_features
 from app.scheduler.runtime_predictor import PredictionError
 
@@ -130,6 +143,57 @@ def predict_runtime(
             # zip이 순서를 보장한다. rows도 candidates 순서로 만들었으므로
             # 예측 i번째가 후보 i번째다.
             for candidate, predicted in zip(request.gpu_candidates, seconds)
+        ],
+    )
+
+
+@router.post("/recommend", response_model=RecommendationResponse)
+def recommend_gpu(
+    request: RecommendationRequest, http_request: Request
+) -> RecommendationResponse:
+    """예측하고, 줄 세우고, 하나를 고른다.
+
+    ``/runtime/predict`` 를 HTTP로 다시 부르지 않는다. 같은 프로세스 안의 예측기를
+    직접 쓴다 -- 자기 자신에게 보내는 요청은 비용만 늘리고 실패할 자리를 하나 더
+    만든다.
+
+    모델이 없으면 추천도 없다. benchmark가 가장 높은 GPU를 고르는 식으로 물러서지
+    않는다 -- 그런 답은 예측을 근거로 한 추천이 아니면서 그렇게 보인다.
+    """
+    loaded = getattr(http_request.app.state, "runtime_model", None)
+    if loaded is None or not loaded.is_available:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(loaded.error if loaded else "the runtime model was never loaded"),
+        )
+
+    try:
+        chosen = recommend_worker(request, loaded.predictor)
+    except UnknownCategoryError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=[{
+                "type": "unknown_category",
+                "loc": ["body", error.feature],
+                "msg": str(error),
+            }],
+        ) from error
+    except (PredictionError, RankingError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(error),
+        ) from error
+
+    return RecommendationResponse(
+        scheduler_model_version=loaded.predictor.model_version,
+        recommended_worker_id=chosen.recommended_worker_id,
+        rankings=[
+            RankedPrediction(
+                rank=entry.rank,
+                worker_id=entry.worker_id,
+                predicted_runtime_sec=entry.predicted_runtime_sec,
+            )
+            for entry in chosen.rankings
         ],
     )
 
