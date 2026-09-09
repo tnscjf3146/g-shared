@@ -5,8 +5,8 @@
   AUTO가 만든 것이든 사용자가 직접 넣은 것이든 여기로 온다.
 - ``POST /scheduler/runtime/predict`` : 작업 하나와 GPU 후보들을 받아 후보마다
   실행 시간을 예측한다. 순위도 추천도 없다.
-- ``POST /scheduler/recommend``       : 같은 입력으로 예측하고, 그 결과를 줄
-  세워 하나를 추천한다.
+- ``POST /scheduler/recommend``       : 같은 입력에 Job의 기술 요구사항을 더해
+  받아, 돌릴 수 있는 GPU만 추린 뒤 예측하고, 그 결과를 줄 세워 하나를 추천한다.
 
 뒤의 두 개를 나눈 이유는 답의 성격이 다르기 때문이다. 예측은 "이 GPU에서 얼마나
 걸리나"라는 사실이고, 추천은 "그래서 어디로 보낼까"라는 결정이다. Backend가 순위
@@ -37,6 +37,7 @@ from app.schemas.scheduler_input import (
 )
 from app.schemas.training import TrainingConfig
 from app.scheduler.auto_config import build_auto_config
+from app.scheduler.feasibility import NoFeasibleGpuError
 from app.scheduler.features import build_dataset_features
 from app.scheduler.policy import PolicyReport, check_training_policy
 from app.scheduler.ranking import RankingError
@@ -151,7 +152,7 @@ def predict_runtime(
 def recommend_gpu(
     request: RecommendationRequest, http_request: Request
 ) -> RecommendationResponse:
-    """예측하고, 줄 세우고, 하나를 고른다.
+    """돌릴 수 있는 후보를 추리고, 예측하고, 줄 세우고, 하나를 고른다.
 
     ``/runtime/predict`` 를 HTTP로 다시 부르지 않는다. 같은 프로세스 안의 예측기를
     직접 쓴다 -- 자기 자신에게 보내는 요청은 비용만 늘리고 실패할 자리를 하나 더
@@ -159,6 +160,15 @@ def recommend_gpu(
 
     모델이 없으면 추천도 없다. benchmark가 가장 높은 GPU를 고르는 식으로 물러서지
     않는다 -- 그런 답은 예측을 근거로 한 추천이 아니면서 그렇게 보인다.
+
+    답을 내지 못하는 세 가지를 각각 다른 상태 코드로 가른다. Backend가 셋에 대해
+    해야 할 일이 다르기 때문이다.
+
+    * **422** -- 요청이 잘못됐다. 고쳐서 다시 보내야 한다.
+    * **503** -- Runtime 모델을 못 불러왔다. Scheduler 쪽 문제이고, 요청은 그대로
+      두고 나중에 다시 보내면 된다.
+    * **409** -- 요청도 모델도 멀쩡한데 이 후보들 중에 Job을 돌릴 수 있는 GPU가
+      없다. 다시 보내도 같은 답이고, 더 큰 GPU가 붙어야 달라진다.
     """
     loaded = getattr(http_request.app.state, "runtime_model", None)
     if loaded is None or not loaded.is_available:
@@ -169,6 +179,16 @@ def recommend_gpu(
 
     try:
         chosen = recommend_worker(request, loaded.predictor)
+    except NoFeasibleGpuError as error:
+        # 요청이 잘못된 것도, 모델이 없는 것도 아니다. 지금 이 후보들로는 답이 없다.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=[{
+                "type": "no_feasible_gpu",
+                "loc": ["body", "gpuCandidates"],
+                "msg": str(error),
+            }],
+        ) from error
     except UnknownCategoryError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
