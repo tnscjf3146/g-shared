@@ -8,8 +8,8 @@ import java.util.List;
  * minVramMb 는 Scheduler 가 아직 받지 않아 제외 (Feasibility Filter 추가 시 함께 추가).
  */
 public record SchedulerRecommendRequest(
-        String modelId,          // "qwen2.5-7b"
-        String dockerImageId,    // "qlora-sft-v1"
+        Long modelId,            // base_models PK (Scheduler feature schema v2 — 정수)
+        Long dockerImageId,      // workloads PK
         DatasetMeta dataset,
         SchedulerTrainingConfig trainingConfig,
         List<GpuCandidate> gpuCandidates

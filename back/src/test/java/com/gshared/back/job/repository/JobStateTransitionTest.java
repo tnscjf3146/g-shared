@@ -45,15 +45,24 @@ class JobStateTransitionTest {
     @Autowired
     private DatasetRepository datasetRepository;
 
+    @Autowired
+    private com.gshared.back.workload.repository.WorkloadRepository workloadRepository;
+    @Autowired
+    private com.gshared.back.workload.repository.BaseModelRepository baseModelRepository;
+
     private User owner;
     private Dataset dataset;      // FK 만족용 실제 데이터셋
     private Worker workerA;       // FK 만족용 실제 워커 2명
     private Worker workerB;
+    private Long workloadId;      // V8 seed 카탈로그의 정수 PK (auto-increment 값에 의존하지 않게 slug 로 조회)
+    private Long baseModelId;
 
     @BeforeEach
     void setUp() {
         owner = userRepository.save(User.createUser(
                 "transition-" + UUID.randomUUID() + "@gshared.io", "encoded", "전이테스터"));
+        workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
         dataset = datasetRepository.save(Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null));
         workerA = newWorker("a-" + UUID.randomUUID());
@@ -63,7 +72,7 @@ class JobStateTransitionTest {
     // ── 헬퍼 ────────────────────────────────────────────────────
 
     private Job newJob() {
-        return jobRepository.save(Job.create(owner, "qlora-sft-v1", "qwen2.5-7b", dataset.getId(),
+        return jobRepository.save(Job.create(owner, workloadId, baseModelId, dataset.getId(),
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
     }
 
@@ -260,7 +269,7 @@ class JobStateTransitionTest {
     void ownership_query_hides_others_job() {
         User other = userRepository.save(User.createUser(
                 "other-" + UUID.randomUUID() + "@gshared.io", "encoded", "타인"));
-        Job othersJob = jobRepository.save(Job.create(other, "qlora-sft-v1", "qwen2.5-7b", dataset.getId(),
+        Job othersJob = jobRepository.save(Job.create(other, workloadId, baseModelId, dataset.getId(),
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
 
         assertThat(jobRepository.findByIdAndOwnerId(othersJob.getId(), owner.getId())).isEmpty();

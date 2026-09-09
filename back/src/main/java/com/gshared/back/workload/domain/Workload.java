@@ -17,8 +17,12 @@ import lombok.NoArgsConstructor;
 public class Workload extends BaseTimeEntity {
 
     @Id
-    @Column(name = "workload_id", length = 32)
-    private String id;               // "qlora-sft-v1" — Scheduler dockerImageId
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "workload_id")
+    private Long id;                 // Scheduler dockerImageId (정수 PK — V8)
+
+    @Column(nullable = false, unique = true, length = 32)
+    private String slug;             // "qlora-sft-v1" — 사람용 식별자 (이름 변경에도 FK 불변)
 
     @Column(nullable = false, length = 64)
     private String name;

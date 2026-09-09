@@ -11,8 +11,8 @@ import java.time.LocalDateTime;
 public record JobDetailResponse(
         Long jobId,
         JobStatus status,
-        String workloadId,
-        String baseModelId,
+        Long workloadId,
+        Long baseModelId,
         Long datasetId,
         String trainingMode,
         Integer epochs,

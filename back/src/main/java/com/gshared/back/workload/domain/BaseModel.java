@@ -17,8 +17,12 @@ import lombok.NoArgsConstructor;
 public class BaseModel extends BaseTimeEntity {
 
     @Id
-    @Column(name = "model_id", length = 64)
-    private String id;               // "qwen2.5-7b" — Scheduler modelId
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "model_id")
+    private Long id;                 // Scheduler modelId (정수 PK — V8)
+
+    @Column(nullable = false, unique = true, length = 64)
+    private String slug;             // "qwen2.5-7b" — 사람용 식별자
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "workload_id", nullable = false)

@@ -12,11 +12,11 @@ import tools.jackson.databind.JsonNode;
  */
 public record CreateJobRequest(
 
-        @NotBlank(message = "workloadId는 필수값입니다.")
-        String workloadId,          // "qlora-sft-v1"
+        @NotNull(message = "workloadId는 필수값입니다.")
+        Long workloadId,            // workloads PK (V8 — 정수)
 
-        @NotBlank(message = "baseModelId는 필수값입니다.")
-        String baseModelId,         // "qwen2.5-7b"
+        @NotNull(message = "baseModelId는 필수값입니다.")
+        Long baseModelId,           // base_models PK (V8 — 정수)
 
         @NotNull(message = "datasetId는 필수값입니다.")
         Long datasetId,
