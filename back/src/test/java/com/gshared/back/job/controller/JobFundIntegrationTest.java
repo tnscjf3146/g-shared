@@ -42,13 +42,19 @@ class JobFundIntegrationTest {
     @Autowired
     private JwtProvider jwtProvider;
 
+    @Autowired
+    private com.gshared.back.dataset.repository.DatasetRepository datasetRepository;
+
     private User owner;
     private String ownerToken;
+    private Long datasetId;   // jobs.dataset_id FK 만족용
 
     @BeforeEach
     void setUp() {
         owner = saveUser("fund-owner");
         ownerToken = jwtProvider.createAccessToken(owner.getId(), owner.getRole());
+        datasetId = datasetRepository.save(com.gshared.back.dataset.domain.Dataset.create(
+                owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null)).getId();
     }
 
     private User saveUser(String prefix) {
@@ -58,7 +64,8 @@ class JobFundIntegrationTest {
 
     private Job saveJob(User jobOwner) {
         return jobRepository.save(Job.create(
-                jobOwner, 1L, 1L, 1L, 1L, "AUTO", null, 1500, 3000L));
+                jobOwner, "qlora-sft-v1", "qwen2.5-7b", datasetId,
+                "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
     }
 
     private String fundUrl(Long jobId) {
