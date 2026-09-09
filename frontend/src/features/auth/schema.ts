@@ -31,9 +31,10 @@ export const signupSchema = z
   })
   .check(z.refine((v) => v.password === v.passwordConfirm, { path: ['passwordConfirm'], message: '비밀번호가 일치하지 않습니다.' }))
 
+// 로그인은 두 필드 모두 형식 검사 없이 존재만 — 규칙 노출을 피하고, 서버(LoginRequest)도 형식을 보지 않는다(틀리면 INVALID_CREDENTIALS)
 export const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().check(z.minLength(1, '비밀번호는 필수값입니다.')), // 로그인은 형식 검사 없이 존재만 — 규칙 노출을 피한다
+  email: z.string().check(z.minLength(1, '이메일은 필수값입니다.')),
+  password: z.string().check(z.minLength(1, '비밀번호는 필수값입니다.')),
 })
 
 export const tokenResponseSchema = z.object({ accessToken: z.string().check(z.minLength(1)) })

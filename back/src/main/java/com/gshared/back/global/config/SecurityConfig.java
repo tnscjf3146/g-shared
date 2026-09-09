@@ -64,6 +64,13 @@ public class SecurityConfig {
                         // WebSocket 핸드셰이크는 워커 토큰으로 인증(WorkerHandshakeInterceptor) → JWT 필터 통과
                         .requestMatchers("/ws/**").permitAll()
 
+                        // 사람 없이 워커 프로그램이 부르는 곳. 로그인 JWT 가 아니라 워커 토큰을 들고 오므로
+                        // 여기서는 통과시키고 WorkerService 가 그 토큰으로 직접 검증한다.
+                        // (/api/workers/register 는 사람이 로그인해서 부르므로 아래 authenticated 에 남는다)
+                        // ⚠ 이 목록을 고치면 JwtAuthenticationFilter.WORKER_TOKEN_PATHS 도 같이 고쳐야 한다.
+                        .requestMatchers(HttpMethod.POST, "/api/workers/authenticate").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/workers/*/gpu").permitAll()
+
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
 
