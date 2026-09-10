@@ -7,7 +7,6 @@ import com.gshared.back.global.client.SchedulerClient;
 import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
 import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
 import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
-import com.gshared.back.global.client.dto.SchedulerTrainingConfigRequest;
 import com.gshared.back.global.exception.BusinessException;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.dto.request.CreateJobRequest;
@@ -33,7 +32,6 @@ import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -48,6 +46,7 @@ public class JobService {
     private final WorkloadRepository workloadRepository;
     private final BaseModelRepository baseModelRepository;
     private final SchedulerClient schedulerClient;
+    private final TrainingConfigResolver trainingConfigResolver;
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
 
@@ -112,34 +111,17 @@ public class JobService {
         return CreateJobResponse.from(job);
     }
 
-    /** CUSTOM: 사용자 4값 검증 / AUTO: Scheduler 가 방향(trainingPriority)에 맞춰 확정. */
+    /**
+     * CUSTOM: 사용자 4값 검증 / AUTO: Scheduler 가 방향(trainingPriority)에 맞춰 확정.
+     *
+     * <p>실제 규칙은 {@link TrainingConfigResolver} 에 있다 — 견적(estimate)과 같은 규칙이어야
+     * 하기 때문이다. 견적에서 통과한 설정이 주문에서 거절당하면 사용자는 무엇이 틀렸는지 알 수 없다.
+     */
     private SchedulerTrainingConfig resolveTrainingConfig(CreateJobRequest request,
                                                           SchedulerRecommendRequest.DatasetMeta datasetMeta) {
-        if ("CUSTOM".equals(request.trainingMode())) {
-            JsonNode c = request.trainingConfig();
-            if (c == null || !c.path("epochs").isNumber() || !c.path("batchSize").isNumber()
-                    || !c.path("learningRate").isNumber() || !c.path("maxLength").isNumber()) {
-                throw new BusinessException(JobErrorCode.INVALID_TRAINING_CONFIG);
-            }
-            SchedulerTrainingConfig config = new SchedulerTrainingConfig(
-                    c.path("epochs").asInt(), c.path("batchSize").asInt(),
-                    c.path("learningRate").asDouble(), c.path("maxLength").asInt());
-            // 양수 검증 — Scheduler 의 422 에만 기대지 않고 우리도 막는다 (0 epochs → 1 TOKEN 견적 방지)
-            if (config.epochs() <= 0 || config.batchSize() <= 0
-                    || config.learningRate() <= 0 || config.maxLength() <= 0) {
-                throw new BusinessException(JobErrorCode.INVALID_TRAINING_CONFIG);
-            }
-            return config;
-        }
-        String priority = request.trainingPriority() != null ? request.trainingPriority() : "BALANCED";
-        SchedulerTrainingConfig config = schedulerClient.trainingConfig(
-                new SchedulerTrainingConfigRequest(datasetMeta, priority));
-        // AUTO 응답 형태 검증 — null 필드가 NOT NULL 컬럼 저장에서 터지지 않게
-        if (config.epochs() == null || config.batchSize() == null
-                || config.learningRate() == null || config.maxLength() == null) {
-            throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
-        }
-        return config;
+        return trainingConfigResolver.resolve(
+                request.trainingMode(), request.trainingPriority(),
+                request.trainingConfig(), datasetMeta);
     }
 
     /** 추천 워커의 예상 실행시간 (rankings 에서 추출, 없으면 1등). */
@@ -152,12 +134,11 @@ public class JobService {
     }
 
     /**
-     * 예상 비용 (TOKEN). billing 기준 = effectiveTokens × epochs.
-     * ponytail: 과금 정책 미정 — 1만 토큰당 1 TOKEN 임시 공식. 정책 확정 시 이 메서드만 교체.
+     * 예상 비용 (TOKEN). 공식은 {@link JobCostPolicy} 에 있다 —
+     * 견적 화면에서 본 금액과 실제 주문 금액이 갈라지지 않게 한 곳에서만 계산한다.
      */
     private Long estimateCost(Dataset dataset, SchedulerTrainingConfig config) {
-        long billedTokens = dataset.getEffectiveTokens() * config.epochs();
-        return Math.max(1, billedTokens / 10_000);
+        return JobCostPolicy.estimate(dataset.getEffectiveTokens(), config.epochs());
     }
 
     /**

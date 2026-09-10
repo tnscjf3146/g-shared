@@ -8,6 +8,7 @@ import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
 import com.gshared.back.worker.dto.request.UpdateWorkerGpuRequest;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
+import com.gshared.back.worker.dto.response.WorkerResponse;
 import com.gshared.back.worker.domain.WorkerStatus;
 import com.gshared.back.worker.exception.WorkerErrorCode;
 import com.gshared.back.worker.repository.WorkerRepository;
@@ -20,6 +21,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -87,6 +89,35 @@ public class WorkerService {
         findOwnWorker(rawToken, workerId).updateGpu(
                 request.gpuModel(), request.vramMb(),
                 request.driverVersion(), request.benchmarkTokensPerSec());
+    }
+
+    /**
+     * 내가 등록한 워커 전부. 한 대도 없으면 빈 목록이다 — 없는 것은 오류가 아니라
+     * "아직 안 붙였다"는 정상 상태이고, 화면은 그때 설치 안내를 보여준다.
+     */
+    public List<WorkerResponse> getMyWorkers(Long ownerId) {
+        return workerRepository.findMineWithOwner(ownerId).stream()
+                .map(WorkerResponse::from)
+                .toList();
+    }
+
+    /**
+     * 워커 등록 해제. 주인만 지울 수 있고, 남의 것을 지목하면 존재 여부를 흘리지 않도록 404 다.
+     *
+     * <p>일을 맡고 있는 워커는 지우지 않는다. 지워 버리면 그 Job 은 결과를 받을 상대가
+     * 사라진 채 RUNNING 에 남고, 되돌릴 방법이 없다. 취소를 먼저 하도록 409 로 막는다.
+     *
+     * <p>지운 뒤 워커 프로그램은 다음 인증에서 WORKER_NOT_FOUND 를 받고 재등록으로 넘어간다 —
+     * 그쪽 흐름이 이미 그렇게 되어 있어, 여기서 따로 알릴 필요가 없다.
+     */
+    @Transactional
+    public void delete(Long ownerId, String workerId) {
+        Worker worker = workerRepository.findByIdAndOwnerId(workerId, ownerId)
+                .orElseThrow(() -> new BusinessException(WorkerErrorCode.WORKER_NOT_FOUND));
+        if (worker.getStatus() == WorkerStatus.RUNNING || worker.getCurrentJobId() != null) {
+            throw new BusinessException(WorkerErrorCode.WORKER_BUSY);
+        }
+        workerRepository.delete(worker);
     }
 
     /**

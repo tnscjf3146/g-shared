@@ -24,8 +24,15 @@ public class Workload extends BaseTimeEntity {
     @Column(nullable = false, unique = true, length = 32)
     private String slug;             // "qlora-sft-v1" — 사람용 식별자 (이름 변경에도 FK 불변)
 
+    @Column(nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    private WorkloadKind kind;       // 화면 1단계 선택지 — 유형에 따라 뒤 단계가 갈린다 (V9)
+
     @Column(nullable = false, length = 64)
     private String name;
+
+    @Column(length = 255)
+    private String description;      // 메뉴판에 그대로 나가는 한 줄 설명 (V9)
 
     @Column(nullable = false, length = 71)
     private String imageDigest;      // Worker 에 실제로 보낼 이미지 지문 (sha256:...)
