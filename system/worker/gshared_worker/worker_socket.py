@@ -1,8 +1,9 @@
-"""The Worker stage that tells the Backend this machine is here.
+"""Opening a Backend connection and getting this machine registered on it.
 
-Runs after AUTH READY, because the only credential this connection accepts is
-the machine's own token, and until the stage before this one has finished there
-either is no token or nobody has checked that the Backend still accepts it.
+Reached only after AUTH READY, because the only credential this connection
+accepts is the machine's own token, and until the stage before it has finished
+there either is no token or nobody has checked that the Backend still accepts
+it. The stage itself lives in :mod:`gshared_worker.worker_connection`.
 
 Written against the Backend's **actual** implementation, read from
 ``back/src/main/java/com/gshared/back/worker/websocket``, not from a
@@ -30,9 +31,14 @@ A connected socket is not a registered Worker. The Backend marks the machine
 ONLINE when it receives REGISTER, not when the socket opens, so this module is
 finished only once the ACK has been read.
 
-**Nothing here keeps the connection.** Staying attached is what heartbeats are
-for and they are not in this build, so the socket is opened, registration is
-confirmed, and it is closed again on the way out.
+**This module opens the connection; it does not keep it.** What comes back from
+:func:`open_registered_socket` is a live :class:`RegisteredSocket` that the
+caller owns and must close. Staying attached -- heartbeats, noticing the
+connection has gone, reconnecting -- is :mod:`gshared_worker.worker_connection`.
+
+The split is the same one as :mod:`gshared_worker.worker_auth` and
+:mod:`gshared_worker.auth_check`: one module knows the protocol, the other
+decides what to do about it over time.
 """
 
 from __future__ import annotations
@@ -46,9 +52,8 @@ from typing import Any, Callable, Protocol
 from urllib.parse import urlparse
 
 from .config import WorkerSettings
-from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
-from .worker_credentials import WorkerCredentials, load_credentials
+from .worker_credentials import WorkerCredentials
 
 _debug = logging.getLogger(LOGGER_NAME)
 
@@ -137,6 +142,16 @@ class ConnectionWentAway(Exception):
     """The socket closed while we were still waiting to hear something."""
 
 
+class ProtocolViolation(Exception):
+    """Something arrived on the socket that is not a message this contract has.
+
+    Broken JSON, a JSON value that is not an object, an envelope with no
+    ``type``. Told apart from a message that is well formed and simply not one
+    this build handles: that one is somebody else's to deal with, this one
+    means the connection is not carrying the protocol any more.
+    """
+
+
 class WorkerSocketTransport(Protocol):
     """The whole of what registration needs from a WebSocket.
 
@@ -209,37 +224,95 @@ def now_in_iso8601() -> str:
     return datetime.now().astimezone().isoformat()
 
 
-def register_over_websocket(
+class RegisteredSocket:
+    """A connection the Backend has accepted this machine on.
+
+    Only :func:`open_registered_socket` makes one, and it only makes one after
+    REGISTER_ACK, so holding an instance means registration happened. That is
+    the point of the class: "connected" and "registered" were two states of one
+    variable before, and the Backend only marks a machine ONLINE on the second.
+
+    **The caller owns it and closes it.** Whoever holds this holds a socket, and
+    that is written down here rather than left to a ``finally`` somewhere.
+
+    ``send`` and ``receive`` speak envelopes rather than text so the protocol is
+    parsed in one place. ``receive`` hands back any well-formed message,
+    including ones this build does not handle -- deciding what a message means
+    is the caller's, refusing what is not a message at all is this class's.
+    """
+
+    def __init__(self, transport: WorkerSocketTransport, worker_id: str) -> None:
+        self._transport = transport
+        self.worker_id = worker_id
+
+    def send(self, message: dict[str, Any]) -> None:
+        """Put one envelope on the wire. Raises :class:`ConnectionWentAway`."""
+        self._transport.send(json.dumps(message))
+
+    def receive(self, timeout: float) -> dict[str, Any]:
+        """The next envelope.
+
+        Raises :class:`TimeoutError` when nothing arrives in time,
+        :class:`ConnectionWentAway` when the socket closed instead, and
+        :class:`ProtocolViolation` when what arrived is not a message.
+        """
+        return _as_envelope(self._transport.recv(timeout))
+
+    def close(self) -> None:
+        _close_quietly(self._transport)
+
+
+def _as_envelope(raw: str) -> dict[str, Any]:
+    """Text off the wire as a message, or a refusal to call it one."""
+    try:
+        message = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ProtocolViolation(
+            "the service sent something that is not JSON") from None
+    if not isinstance(message, dict):
+        raise ProtocolViolation("the service sent a JSON value that is not a message")
+    if not isinstance(message.get("type"), str) or not message["type"]:
+        raise ProtocolViolation("the service sent a message with no type")
+    return message
+
+
+def open_registered_socket(
     settings: WorkerSettings,
     credentials: WorkerCredentials,
     *,
     open_socket: OpenSocket | None = None,
     clock: Clock | None = None,
     timeout: float = REGISTRATION_TIMEOUT_SECONDS,
-) -> SocketResult:
-    """Connect, say REGISTER, and wait to be told the Backend heard it.
+) -> tuple[SocketResult, "RegisteredSocket | None"]:
+    """Connect, say REGISTER, wait to be told the Backend heard it.
 
-    Closes the socket on the way out whatever happened. Keeping it open is what
-    the heartbeat stage is for; a socket held open by a stage that has nothing
-    to send on it is a socket nobody is watching.
+    On success the live socket comes back with the result and **the caller owns
+    it from then on**. On every failure nothing is left open -- there is no path
+    out of here that hands back a socket nobody was told about.
+
+    Two return values rather than one because the two answers are different
+    kinds of thing: the result is a fact to report and log, the socket is a
+    resource to hold and close. Putting a live socket inside the frozen record
+    the caller logs would blur that.
     """
     url = websocket_url(settings.backend_url)
     _debug.info("websocket: connecting to %s", url)
 
     try:
-        socket = (open_socket or open_worker_socket)(url, credentials.worker_token)
+        transport = (open_socket or open_worker_socket)(url, credentials.worker_token)
     except HandshakeRefused as refused:
         _debug.info("websocket: handshake refused with HTTP %s", refused.status)
         return SocketResult(
-            SocketOutcome.HANDSHAKE_REFUSED, str(refused), status=refused.status)
+            SocketOutcome.HANDSHAKE_REFUSED, str(refused), status=refused.status), None
     except TransportUnavailable as unavailable:
         _debug.info("websocket: could not be reached (%s)", unavailable)
-        return SocketResult(SocketOutcome.UNREACHABLE, str(unavailable))
+        return SocketResult(SocketOutcome.UNREACHABLE, str(unavailable)), None
 
-    try:
-        return _register_on(socket, credentials.worker_id, clock, timeout)
-    finally:
-        _close_quietly(socket)
+    result = _register_on(transport, credentials.worker_id, clock, timeout)
+    if not result.registered:
+        _close_quietly(transport)
+        return result, None
+    return result, RegisteredSocket(transport, credentials.worker_id)
 
 
 def _register_on(
@@ -271,15 +344,11 @@ def _register_on(
 def _read_ack(raw: str, worker_id: str) -> SocketResult:
     """What arrived, and whether it means this machine is registered."""
     try:
-        message = json.loads(raw)
-    except (TypeError, ValueError):
-        return SocketResult(
-            SocketOutcome.MALFORMED_ACK, "the service replied with something that is not JSON")
-    if not isinstance(message, dict):
-        return SocketResult(
-            SocketOutcome.MALFORMED_ACK, "the service replied with a JSON value that is not a message")
+        message = _as_envelope(raw)
+    except ProtocolViolation as violation:
+        return SocketResult(SocketOutcome.MALFORMED_ACK, str(violation))
 
-    kind = message.get("type")
+    kind = message["type"]
     if kind != "REGISTER_ACK":
         # Anything else, named or not, leaves this machine unregistered. It is
         # not read as a confirmation just because a message arrived.
@@ -396,103 +465,3 @@ class _WebsocketsTransport:
 def _why_it_closed(closed: Exception) -> str:
     """A sentence about a closed connection, without the library's repr."""
     return f"the connection to the G-shared service closed ({type(closed).__name__})"
-
-
-#: What each outcome means to the person reading the console, and what they
-#: might do about it. Same shape as ``_IN_PLAIN_WORDS`` in
-#: :mod:`gshared_worker.auth_check`.
-_IN_PLAIN_WORDS = {
-    SocketOutcome.HANDSHAKE_REFUSED: (
-        "The G-shared service would not accept this machine's connection.",
-        "Its credentials were accepted a moment ago, so this is worth reporting "
-        "rather than retrying.",
-    ),
-    SocketOutcome.UNREACHABLE: (
-        "The G-shared service could not be reached.",
-        "Nothing was changed. Try again when it is back.",
-    ),
-    SocketOutcome.REGISTRATION_TIMED_OUT: (
-        "The G-shared service accepted the connection but never confirmed this machine.",
-        "Nothing was changed here. Try again in a moment.",
-    ),
-    SocketOutcome.MALFORMED_ACK: (
-        "The G-shared service answered with something this version does not understand.",
-        "This is a problem with the service rather than with this machine.",
-    ),
-    SocketOutcome.WRONG_WORKER: (
-        "The G-shared service confirmed a different machine.",
-        "This machine was not registered. Nothing was changed here.",
-    ),
-    SocketOutcome.CLOSED_BEFORE_ACK: (
-        "The connection to the G-shared service ended before this machine was confirmed.",
-        "Nothing was changed here. Try again in a moment.",
-    ),
-}
-
-
-def connect_to_backend(
-    settings: WorkerSettings,
-    say: Callable[..., None],
-    *,
-    open_socket: OpenSocket | None = None,
-    credentials: WorkerCredentials | None = None,
-) -> int:
-    """The stage: attach this machine to the service it is registered with.
-
-    Reached only after :func:`gshared_worker.auth_check.authenticate_worker`
-    returned OK, which is what makes reading the credentials back off disk safe
-    here -- either they were already there or registration has just written
-    them. Reading them here rather than carrying them down from the stage
-    before keeps the token in the one function that uses it.
-    """
-    say("")
-    say("Connecting to the G-shared service...")
-
-    if credentials is None:
-        loaded = load_credentials()
-        if not loaded.is_present:
-            # Should not happen: the stage before this one only returns OK once
-            # a machine has an accepted identity. Said rather than assumed,
-            # because the alternative is an AttributeError three lines down.
-            _debug.info("websocket: no credentials after a successful auth stage")
-            say("")
-            say("G-shared cannot connect: this machine's credentials are no longer readable.")
-            return int(WorkerExitCode.CREDENTIAL_MISMATCH)
-        credentials = loaded.credentials
-
-    result = register_over_websocket(settings, credentials, open_socket=open_socket)
-    return _report(say, result)
-
-
-def _report(say: Callable[..., None], result: SocketResult) -> int:
-    _debug.info(
-        "websocket: %s -- %s%s",
-        result.outcome.value, result.detail,
-        f" (HTTP {result.status})" if result.status else "",
-    )
-
-    if result.registered:
-        say("  This machine is now registered with the service.")
-        say("")
-        say("WEBSOCKET REGISTERED.")
-        say("")
-        say("Staying connected is not part of this build yet, so the connection")
-        say("was closed again. Heartbeats and reconnection arrive with it.")
-        return int(WorkerExitCode.OK)
-
-    said, remedy = _IN_PLAIN_WORDS.get(result.outcome, (result.detail, None))
-    say("")
-    say(said)
-    if remedy:
-        say(f"  {remedy}")
-
-    # A service that is down is worth running again; a credential the service
-    # will keep refusing is not. Telling them apart is why these are different
-    # outcomes rather than one failure.
-    if result.outcome is SocketOutcome.UNREACHABLE:
-        return int(WorkerExitCode.TRANSPORT_FAILURE)
-    if result.outcome is SocketOutcome.HANDSHAKE_REFUSED and result.status in (401, 403):
-        return int(WorkerExitCode.CREDENTIAL_MISMATCH)
-    # Everything else: the service answered and the conversation did not
-    # finish. Not the credential's fault, and not a network to wait out.
-    return int(WorkerExitCode.EXPECTED_FAILURE)

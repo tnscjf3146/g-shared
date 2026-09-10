@@ -20,7 +20,7 @@ from unittest.mock import patch
 from gshared_worker import environment_check
 from gshared_worker import auth_check
 from gshared_worker import runtime_check
-from gshared_worker import worker_socket
+from gshared_worker import worker_connection
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
 from gshared_worker.errors import WorkerAlreadyRunningError, WorkerError
@@ -155,7 +155,8 @@ class AConfiguredMachineStartsTest(StartupTestCase):
         self.assertIs(worker_main.authenticate_worker, auth_check.authenticate_worker)
 
     def test_the_backend_connection_is_the_stage_after_authentication(self):
-        self.assertIs(worker_main.connect_to_backend, worker_socket.connect_to_backend)
+        self.assertIs(
+            worker_main.connect_to_backend, worker_connection.connect_to_backend)
 
     def test_a_machine_that_did_not_authenticate_is_never_offered_to_the_backend(self):
         # The only credential that connection accepts is the machine's own
