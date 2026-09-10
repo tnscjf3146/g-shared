@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/fetcher'
-import { cancelJob, getCatalog, getJob } from '../api'
+import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
 import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, STATUS_META, STATUS_SENTENCE, formatBytes, formatCost, formatDateTime, formatDuration } from '../format'
-import type { Catalog, JobDetail } from '../types'
+import type { Catalog, Dataset, JobDetail } from '../types'
+import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
 import { JobDetailSkeleton } from './jobSkeleton'
 import { PlainTable } from './plainTable'
@@ -19,6 +20,7 @@ type State = { status: 'loading' } | { status: 'notfound' } | { status: 'error' 
 export function JobDetailPage({ jobId }: { jobId: number }) {
   const [state, setState] = useState<State>({ status: 'loading' })
   const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [dataset, setDataset] = useState<Dataset | null>(null) // GET /datasets/{id} — 상세 응답엔 메타가 없어 따로
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -49,6 +51,13 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
       .then(setCatalog)
       .catch(() => {})
   }, [])
+  const datasetId = state.status === 'ready' ? state.job.datasetId : null
+  useEffect(() => {
+    if (datasetId == null) return
+    getDataset(datasetId)
+      .then(setDataset)
+      .catch(() => {}) // 못 받으면 데이터셋 표만 비운다
+  }, [datasetId])
 
   if (state.status === 'loading') return <JobDetailSkeleton />
   if (state.status === 'notfound') {
@@ -84,7 +93,6 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   const name = {
     workload: catalog?.workloads.find((w) => w.id === job.workloadId)?.name ?? `#${job.workloadId}`,
     model: catalog?.baseModels.find((m) => m.id === job.baseModelId)?.name ?? `#${job.baseModelId}`,
-    gpu: catalog?.gpus.find((g) => g.id === job.gpuId)?.model ?? `#${job.gpuId}`,
   }
 
   const cancel = async () => {
@@ -131,28 +139,47 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
         <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
+        {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
+        {job.assignedWorkerId && (
+          <p className="text-[14px] tabular-nums text-text-muted" title={job.assignedWorkerId}>
+            배정 워커 {shortWorkerId(job.assignedWorkerId)}
+          </p>
+        )}
       </section>
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">설정</h2>
-        <PlainTable cols={[['작업 종류', name.workload], ['베이스 모델', name.model], ['GPU 등급', name.gpu], ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정']]} widths={['20%', '30%', '30%', '20%']} />
+        <PlainTable
+          minWidth={900}
+          widths={['16%', '24%', '12%', '12%', '12%', '12%', '12%']}
+          cols={[
+            ['작업 종류', name.workload],
+            ['베이스 모델', name.model],
+            ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
+            ['epochs', String(job.epochs)],
+            ['batch size', String(job.batchSize)],
+            ['learning rate', String(job.learningRate)],
+            ['max length', String(job.maxLength)],
+          ]}
+        />
       </section>
 
-      {/* 데이터셋 — 3단계에서 브라우저가 뽑은 메타 5값 + 파일명. 백엔드 응답에 실리면 보인다 */}
-      {job.datasetMetadata && (
+      {/* 데이터셋 — 3단계에서 브라우저가 뽑은 메타 + 파일 해시. GET /datasets/{datasetId}(파일명은 서버에 없다) */}
+      {dataset && (
         <section className="card flex flex-col gap-3 px-6 py-5">
           <h2 className="text-[17px] font-bold tracking-heading text-dark">데이터셋</h2>
           <PlainTable
-            widths={['30%', '12%', '12%', '16%', '15%', '15%']}
-            minWidth={760}
+            minWidth={840}
+            widths={['12%', '12%', '15%', '15%', '13%', '13%', '20%']}
             cols={[
-              ['파일', job.datasetName ?? dash],
-              ['크기', formatBytes(job.datasetMetadata.sizeBytes)],
-              ['샘플', `${job.datasetMetadata.sampleCount.toLocaleString('ko-KR')}개`],
-              ['토큰(근사)', job.datasetMetadata.totalTokens.toLocaleString('ko-KR')],
-              ['평균 길이', String(Math.round(job.datasetMetadata.avgSeqLength))],
-              ['최대 길이', String(job.datasetMetadata.maxSeqLength)],
+              ['크기', formatBytes(dataset.sizeBytes)],
+              ['샘플', `${dataset.sampleCount.toLocaleString('ko-KR')}개`],
+              ['토큰(근사)', dataset.totalTokens.toLocaleString('ko-KR')],
+              ['유효 토큰', dataset.effectiveTokens.toLocaleString('ko-KR')],
+              ['평균 길이', String(Math.round(dataset.avgSeqLength))],
+              ['최대 길이', String(dataset.maxSeqLength)],
+              ['파일 해시', dataset.dataHash ? <span title={dataset.dataHash}>{dataset.dataHash.slice(0, 12)}…</span> : dash],
             ]}
           />
         </section>

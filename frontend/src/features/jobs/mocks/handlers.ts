@@ -1,8 +1,8 @@
 import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
-import { CATALOG_PATHS, JOBS_PATH, UPLOADS_PATH, datasetMetadataSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema } from '../schema'
-import type { AutoMode, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
-import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_JOBS } from './data'
+import { CATALOG_PATHS, DATASETS_PATH, JOBS_PATH, createDatasetRequestSchema, createJobRequestSchema, datasetSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema } from '../schema'
+import type { AutoMode, Dataset, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
+import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_DATASETS, MOCK_JOBS } from './data'
 import * as z from 'zod/mini'
 
 const URL = `${API_BASE_URL}${JOBS_PATH}`
@@ -13,7 +13,18 @@ const nowLocal = () => new Date().toISOString().replace(/\.\d{3}Z$/, '') // back
 // 상태는 sessionStorage 에 보존 — 새로고침해도 만든 작업이 남고 자동 전이가 이어진다(탭을 닫으면 fixture 로).
 // 워커 목업처럼 페이지 메모리에만 두면 새로고침마다 사라져 헷갈린다(2026-09-08 경험). 핸들러는 서버(instrumentation)에서도 로드되므로 storage 접근은 방어
 const KEY = 'gshared.mock.jobs'
-const datasetUploads = new Map<number, { name: string; metadata: DatasetMetadata }>() // 업로드 id → 파일명·메타(세션 한정)
+const DATASETS_KEY = 'gshared.mock.datasets'
+function loadDatasets(): Dataset[] {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(DATASETS_KEY) : null
+    if (raw) return z.array(datasetSchema).parse(JSON.parse(raw))
+  } catch {
+    /* 깨진 저장값은 버린다 */
+  }
+  return MOCK_DATASETS.map((d) => ({ ...d }))
+}
+let datasets: Dataset[] = loadDatasets()
+let nextDatasetId = Math.max(4999, ...datasets.map((d) => d.datasetId)) + 1
 const fresh = () => MOCK_JOBS.map((j) => ({ ...j }))
 function loadJobs(): JobDetail[] {
   try {
@@ -73,7 +84,6 @@ function gpuOptions(spec: { baseModelId: number; datasetMetadata: DatasetMetadat
     return { ...g, fit, requiredVramMb, reason, availableWorkers: g.id === 2 ? 3 : g.id === 1 ? 1 : 0 }
   })
 }
-let nextUploadId = 5000
 
 // ── 목업 전용 자동 전이: CREATED → FUNDED → ASSIGNED → RUNNING(진행률) → COMPLETED. 단계별 함수라 새로고침 뒤 중간 상태에서 재개 가능 ──
 const timers = new Map<number, ReturnType<typeof setTimeout>>()
@@ -86,7 +96,7 @@ function toFunded(jobId: number) {
   schedule(jobId, MOCK_ADVANCE_MS.toAssigned, () => toAssigned(jobId))
 }
 function toAssigned(jobId: number) {
-  set(jobId, { status: 'ASSIGNED' })
+  set(jobId, { status: 'ASSIGNED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111' })
   schedule(jobId, MOCK_ADVANCE_MS.toRunning, () => toRunning(jobId))
 }
 function toRunning(jobId: number) {
@@ -160,21 +170,26 @@ export const jobHandlers = [
     return HttpResponse.json(gpuOptions(r.data))
   }),
 
-  // ── 업로드(제안, multipart) — 마지막 단계에서만 ──
-  http.post(`${API_BASE_URL}${UPLOADS_PATH}`, async ({ request }) => {
-    await delay(600)
+  // ── 데이터셋 메타 등록·조회(back DatasetController) — 원본 파일은 받지 않는다 ──
+  http.post(`${API_BASE_URL}${DATASETS_PATH}`, async ({ request }) => {
+    await delay(400)
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
-    const form = await request.formData().catch(() => null)
-    const file = form?.get('file')
-    const kind = form?.get('kind')
-    if (!(file instanceof File) || !['dataset', 'adapter', 'model'].includes(String(kind))) return error(400, 'INVALID_INPUT', 'file 과 kind 는 필수값입니다.')
-    const id = nextUploadId++
-    if (kind === 'dataset') {
-      const meta = datasetMetadataSchema.safeParse(JSON.parse(String(form?.get('metadata') ?? 'null')))
-      if (!meta.success) return error(400, 'INVALID_INPUT', '데이터셋 metadata 가 올바르지 않습니다.')
-      datasetUploads.set(id, { name: file.name, metadata: meta.data }) // 작업 생성 때 상세에 붙인다
+    const r = createDatasetRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    const d: Dataset = { datasetId: nextDatasetId++, ...r.data, createdAt: nowLocal() }
+    datasets = [d, ...datasets]
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(DATASETS_KEY, JSON.stringify(datasets))
+    } catch {
+      /* 메모리로만 */
     }
-    return HttpResponse.json({ id, kind, name: file.name, sizeBytes: file.size }, { status: 201 })
+    return HttpResponse.json(d, { status: 201 })
+  }),
+  http.get(`${API_BASE_URL}${DATASETS_PATH}/:datasetId`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const d = datasets.find((x) => x.datasetId === Number(params.datasetId))
+    return d ? HttpResponse.json(d) : error(404, 'DATASET_NOT_FOUND', 'Dataset을 찾을 수 없습니다.')
   }),
 
   // ── Job(back 스펙) ──
@@ -201,26 +216,29 @@ export const jobHandlers = [
   http.post(URL, async ({ request }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
-    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
-    for (const k of ['workloadId', 'baseModelId', 'datasetId', 'gpuId', 'predictedRuntimeSec', 'estimatedCost']) {
-      if (typeof body?.[k] !== 'number') return error(400, 'INVALID_INPUT', `${k}는 필수값입니다.`)
-    }
-    const mode = body!.trainingMode
-    if (mode !== 'AUTO' && mode !== 'CUSTOM') return error(400, 'INVALID_INPUT', 'trainingMode는 AUTO 또는 CUSTOM이어야 합니다.')
-    const cfg = body!.trainingConfig as TrainingConfig | undefined
+    const r = createJobRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    const body = r.data
+    if (!MOCK_CATALOG.workloads.some((w) => w.id === body.workloadId)) return error(404, 'WORKLOAD_NOT_FOUND', '지원하지 않는 Workload입니다.')
+    if (!MOCK_CATALOG.baseModels.some((m) => m.id === body.baseModelId && m.workloadIds.includes(body.workloadId))) return error(404, 'BASE_MODEL_NOT_FOUND', '지원하지 않는 Base Model입니다.')
+    const dataset = datasets.find((d) => d.datasetId === body.datasetId)
+    if (!dataset) return error(404, 'DATASET_NOT_FOUND', 'Dataset을 찾을 수 없습니다.')
+    // 서버가 Scheduler 로 확정하는 부분을 흉내: AUTO 는 방향(trainingPriority)으로, CUSTOM 은 4값 검증
+    const cfg = body.trainingMode === 'AUTO' ? AUTO_CONFIG[body.trainingPriority ?? 'BALANCED'](dataset.maxSeqLength) : body.trainingConfig
+    if (!cfg) return error(400, 'INVALID_TRAINING_CONFIG', 'trainingConfig가 올바르지 않습니다. (epochs·batchSize·learningRate·maxLength 4값 필수)')
+    const est = estimate(dataset, 2, cfg) // 추천 GPU 는 4070 등급으로 고정
     const job: JobDetail = {
       jobId: nextId++, status: 'CREATED',
-      workloadId: body!.workloadId as number, baseModelId: body!.baseModelId as number, gpuId: body!.gpuId as number,
-      trainingMode: mode, predictedRuntimeSec: body!.predictedRuntimeSec as number, estimatedCost: body!.estimatedCost as number,
-      actualRuntimeSec: null, actualCost: null, progressPercent: null, progressEpoch: null, progressTotalEpochs: cfg?.epochs ?? 3,
-      resultHash: null, resultUrl: null, createdAt: nowLocal(), startedAt: null, finishedAt: null,
-      datasetName: datasetUploads.get(body!.datasetId as number)?.name ?? null,
-      datasetMetadata: datasetUploads.get(body!.datasetId as number)?.metadata ?? null,
+      workloadId: body.workloadId, baseModelId: body.baseModelId, datasetId: body.datasetId,
+      trainingMode: body.trainingMode, epochs: cfg.epochs, batchSize: cfg.batchSize, learningRate: cfg.learningRate, maxLength: cfg.maxLength,
+      predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, actualRuntimeSec: null, actualCost: null, assignedWorkerId: null,
+      progressPercent: null, progressEpoch: null, progressTotalEpochs: cfg.epochs, resultHash: null, resultUrl: null, failReason: null,
+      createdAt: nowLocal(), startedAt: null, finishedAt: null,
     }
     jobs = [job, ...jobs]
     persist()
     resume(job)
-    return HttpResponse.json({ jobId: job.jobId }, { status: 201 })
+    return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1' }, { status: 201 })
   }),
 
   http.post(`${URL}/:jobId/cancel`, async ({ request, params }) => {

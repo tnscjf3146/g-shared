@@ -24,6 +24,7 @@ export const workerSchema = z.object({
   currentJobId: z.nullable(z.string()),
   lastHeartbeatAt: z.nullable(z.string()),
   createdAt: z.string(),
+  walletLinked: z.boolean(), // 주인 지갑 연결 여부. false 면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다
 })
 
 export const workerListSchema = z.array(workerSchema)

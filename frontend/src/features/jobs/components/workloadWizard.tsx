@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Stepper } from '@/components/ui/stepper'
-import { createJob, getCatalog, uploadFile } from '../api'
+import { createDataset, createJob, getCatalog } from '../api'
+import { hashFile } from '../dataset-analysis'
 import { jobMessageFor } from '../errors'
 import { hasEnough, useWalletFunds } from '../hooks/use-wallet-funds'
 import type { AutoMode, Catalog, DatasetMetadata, Estimate, JobSpec, TrainingConfig } from '../types'
@@ -15,7 +16,7 @@ import { StepUpload } from './stepUpload'
 import { StepWorkload } from './stepWorkload'
 
 // /jobs/new "워크로드 등록" 5단계 위저드(job.md §4). 1 워크로드 → 2 설정 → 3 데이터셋(브라우저 분석) → 4 GPU 등급(메타데이터로 추천, 고르면 견적) → 5 업로드(지갑 잔액 ≥ 비용이면 업로드·등록, 부족하면 예치 안내)
-// 파일(데이터셋·어댑터·내 모델)은 하단 [업로드] 를 누를 때까지 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터만 보낸다
+// 파일(데이터셋·어댑터·내 모델)은 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터(+파일 해시)만 보낸다 — 파일 저장 위치 확정 전(백엔드 안내 2026-09-10 §4)
 export type WizardState = {
   workloadId: number | null
   baseModelId: number | null
@@ -122,35 +123,28 @@ export function WorkloadWizard() {
     }
   }
 
-  // 마지막: 파일 업로드(있는 것만, 순서대로) → POST /jobs → 상세로
+  // 마지막: 데이터셋 메타 등록(POST /datasets: 5값 + effectiveTokens + 파일 해시) → POST /jobs → 상세로.
+  // 원본 파일(데이터셋·어댑터·내 모델)은 저장 위치가 정해질 때까지 보내지 않는다(백엔드 안내 2026-09-10 §4). 견적·GPU 는 서버가 Scheduler 로 다시 계산
   const submit = async () => {
     if (!spec || !state.gpuId || !state.estimate || !state.datasetFile) return
     setError(null)
     try {
-      setSubmitting('데이터셋 업로드 중…')
-      const datasetId = (await uploadFile('dataset', state.datasetFile, spec.datasetMetadata)).id
-      let adapterId: number | undefined
-      if (state.adapterFile) {
-        setSubmitting('어댑터 업로드 중…')
-        adapterId = (await uploadFile('adapter', state.adapterFile)).id
-      }
-      let modelId: number | undefined
-      if (state.modelSource === 'OWN' && state.ownModelFile) {
-        setSubmitting('모델 업로드 중…')
-        modelId = (await uploadFile('model', state.ownModelFile)).id
-      }
+      setSubmitting('데이터셋 등록 중…')
+      const meta = spec.datasetMetadata
+      const { datasetId } = await createDataset({
+        ...meta,
+        effectiveTokens: meta.totalTokens, // 과금 기준. 패딩·잘림 반영값은 서버(AI)가 계산하는 게 맞아 지금은 totalTokens 로 — 백엔드도 견적에서 같은 우회를 쓴다
+        dataHash: await hashFile(state.datasetFile),
+        storageUri: null,
+      })
       setSubmitting('워크로드 등록 중…')
-      const jobId = await createJob({
+      const { jobId } = await createJob({
         workloadId: spec.workloadId,
         baseModelId: spec.baseModelId,
         datasetId,
-        gpuId: state.gpuId,
         trainingMode: spec.trainingMode,
+        trainingPriority: spec.trainingMode === 'AUTO' ? state.level : undefined, // 견적의 autoMode 와 같은 값, 이름만 다름
         trainingConfig: spec.trainingMode === 'CUSTOM' ? state.estimate.trainingConfig : undefined,
-        predictedRuntimeSec: state.estimate.predictedRuntimeSec,
-        estimatedCost: state.estimate.estimatedCost,
-        adapterId,
-        modelId,
       })
       router.replace(`/jobs/${jobId}`)
     } catch (e) {

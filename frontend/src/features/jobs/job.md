@@ -11,40 +11,38 @@
 
 ## 1. 백엔드 API
 
-### 1-1. 있는 것 (`/api/jobs`, develop)
+### 1-1. 있는 것 (develop, 2026-09-10 `be-feature/job-wizard-apis` 머지 후) — 프론트 스키마와 맞춤
 
 | 메서드/경로 | 요청 | 응답 | 실패(`{ code, message }`) |
 | --- | --- | --- | --- |
-| `POST /api/jobs` | `{ workloadId, baseModelId, datasetId, gpuId, trainingMode: "AUTO"\|"CUSTOM", trainingConfig?: { epochs, batchSize, learningRate, maxLength }, predictedRuntimeSec(>0), estimatedCost(>0) }` | `201 { jobId }` | `INVALID_INPUT` 400 |
-| `GET /api/jobs?status=&page=&size=` | 최신순 고정(`sort=id,desc`), size 기본 10 | `200 { content: JobSummary[], page, totalPages, totalElements }` | |
+| `GET /api/workloads` | — | `[{ id, kind: TRAIN_LORA\|INFERENCE\|EVALUATION, name, description("" 가능) }]` | |
+| `GET /api/base-models` | — | `[{ id, name, params("7B"), workloadIds[] }]` params 는 서버가 만든 표기 | |
+| `GET /api/gpus` | — | `[{ id, model, vramMb, hourlyPrice: 0 }]` **살아 있는 워커를 모델명으로 묶은 등급** — 시간에 따라 바뀌고 빈 배열 가능. `hourlyPrice` 는 과금이 토큰 기준이라 0 → 화면에 안 씀 | |
+| `POST /api/jobs/gpu-options` | `JobSpec`(평평) | `[{ …gpu, fit: RECOMMENDED\|OK\|TIGHT\|INSUFFICIENT, requiredVramMb, reason, availableWorkers }]` INSUFFICIENT 도 포함(선택 차단은 화면). 저장 안 함 | `NO_AVAILABLE_WORKER` 409, `NO_FEASIBLE_GPU`/`SCHEDULER_REJECTED` 422, `SCHEDULER_UNAVAILABLE` 503 |
+| `POST /api/jobs/estimate` | `JobSpec + gpuId` | `{ trainingConfig{4값}, predictedRuntimeSec, estimatedCost }` AUTO 면 Scheduler 가 정한 설정. 저장 안 함 | 위와 같음 |
+| `POST /api/datasets` | `{ sizeBytes, sampleCount, totalTokens, effectiveTokens, avgSeqLength, maxSeqLength, dataHash?(66), storageUri?(512) }` **메타만**(원본 파일 X) | `201 { datasetId, …같은 필드, createdAt }` | `INVALID_INPUT` 400 |
+| `GET /api/datasets/{id}` | 본인 것만 | `200 Dataset` | `DATASET_NOT_FOUND` 404 |
+| `POST /api/jobs` | `{ workloadId, baseModelId, datasetId, trainingMode, trainingPriority?(AUTO), trainingConfig?(CUSTOM) }` **gpuId·predicted·estimated 는 안 받음** — 서버가 Scheduler 로 다시 계산(가격 조작 방지) | `201 { jobId, recommendedWorkerId, predictedRuntimeSec, estimatedCost, schedulerModelVersion }` | `WORKLOAD_NOT_FOUND`/`BASE_MODEL_NOT_FOUND`/`DATASET_NOT_FOUND` 404, `INVALID_TRAINING_CONFIG` 400, Scheduler 계열 |
+| `GET /api/jobs?status=&page=&size=` | 최신순 고정 | `200 { content: JobSummary[], page, totalPages, totalElements }` | |
 | `GET /api/jobs/{jobId}` | 본인 것만 | `200 JobDetail` | `JOB_NOT_FOUND` 404 |
-| `POST /api/jobs/{jobId}/cancel` | 본인 + `CREATED/FUNDED/ASSIGNED` 만 | `200` 빈 본문 | `JOB_NOT_FOUND` 404, `INVALID_JOB_STATUS` 409 |
+| `POST /api/jobs/{jobId}/cancel` | `CREATED/FUNDED/ASSIGNED` 만 | `200` | `JOB_NOT_FOUND` 404, `INVALID_JOB_STATUS` 409 |
+| `POST /api/jobs/{jobId}/fund` | (Escrow 연동용, 화면 미사용) | `200` | |
 
 ```
 JobSummary: { jobId, status, workloadId, progressPercent, estimatedCost, createdAt }
-JobDetail : { jobId, status, workloadId, baseModelId, gpuId, trainingMode, predictedRuntimeSec, actualRuntimeSec,
-              estimatedCost, actualCost, progressPercent, progressEpoch, progressTotalEpochs,
-              resultHash, resultUrl, createdAt, startedAt, finishedAt,
-              datasetName?, datasetMetadata? }   ← 프론트 제안(2026-09-10): 상세 [데이터셋] 표용. 백엔드엔 아직 없음(optional 로 받음)
-                                                                       (LocalDateTime → "2026-09-09T10:00:00" 형태, Z 없음)
+JobDetail : { jobId, status, workloadId, baseModelId, datasetId, trainingMode, epochs, batchSize, learningRate, maxLength,
+              predictedRuntimeSec, actualRuntimeSec, estimatedCost, actualCost, assignedWorkerId, progressPercent, progressEpoch,
+              progressTotalEpochs, resultHash, resultUrl, failReason, createdAt, startedAt, finishedAt }
+              ※ gpuId 없음(V7: 워커 1대 = GPU 1개 → assignedWorkerId 가 곧 GPU). GPU 이름은 백엔드에 gpuModel 추가 요청(§8)
 JobStatus : CREATED(예치 대기) → FUNDED(배정 대기) → ASSIGNED(시작 대기) → RUNNING → COMPLETED | FAILED,  CANCELLED
+autoMode(견적) = trainingPriority(주문) : SPEED | BALANCED | TRAINING — 값 같고 이름만 다름(통일 요청 §8)
 ```
 
-- `create` 는 **견적을 이미 받은 뒤 승인하는 호출**이다(`predictedRuntimeSec`, `estimatedCost` 를 클라이언트가 보냄). 서버는 재계산하지 않는다 → §1-3 견적 API 가 없으면 프론트가 임의 값을 보내는 꼴이 된다.
-- `JobMatcher`: 30초마다 `FUNDED` Job 을 `ONLINE` 워커에 선착순 배정 → `JOB_ASSIGN`(payload 에 gpuId 등). 진행·완료·실패는 워커 WS 메시지로 갱신(`updateProgress/completeJob/failJob`).
-- `FUNDED` 로 넘기는 코드는 **없다**(주석: "예치 확인: BC 연동"). Escrow 미배포라 당분간 실서버에서는 Job 이 `CREATED` 에 머문다.
+- `POST /uploads`(원본 파일)는 **없다** — 저장 위치(공급자 PC / S3·MinIO / 직접 전송)가 블록체인 회의 안건(6-3). 정해지면 붙인다. 그때까지 5단계는 데이터셋 **메타 + 파일 SHA-256 해시**만 등록하고 파일(데이터셋·어댑터·내 모델)은 브라우저에 남긴다.
+- `effectiveTokens`(과금 기준, 패딩·잘림 반영)는 지금 `totalTokens` 를 그대로 보낸다. 견적 API 도 서버에서 같은 우회를 쓴다. 정확한 값은 토크나이저·배치 구성을 아는 쪽(AI)이 계산하는 게 맞다(§8).
+- 실서버에서 4단계부터는 워커가 최소 1대 `ONLINE` 이어야 한다. 없으면 `/api/gpus` 빈 배열, `gpu-options` 409 `NO_AVAILABLE_WORKER` — 정상 동작. 화면은 "지금 사용 가능한 GPU 가 없습니다" 로 안내.
 
-### 1-2. 없는 것 → 백엔드에 요청 (작업 만들기의 선행 조건)
-
-`create` 가 요구하는 4개 ID 를 채울 **카탈로그 조회가 어느 브랜치에도 없다**(workload/baseModel/dataset/gpu 컨트롤러 검색 결과 0). 사용자가 고를 목록이 없으면 폼을 만들 수 없다.
-
-| 요청 | 스펙(제안) | 비고 |
-| --- | --- | --- |
-| `GET /api/workloads` | `[{ id, name, description }]` 예: 텍스트 분류 파인튜닝 | 승인된 실행 이미지와 1:1 일 가능성 — 시스템 담당 확인 |
-| `GET /api/base-models` | `[{ id, name, params, workloadIds[] }]` 예: `bert-base`, `llama-3-8b` | workload 별 필터 |
-| ~~`GET /api/datasets`~~ (2026-09-10 제거 — 기존 데이터셋 선택 기능을 뺐다) | `[{ id, name, sizeBytes, sampleCount, totalTokens, avgSeqLength, maxSeqLength, createdAt }]` | AI `DatasetMetadata` 와 같은 필드. **업로드 API 는 별도**(이번 범위 밖) |
-| `GET /api/gpus` | `[{ id, model, vramMb, hourlyPrice }]` 예: RTX 4070 12GB | Job.gpuId 는 특정 워커가 아니라 **GPU 등급**(JobMatcher 가 gpuId 로 배정) |
-| **`POST /api/jobs/estimate`** | `{ workloadId, baseModelId, datasetId, gpuId, trainingMode, autoMode?: SPEED\|BALANCED\|TRAINING, trainingConfig? }` → `{ trainingConfig, predictedRuntimeSec, estimatedCost }` | 백엔드가 AI `/scheduler/training-config`(AUTO) + 예측을 호출해 감싼다. 프론트가 AI 서버를 직접 부르지 않게(오리진·인증 단일화) |
+### 1-2. (해결됨) 카탈로그·워커·견적 API — 2026-09-10 develop 에 들어왔다. 위 1-1 로 이동
 
 ### 1-3. AI 서버 (`ai-feature/training-config`, FastAPI `/scheduler`)
 
@@ -166,15 +164,30 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 
 ## 7. 에러 메시지 (`errors.ts`)
 
-| 코드 | 문구 | 위치 |
+| 코드 | 문구 | 어디에 |
 | --- | --- | --- |
-| `JOB_NOT_FOUND` 404 | 작업을 찾을 수 없습니다. | 상세 페이지 본문 + 목록으로 링크 |
-| `INVALID_JOB_STATUS` 409 | 현재 상태에서는 취소할 수 없습니다. 목록을 새로 고칩니다. | 상세 헤더 인라인 → 재조회 |
+| `JOB_NOT_FOUND` 404 | 작업을 찾을 수 없습니다. | 상세 본문 + 돌아가기 |
+| `INVALID_JOB_STATUS` 409 | 현재 상태에서는 취소할 수 없습니다. 목록을 새로 고칩니다. | 상세·대시보드 취소 |
 | `INVALID_INPUT` 400 | (서버 메시지) | 폼 상단 |
-| estimate 422 | (AI `msg`) | 해당 필드 아래 |
-| 그 외 | 잠시 후 다시 시도해 주세요. | 폼 상단 / 페이지 |
+| `DATASET_NOT_FOUND` 404 | 데이터셋 정보를 찾을 수 없습니다. 3단계에서 파일을 다시 올려 주세요. | 5단계 |
+| `WORKLOAD_NOT_FOUND` / `BASE_MODEL_NOT_FOUND` 404 | 1단계에서 다시 선택 안내 | 5단계 |
+| `INVALID_TRAINING_CONFIG` 400 | 학습 설정 4값 확인 | 2·5단계 |
+| **`NO_AVAILABLE_WORKER` 409** | 지금 일할 수 있는 GPU 가 없습니다. **설정은 그대로 두고** 잠시 후 다시 시도 | 4·5단계 — 기다리면 해결 |
+| **`NO_FEASIBLE_GPU` 422** | 이 설정으로 실행할 수 있는 GPU 가 없습니다. **모델·batch·max length 를 줄여** 주세요 | 4·5단계 — 기다려도 소용없음 |
+| `SCHEDULER_REJECTED` 422 | 스케줄러가 요청을 거절했습니다. 설정을 확인 | 4·5단계 |
+| `SCHEDULER_UNAVAILABLE` 503 | 스케줄러에 연결할 수 없습니다. 잠시 후 재시도 | 4·5단계 |
+
+409(기다리면 됨)와 422(요청을 바꿔야 함)는 사용자에게 할 말이 정반대라 문구를 갈랐다.
 
 ## 8. 결정 필요
+
+### 8-0. 백엔드 "프론트 연동 안내(2026-09-10)" 에 대한 프론트 답변·요청
+- ① `jobDetail.gpuId` → **나(백엔드가 `JobDetailResponse` 에 `gpuModel` 문자열 추가) 로 부탁**. 프론트는 우선 `assignedWorkerId` 를 "배정 워커" 로 보이게 바꿨고, `gpuModel` 이 오면 그 자리에 GPU 이름을 붙인다.
+- ② `createJobRequest` 에서 `gpuId·predictedRuntimeSec·estimatedCost` 제거 완료. AUTO 는 `trainingPriority` 로 보낸다. **이름은 `autoMode` 로 통일해 주면 좋겠다**(견적과 주문이 같은 값이라 한 이름이 덜 헷갈림). 바꾸면 프론트는 한 줄 수정.
+- ③ `effectiveTokens`: 프론트 분석기는 토크나이저 없이 문자 비율로 근사한 `totalTokens` 만 낸다. 패딩·잘림(maxLength 는 2단계, 배치 구성은 서버)까지 반영한 값은 **AI/백엔드가 계산하는 게 맞다**. 지금은 `totalTokens` 를 그대로 보내니 **선택 항목으로 열어 두거나 서버에서 채우는 쪽**을 권한다.
+- ④ `hourlyPrice` 표시 제거 완료(대기 워커 수만 남김).
+- 추가: `GET /api/datasets` 목록은 필요 없다(기존 데이터셋 선택 기능 제거). `POST /uploads` 는 저장 위치 확정 후.
+
 
 - [ ] **카탈로그 4종 + estimate API** — 백엔드 요청(§1-2). 이게 없으면 `/jobs/new` 는 목업으로만 동작. 지갑·워커와 같은 패턴으로, 직접 넣을지 요청할지는 사용자 결정. 카탈로그 **데이터**(어떤 workload/모델을 지원하는지)는 시스템·AI 담당이 정해야 함(승인 이미지 목록).
 - [ ] **`FAILED` 사유 노출** — `Job.failReason` 이 있는데 `JobDetailResponse` 에 없다. 한 필드 추가 요청.

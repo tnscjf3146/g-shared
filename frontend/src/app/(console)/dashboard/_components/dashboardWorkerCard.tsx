@@ -17,7 +17,11 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
         <h3 className="truncate text-[17px] font-bold tracking-heading text-dark" title={worker.workerId}>
           <span className="tabular-nums">{index}.</span> {worker.deviceName}
         </h3>
-        <div className="hidden text-[17px] font-medium text-dark md:block">{STATUS_LABEL[worker.status]}</div>
+        <div className="hidden md:block">
+          <div className="text-[17px] font-medium text-dark">{STATUS_LABEL[worker.status]}</div>
+          {/* 지갑 미연결이면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다 — 주인만 알 수 있으니 여기서 알린다 */}
+          {!worker.walletLinked && <div className="text-[14px] text-danger">지갑 미연결 · 작업을 받을 수 없습니다</div>}
+        </div>
         <div className="hidden md:block">
           <div className="text-[14px] text-text-muted">OS</div>
           <div className="truncate text-[17px] font-medium text-dark">{worker.osVersion ?? '—'}</div>

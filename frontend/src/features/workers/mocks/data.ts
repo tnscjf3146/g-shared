@@ -15,6 +15,7 @@ export const MOCK_WORKERS: Worker[] = workerListSchema.parse([
     currentJobId: null,
     lastHeartbeatAt: '2026-09-08T00:00:00Z',
     createdAt: '2026-09-01T09:00:00Z',
+    walletLinked: true,
   },
   {
     workerId: 'worker-22222222-2222-4222-8222-222222222222',
@@ -28,6 +29,7 @@ export const MOCK_WORKERS: Worker[] = workerListSchema.parse([
     currentJobId: null,
     lastHeartbeatAt: '2026-09-08T00:00:00Z',
     createdAt: '2026-08-20T13:30:00Z',
+    walletLinked: false,
   },
 ])
 

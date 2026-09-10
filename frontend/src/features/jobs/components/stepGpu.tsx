@@ -66,7 +66,12 @@ export function StepGpu({ spec, state, onChange }: Props) {
           {current.error}
         </p>
       )}
-      {options && (
+      {options && options.length === 0 && (
+        <p role="status" className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
+          지금 사용 가능한 GPU 가 없습니다. 등급 목록은 켜져 있는 공급자 PC 로 만들어져서, 잠시 후 다시 오면 나타날 수 있습니다.
+        </p>
+      )}
+      {options && options.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="sr-only">GPU 등급</legend>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -84,7 +89,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
                     <StatusBadge tone={FIT[g.fit].tone}>{FIT[g.fit].label}</StatusBadge>
                   </div>
                   <span className="text-[13px] tabular-nums text-text-muted">
-                    {Math.round(g.vramMb / 1024)} GB · 시간당 {g.hourlyPrice.toLocaleString('ko-KR')} GSC · 대기 워커 {g.availableWorkers}대
+                    {Math.round(g.vramMb / 1024)} GB · 대기 워커 {g.availableWorkers}대
                   </span>
                   <span className="text-[12px] text-text-muted">{g.reason}</span>
                 </label>
