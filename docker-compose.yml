@@ -9,6 +9,7 @@ services:
       - .env                  # .env 값을 통째로 컨테이너에 전달
     environment:
       SPRING_PROFILES_ACTIVE: prod   # prod 프로필로 기동
+      SCHEDULER_BASE_URL: http://ai:8000   # AI Scheduler 내부 호출 주소 (컨테이너 이름으로 접근)
     volumes:
       - ./logs:/app/logs      # 애플리케이션 로그를 서버에 보관
     depends_on:
@@ -44,13 +45,13 @@ services:
       - "3000:3000"          # 서버 3000 → 컨테이너 3000 (Next.js SSR은 내부 3000에서 node 실행)
     restart: unless-stopped
 
-  # AI Scheduler (FastAPI + XGBoost) — ai/ 코드가 develop에 머지되면 주석 해제
-  # backend가 http://ai:8000 으로 내부 호출 (바깥 포트 노출 불필요)
-  # ⚠️ 해제 전 확인: ai/requirements.txt가 UTF-8 인코딩인지 (UTF-16이면 빌드 실패)
-  # ai:
-  #   build: ./ai
-  #   container_name: gshared-ai
-  #   restart: unless-stopped
+  # AI Scheduler (FastAPI + XGBoost) — backend가 http://ai:8000 으로 내부 호출 (바깥 포트 노출 불필요)
+  ai:
+    build: ./ai
+    container_name: gshared-ai
+    restart: unless-stopped
+    volumes:
+      - ./ai/models:/app/models   # 학습된 XGBoost 모델 파일 자리 — 서버에 파일만 넣고 재시작하면 반영 (이미지 재빌드 불필요)
 
 volumes:
   mysql-data:                 # 명명된 볼륨 (컨테이너 지워도 데이터 유지)
