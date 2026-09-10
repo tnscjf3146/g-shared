@@ -49,18 +49,48 @@ class TestAValidRequest:
         body = post().json()
 
         assert body["features"] == {
-            "dataset_size_bytes": 1048576.0,
-            "sample_count": 1000.0,
-            "total_tokens": 256000.0,
-            "avg_seq_length": 256.0,
-            "max_seq_length": 512.0,
+            "datasetSizeBytes": 1048576.0,
+            "sampleCount": 1000.0,
+            "totalTokens": 256000.0,
+            "avgSeqLength": 256.0,
+            "maxSeqLength": 512.0,
         }
+
+    def test_the_values_are_the_internal_ones_untouched(self):
+        # 이름만 계약을 따른다. 숫자는 예측기가 받는 것과 같은 값이어야 하므로
+        # 보기 좋으라고 정수로 되돌리지 않는다.
+        features = post().json()["features"]
+
+        assert all(isinstance(value, float) for value in features.values())
 
     def test_the_wire_contract_stays_camel_case(self):
         body = post().json()
 
         assert set(body["dataset"]) == set(DATASET)
         assert set(body["training"]) == set(TRAINING)
+
+    def test_the_features_are_camel_case_too(self):
+        # 예전에는 이 객체만 snake_case였다. 같은 응답 안에서 두 가지 이름
+        # 규칙을 쓰면 읽는 쪽이 필드마다 어느 쪽인지 외워야 한다.
+        assert set(post().json()["features"]) == {
+            "datasetSizeBytes", "sampleCount", "totalTokens",
+            "avgSeqLength", "maxSeqLength",
+        }
+
+    def test_no_internal_name_leaks_into_the_response(self):
+        assert not any("_" in key for key in post().json()["features"])
+
+    def test_the_contract_covers_every_internal_feature(self):
+        # 내부에 feature가 늘었는데 계약 모델에 적지 않으면 응답이 만들어질 때
+        # 드러나야 한다. 조용히 빠지는 쪽이 훨씬 나쁘다.
+        from app.scheduler.features import FEATURE_NAMES
+
+        expected = {
+            "".join(part.capitalize() if index else part
+                    for index, part in enumerate(name.split("_")))
+            for name in FEATURE_NAMES
+        }
+        assert set(post().json()["features"]) == expected
 
 
 class TestValidationHappensAtTheBoundary:
