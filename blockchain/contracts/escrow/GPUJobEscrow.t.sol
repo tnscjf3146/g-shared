@@ -362,6 +362,56 @@ contract GPUJobEscrowTest is Test {
         assertEq(token.balanceOf(provider), before + PRICE);
     }
 
+    /// @notice 기계 둘을 승인한 상태에서 하나만 취소해도 나머지는 그대로 동작한다.
+    ///         취소된 기계의 진행 중 작업도 끝까지 간다.
+    function test_revokingOneOperatorDoesNotAffectTheOther() public {
+        vm.startPrank(provider);
+        escrow.setOperator(operator, true);
+        escrow.setOperator(operator2, true);
+        vm.stopPrank();
+
+        // 기계 둘이 각각 다른 작업을 맡는다
+        uint256 first = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(first);
+
+        uint256 second = _funded();
+        vm.prank(operator2);
+        escrow.acceptJob(second);
+
+        // 첫째 기계의 승인만 취소한다
+        vm.prank(provider);
+        escrow.setOperator(operator, false);
+        assertFalse(escrow.isOperator(provider, operator));
+        assertTrue(escrow.isOperator(provider, operator2));
+
+        // 취소된 기계도 이미 맡은 작업은 끝낸다
+        vm.prank(operator);
+        escrow.submitResult(first, RESULT_HASH);
+        assertEq(uint8(_state(first)), uint8(GPUJobEscrow.JobState.COMPLETED));
+
+        // 남은 기계도 영향을 받지 않는다
+        vm.prank(operator2);
+        escrow.submitResult(second, RESULT_HASH);
+        assertEq(uint8(_state(second)), uint8(GPUJobEscrow.JobState.COMPLETED));
+
+        assertEq(token.balanceOf(provider), PRICE * 2);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    /// @notice 취소된 기계는 새 작업을 받을 수 없다.
+    function test_revokedOperatorCannotAcceptNewJob() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+        vm.prank(provider);
+        escrow.setOperator(operator, false);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.acceptJob(jobId);
+    }
+
     /// @notice 승인된 다른 기계도 남이 맡은 작업에는 끼어들 수 없다.
     function test_submitResult_rejectsAnotherApprovedOperator() public {
         vm.startPrank(provider);
