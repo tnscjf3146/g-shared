@@ -32,6 +32,7 @@ from app.schemas.runtime import (
 )
 from app.schemas.scheduler_input import (
     AutoTrainingConfigRequest,
+    DatasetFeatureValues,
     SchedulerInputRequest,
     SchedulerInputResponse,
 )
@@ -82,7 +83,9 @@ def accept_scheduler_input(request: SchedulerInputRequest) -> SchedulerInputResp
     return SchedulerInputResponse(
         dataset=request.dataset,
         training=request.training,
-        features=features.as_mapping(),
+        # 내부 이름으로 만든 값을 계약 모델에 옮긴다. 여기가 두 이름 체계가
+        # 만나는 유일한 지점이고, 그래서 내부 이름을 바꿔도 JSON은 그대로다.
+        features=DatasetFeatureValues(**features.as_mapping()),
     )
 
 

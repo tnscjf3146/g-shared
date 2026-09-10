@@ -160,7 +160,7 @@ class TestNothingIsRefusedWithoutEvidenceAtTheBoundary:
             SMALL,
         ).json()
 
-        assert body["features"]["sample_count"] == 10.0
+        assert body["features"]["sampleCount"] == 10.0
 
     def test_the_schema_still_refuses_what_it_always_refused(self):
         # 정책이 비었다고 해서 아무거나 통과하는 것은 아니다.
