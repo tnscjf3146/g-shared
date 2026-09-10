@@ -13,6 +13,7 @@ const nowLocal = () => new Date().toISOString().replace(/\.\d{3}Z$/, '') // back
 // 상태는 sessionStorage 에 보존 — 새로고침해도 만든 작업이 남고 자동 전이가 이어진다(탭을 닫으면 fixture 로).
 // 워커 목업처럼 페이지 메모리에만 두면 새로고침마다 사라져 헷갈린다(2026-09-08 경험). 핸들러는 서버(instrumentation)에서도 로드되므로 storage 접근은 방어
 const KEY = 'gshared.mock.jobs'
+const datasetUploads = new Map<number, { name: string; metadata: DatasetMetadata }>() // 업로드 id → 파일명·메타(세션 한정)
 const fresh = () => MOCK_JOBS.map((j) => ({ ...j }))
 function loadJobs(): JobDetail[] {
   try {
@@ -135,7 +136,6 @@ export const jobHandlers = [
   // ── 카탈로그(제안 스펙, job.md §1-2) ──
   catalogGet(CATALOG_PATHS.workloads, MOCK_CATALOG.workloads),
   catalogGet(CATALOG_PATHS.baseModels, MOCK_CATALOG.baseModels),
-  catalogGet(CATALOG_PATHS.datasets, MOCK_CATALOG.datasets),
   catalogGet(CATALOG_PATHS.gpus, MOCK_CATALOG.gpus),
 
   // ── 견적(제안) ──
@@ -168,11 +168,13 @@ export const jobHandlers = [
     const file = form?.get('file')
     const kind = form?.get('kind')
     if (!(file instanceof File) || !['dataset', 'adapter', 'model'].includes(String(kind))) return error(400, 'INVALID_INPUT', 'file 과 kind 는 필수값입니다.')
+    const id = nextUploadId++
     if (kind === 'dataset') {
       const meta = datasetMetadataSchema.safeParse(JSON.parse(String(form?.get('metadata') ?? 'null')))
       if (!meta.success) return error(400, 'INVALID_INPUT', '데이터셋 metadata 가 올바르지 않습니다.')
+      datasetUploads.set(id, { name: file.name, metadata: meta.data }) // 작업 생성 때 상세에 붙인다
     }
-    return HttpResponse.json({ id: nextUploadId++, kind, name: file.name, sizeBytes: file.size }, { status: 201 })
+    return HttpResponse.json({ id, kind, name: file.name, sizeBytes: file.size }, { status: 201 })
   }),
 
   // ── Job(back 스펙) ──
@@ -212,6 +214,8 @@ export const jobHandlers = [
       trainingMode: mode, predictedRuntimeSec: body!.predictedRuntimeSec as number, estimatedCost: body!.estimatedCost as number,
       actualRuntimeSec: null, actualCost: null, progressPercent: null, progressEpoch: null, progressTotalEpochs: cfg?.epochs ?? 3,
       resultHash: null, resultUrl: null, createdAt: nowLocal(), startedAt: null, finishedAt: null,
+      datasetName: datasetUploads.get(body!.datasetId as number)?.name ?? null,
+      datasetMetadata: datasetUploads.get(body!.datasetId as number)?.metadata ?? null,
     }
     jobs = [job, ...jobs]
     persist()

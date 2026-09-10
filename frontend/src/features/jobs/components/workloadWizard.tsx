@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Stepper } from '@/components/ui/stepper'
 import { createJob, getCatalog, uploadFile } from '../api'
 import { jobMessageFor } from '../errors'
+import { hasEnough, useWalletFunds } from '../hooks/use-wallet-funds'
 import type { AutoMode, Catalog, DatasetMetadata, Estimate, JobSpec, TrainingConfig } from '../types'
 import { StepConfig } from './stepConfig'
 import { StepDataset } from './stepDataset'
@@ -14,7 +15,7 @@ import { StepUpload } from './stepUpload'
 import { StepWorkload } from './stepWorkload'
 
 // /jobs/new "워크로드 등록" 5단계 위저드(job.md §4). 1 워크로드 → 2 설정 → 3 데이터셋(브라우저 분석) → 4 GPU 등급(메타데이터로 추천, 고르면 견적) → 5 업로드(지갑 잔액 ≥ 비용이면 업로드·등록, 부족하면 예치 안내)
-// 파일(데이터셋·어댑터·내 모델)은 마지막 [업로드하고 등록] 을 누를 때까지 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터만 보낸다
+// 파일(데이터셋·어댑터·내 모델)은 하단 [업로드] 를 누를 때까지 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터만 보낸다
 export type WizardState = {
   workloadId: number | null
   baseModelId: number | null
@@ -24,7 +25,6 @@ export type WizardState = {
   level: AutoMode // 학습 수준(학습 워크로드만)
   custom: TrainingConfig | null | 'invalid' // 고급: 직접 설정(있으면 level 대신). 'invalid' = 고급을 열었지만 값이 틀림 → 다음 단계 차단
   datasetFile: File | null
-  datasetId: number | null // 파일 대신 기존 데이터셋
   datasetMetadata: DatasetMetadata | null // 파일이면 브라우저 분석 결과, 기존이면 카탈로그 값
   analyzing: boolean
   gpuId: number | null
@@ -32,7 +32,7 @@ export type WizardState = {
 }
 const INITIAL: WizardState = {
   workloadId: null, baseModelId: null, modelSource: 'PROVIDED', ownModelFile: null, adapterFile: null, level: 'BALANCED', custom: null,
-  datasetFile: null, datasetId: null, datasetMetadata: null, analyzing: false, gpuId: null, estimate: null,
+  datasetFile: null, datasetMetadata: null, analyzing: false, gpuId: null, estimate: null,
 }
 const STEPS = [{ label: '워크로드' }, { label: '설정' }, { label: '데이터셋' }, { label: 'GPU 등급 · 견적' }, { label: '업로드' }]
 
@@ -60,6 +60,7 @@ export function WorkloadWizard() {
   const [maxReached, setMaxReached] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState<string | null>(null) // 진행 문구
+  const { funds, recheck } = useWalletFunds(step === 4) // 5단계에 들어오면 지갑·잔액 확인 → 하단 [업로드] 활성 판단
   const patch = (p: Partial<WizardState>) => {
     setState((s) => ({ ...s, ...p }))
     setError(null)
@@ -97,7 +98,7 @@ export function WorkloadWizard() {
       if (state.custom === 'invalid') return '고급 학습 설정 값을 확인해 주세요.'
     }
     if (i === 2) {
-      if (!state.datasetFile && !state.datasetId) return workload?.kind === 'INFERENCE' ? '입력 데이터 파일을 올리거나 기존 데이터셋을 선택해 주세요.' : '데이터셋 파일을 올리거나 기존 데이터셋을 선택해 주세요.'
+      if (!state.datasetFile) return workload?.kind === 'INFERENCE' ? '입력 데이터 파일을 올려 주세요.' : '데이터셋 파일을 올려 주세요.'
       if (state.analyzing) return '데이터셋 분석이 끝날 때까지 잠시 기다려 주세요.'
       if (!state.datasetMetadata) return '데이터셋을 분석하지 못했습니다. 파일 형식을 확인해 주세요.'
     }
@@ -123,14 +124,11 @@ export function WorkloadWizard() {
 
   // 마지막: 파일 업로드(있는 것만, 순서대로) → POST /jobs → 상세로
   const submit = async () => {
-    if (!spec || !state.gpuId || !state.estimate) return
+    if (!spec || !state.gpuId || !state.estimate || !state.datasetFile) return
     setError(null)
     try {
-      let datasetId = state.datasetId
-      if (state.datasetFile) {
-        setSubmitting('데이터셋 업로드 중…')
-        datasetId = (await uploadFile('dataset', state.datasetFile, spec.datasetMetadata)).id
-      }
+      setSubmitting('데이터셋 업로드 중…')
+      const datasetId = (await uploadFile('dataset', state.datasetFile, spec.datasetMetadata)).id
       let adapterId: number | undefined
       if (state.adapterFile) {
         setSubmitting('어댑터 업로드 중…')
@@ -145,7 +143,7 @@ export function WorkloadWizard() {
       const jobId = await createJob({
         workloadId: spec.workloadId,
         baseModelId: spec.baseModelId,
-        datasetId: datasetId!,
+        datasetId,
         gpuId: state.gpuId,
         trainingMode: spec.trainingMode,
         trainingConfig: spec.trainingMode === 'CUSTOM' ? state.estimate.trainingConfig : undefined,
@@ -171,7 +169,7 @@ export function WorkloadWizard() {
         {step === 1 && <StepConfig catalog={catalog} state={state} onChange={patch} />}
         {step === 2 && <StepDataset catalog={catalog} state={state} onChange={patch} />}
         {step === 3 && spec && <StepGpu spec={spec} state={state} onChange={patch} />}
-        {step === 4 && spec && <StepUpload catalog={catalog} spec={spec} state={state} submitting={submitting !== null} onSubmit={submit} />}
+        {step === 4 && spec && <StepUpload catalog={catalog} spec={spec} state={state} funds={funds} onRecheck={recheck} />}
 
         {(error || submitting) && (
           <p role={error ? 'alert' : 'status'} className={`rounded-md px-4 py-3 text-[14px] ${error ? 'bg-danger-tint text-danger' : 'bg-neutral-tint text-dark'}`}>
@@ -187,7 +185,15 @@ export function WorkloadWizard() {
             {step + 1} / {STEPS.length}
           </span>
           {last ? (
-            <span className="text-[13px] text-text-muted">위 카드의 업로드 버튼으로 마칩니다</span>
+            // 지갑 미연결·잔액 부족이면 회색(비활성), 잔액이 충분하면 초록(활성)
+            (() => {
+              const enough = hasEnough(funds, state.estimate?.estimatedCost ?? 0)
+              return (
+                <Button size="lg" variant={enough ? 'primary' : 'secondary'} disabled={!enough || submitting !== null} onClick={submit} title={enough ? undefined : funds.status === 'nowallet' ? '지갑을 먼저 연결하세요' : '지갑 잔액이 예상 비용보다 적습니다'}>
+                  {submitting ? '업로드·등록 중…' : '업로드'}
+                </Button>
+              )
+            })()
           ) : (
             <Button size="lg" onClick={next} disabled={state.analyzing && step === 2}>
               {step === 2 && state.analyzing ? '분석 중…' : `다음: ${STEPS[step + 1].label}`}

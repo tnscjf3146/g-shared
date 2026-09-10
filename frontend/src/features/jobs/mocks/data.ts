@@ -15,10 +15,6 @@ export const MOCK_CATALOG: Catalog = catalogSchema.parse({
     { id: 21, name: 'Llama-3.2-1B', params: '1.2B', workloadIds: [1, 2, 3] },
     { id: 22, name: 'Qwen2.5-1.5B-Instruct', params: '1.5B', workloadIds: [1, 2, 3] },
   ],
-  datasets: [
-    { id: 101, name: 'nsmc-sample.jsonl', sizeBytes: 18_400_000, sampleCount: 50_000, totalTokens: 1_650_000, avgSeqLength: 33, maxSeqLength: 140, createdAt: '2026-09-01T09:00:00' },
-    { id: 102, name: 'kor-instruct-5k.jsonl', sizeBytes: 9_800_000, sampleCount: 5_000, totalTokens: 1_250_000, avgSeqLength: 250, maxSeqLength: 1024, createdAt: '2026-09-05T14:20:00' },
-  ],
   gpus: [
     { id: 1, model: 'NVIDIA GeForce RTX 3060', vramMb: 12288, hourlyPrice: 400 },
     { id: 2, model: 'NVIDIA GeForce RTX 4070', vramMb: 12282, hourlyPrice: 600 },
@@ -42,13 +38,15 @@ const base = {
   resultUrl: null,
   startedAt: null,
   finishedAt: null,
+  datasetName: 'instruct-300.jsonl',
+  datasetMetadata: { sizeBytes: 61_217, sampleCount: 300, totalTokens: 10_522, avgSeqLength: 35, maxSeqLength: 40 },
 }
 
 /** 상태별 1건씩. 새로 만든 작업은 id 1000 부터 */
 export const MOCK_JOBS: JobDetail[] = z.array(jobDetailSchema).parse([
   { ...base, jobId: 7, status: 'RUNNING', progressPercent: 42, progressEpoch: 2, progressTotalEpochs: 3, createdAt: '2026-09-09T09:10:00', startedAt: '2026-09-09T09:20:00' },
   { ...base, jobId: 6, status: 'ASSIGNED', createdAt: '2026-09-09T09:05:00' },
-  { ...base, jobId: 5, status: 'FUNDED', workloadId: 2, baseModelId: 21, gpuId: 3, predictedRuntimeSec: 9000, estimatedCost: 3600, createdAt: '2026-09-09T08:50:00' },
+  { ...base, jobId: 5, status: 'FUNDED', workloadId: 2, baseModelId: 21, gpuId: 3, predictedRuntimeSec: 9000, estimatedCost: 3600, createdAt: '2026-09-09T08:50:00', datasetName: 'inference-inputs-100.json', datasetMetadata: { sizeBytes: 9_161, sampleCount: 100, totalTokens: 1_073, avgSeqLength: 11, maxSeqLength: 14 } },
   { ...base, jobId: 4, status: 'CREATED', trainingMode: 'CUSTOM', createdAt: '2026-09-09T08:30:00' },
   {
     ...base, jobId: 3, status: 'COMPLETED', actualRuntimeSec: 4410, actualCost: 1200, progressPercent: 100, progressEpoch: 3, progressTotalEpochs: 3,

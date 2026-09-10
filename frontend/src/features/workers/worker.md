@@ -61,7 +61,9 @@ G-shared.exe 실행
         15초마다 GET 재조회(탭이 보일 때만 — document.visibilityState). 하트비트 30초·타임아웃 90초라 이 주기면 충분
 ```
 
-- `/workers` 는 `proxy.ts` `PROTECTED` + `matcher` 에 추가(auth.md §4 규칙). `navAuth.tsx` 에 `[워커]` 링크를 `[지갑]` 왼쪽에(authed 만, 2026-09-08 지갑 결정과 동일).
+- `/workers` 는 `proxy.ts` `PROTECTED` + `matcher` 에 추가(auth.md §4 규칙).
+- **2026-09-09 대시보드 통합**: 워커 목록은 `/dashboard/workers` 로(2026-09-10 에 `?tab=workers` 쿼리 → 경로로 변경, 옛 주소는 리다이렉트 호환). 사이드바 [공급] › [GPU 등록하기](`/workers/new`). 네비 `[워커]` 탭은 `[대시보드]` 로 합쳐졌고 `/workers` 는 그 탭으로 리다이렉트. 랜딩 `내 GPU로 수익 내기` → `/dashboard?tab=workers`.
+- **2026-09-10 대시보드 개편**: 워커 카드는 `app/(console)/dashboard/_components/dashboardWorkerCard.tsx`(id·OS 킥커, 상태 점, GPU/VRAM/드라이버/벤치마크 2×2, 힌트 + 등록 해제). 지표: 연결된 워커·작업 중 GPU·총 VRAM·평균 벤치마크. `workersPage/workerCard/workerSkeleton` 삭제, `workerRegisterCard` 는 빈 상태·`<details>` 에서 계속 사용. 온도·전력·가동률·수익·수신 토글은 백엔드 요청 후.
 - 랜딩 `heroSection.tsx` 의 `내 GPU로 수익 내기` href `/` → `/workers`. 시안(landing.md)의 문구 그대로.
 - 등록은 웹 밖(앱)에서 일어나므로 **"등록 완료" 를 웹이 직접 알 수 없다** → 안내 카드에 "앱에서 로그인이 끝나면 여기 자동으로 나타납니다" + 폴링. 별도 "확인" 버튼 없음.
 

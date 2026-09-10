@@ -131,7 +131,7 @@ next.config.ts                      rewrites: /api/:path* → BACKEND_ORIGIN(기
 ## 8. 결정 필요
 
 - [x] **비밀번호 규칙 불일치**: zod 는 백엔드(6~20)를 따름(`passwordSchema`). 로그인 폼은 형식 검사 없이 존재만 확인(규칙 노출 방지). 회원가입 플레이스홀더는 `6~20자, 영문+숫자` 로 → 디자이너에게 피그마 수정 요청 남음.
-- [x] **로그인 후 이동 목적지**: `?next=` 가 있으면 그곳, 없으면 `/`(임시). `/dashboard` 가 생기면 기본값만 바꾼다.
+- [x] **로그인 후 이동 목적지**: `?next=` 가 있으면 그곳, 없으면 `/dashboard`(2026-09-09, 대시보드 생성과 함께 기본값 변경).
 - [x] **다중 탭 동기화**: `AuthProvider` 가 `storage` 이벤트로 `gshared.session` 변화를 감지 — 다른 탭 로그아웃이면 이 탭도 즉시 guest, 다른 탭 로그인이면 reissue 로 authed.
 - [x] **오픈 리다이렉트 차단**: `next` 는 `next-path.ts` 의 `safeNextPath` 로 검증 — 같은 오리진 절대 경로(`/`로 시작)만 통과, `//evil.com`·`/\evil.com`·절대 URL·스킴은 `/` 로. loginForm(소비)과 api.ts `toLogin`(생성) 양쪽에서 적용(코드 리뷰 반영, 2026-09-07).
 - [ ] **내 정보(닉네임) 표시**: 백엔드에 `GET /api/users/me` 가 없어 헤더에 닉네임을 못 띄운다. 백엔드에 요청할지(추천), 우선 토큰의 `role` 만 쓸지.

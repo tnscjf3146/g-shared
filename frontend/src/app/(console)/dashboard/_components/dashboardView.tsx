@@ -1,0 +1,204 @@
+'use client'
+
+import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirmDialog'
+import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
+import { jobMessageFor } from '@/features/jobs/errors'
+import { ACTIVE_STATUSES, formatCost } from '@/features/jobs/format'
+import type { Catalog, JobSummary } from '@/features/jobs/types'
+import { deleteWorker, getMyWorkers } from '@/features/workers/api'
+import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
+import { workerMessageFor } from '@/features/workers/errors'
+import { formatVram } from '@/features/workers/format'
+import type { Worker } from '@/features/workers/types'
+import { DashboardJobRow } from './dashboardJobRow'
+import { DashboardWorkerCard } from './dashboardWorkerCard'
+import { StatTiles } from './statTiles'
+
+// 대시보드 본문(/dashboard/jobs · /dashboard/workers, 참고 디자인 구조): 헤더(제목 — 작업/공급, 전환은 사이드바) → 지표 4개 → 작업·워커 모두 카드 세로 목록.
+// 데이터는 지금 API 에 있는 것만: 작업 목록(GET /jobs), 내 워커(GET /workers/me), 카탈로그(워크로드 이름). 15초 폴링, 시계는 1초
+export type DashboardTab = 'jobs' | 'workers'
+const POLL_MS = 15_000
+const PAGE_SIZE = 50
+
+type Loaded<T> = { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: T }
+
+export function DashboardView({ tab }: { tab: DashboardTab }) {
+  const [jobs, setJobs] = useState<Loaded<JobSummary[]>>({ status: 'loading' })
+  const [workers, setWorkers] = useState<Loaded<Worker[]>>({ status: 'loading' })
+  const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const [notice, setNotice] = useState<string | null>(null)
+
+  // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
+  const load = useCallback((silent = false) => {
+    getJobs({ page: 0, size: PAGE_SIZE })
+      .then((p) => setJobs({ status: 'ready', data: p.content }))
+      .catch(() => {
+        if (!silent) setJobs({ status: 'error' })
+      })
+    getMyWorkers()
+      .then((w) => setWorkers({ status: 'ready', data: w }))
+      .catch(() => {
+        if (!silent) setWorkers({ status: 'error' })
+      })
+  }, [])
+
+  useEffect(() => {
+    void load()
+    const poll = setInterval(() => {
+      setNow(Date.now()) // 워커 카드의 "n분 전" 갱신용. 폴링 주기면 충분
+      if (document.visibilityState === 'visible') load(true)
+    }, POLL_MS)
+    return () => clearInterval(poll)
+  }, [load])
+  useEffect(() => {
+    getCatalog()
+      .then(setCatalog)
+      .catch(() => {})
+  }, [])
+
+  const jobList = jobs.status === 'ready' ? jobs.data : []
+  const workerList = workers.status === 'ready' ? workers.data : []
+  const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
+
+  const onCancel = async (id: number) => {
+    if (!confirm(`작업 #${id} 을(를) 취소할까요?`)) return
+    try {
+      await cancelJob(id)
+      load(true)
+    } catch (e) {
+      setNotice(jobMessageFor(e))
+      load(true)
+    }
+  }
+  // 등록 해제: 확인 대화상자 한 줄 → 확정 시 삭제
+  const [unlinkTarget, setUnlinkTarget] = useState<Worker | null>(null)
+  const [unlinking, setUnlinking] = useState(false)
+  const onUnlink = (w: Worker) => setUnlinkTarget(w)
+  const confirmUnlink = async () => {
+    if (!unlinkTarget) return
+    setUnlinking(true)
+    try {
+      await deleteWorker(unlinkTarget.workerId)
+    } catch (e) {
+      setNotice(workerMessageFor(e))
+    } finally {
+      setUnlinking(false)
+      setUnlinkTarget(null)
+      load(true)
+    }
+  }
+
+  // 지표 — 있는 필드로만
+  const running = jobList.filter((j) => j.status === 'RUNNING').length
+  const waiting = jobList.filter((j) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING').length
+  const activeCost = jobList.filter((j) => ACTIVE_STATUSES.has(j.status)).reduce((a, j) => a + j.estimatedCost, 0)
+  const online = workerList.filter((w) => w.status !== 'OFFLINE').length
+  const busy = workerList.filter((w) => w.status === 'RUNNING').length
+  const vram = workerList.reduce((a, w) => a + (w.vramMb ?? 0), 0)
+  const benches = workerList.map((w) => w.benchmarkTokensPerSec).filter((v): v is number => v != null)
+  const stats =
+    tab === 'jobs'
+      ? [
+          { label: '학습 중', value: String(running), sub: `작업 ${jobList.length}개 중` },
+          { label: '배정·시작 대기', value: String(waiting), sub: '예치 대기 포함' },
+          { label: '완료', value: String(jobList.filter((j) => j.status === 'COMPLETED').length), sub: `실패·취소 ${jobList.filter((j) => j.status === 'FAILED' || j.status === 'CANCELLED').length}` },
+          { label: '진행 중 예상 비용', value: formatCost(activeCost), sub: '견적 기준 합계' },
+        ]
+      : [
+          { label: '연결된 워커', value: `${online} / ${workerList.length}`, sub: `${workerList.length - online}대 오프라인` },
+          { label: '작업 중 GPU', value: String(busy), sub: `대기 중 ${online - busy}대` },
+          { label: '총 VRAM', value: vram ? formatVram(vram) : '—', sub: '등록된 GPU 합계' },
+          { label: '평균 벤치마크', value: benches.length ? `${Math.round(benches.reduce((a, b) => a + b, 0) / benches.length).toLocaleString('ko-KR')} tok/s` : '측정 전', sub: `${benches.length}대 측정` },
+        ]
+
+  return (
+    <>
+      {/* 헤더: 제목만. 작업/공급 전환은 왼쪽 사이드바 메뉴 */}
+      <section className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-h1 font-bold tracking-heading text-dark">{tab === 'jobs' ? '작업' : '공급'}</h1>
+      </section>
+
+      {notice && (
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[16px] text-danger">
+          {notice}
+        </p>
+      )}
+
+      <StatTiles items={stats} loading={(tab === 'jobs' ? jobs : workers).status === 'loading'} />
+
+      {tab === 'jobs' ? (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-[24px] font-bold tracking-heading text-dark">내 학습 작업</h2>
+            <Button href="/jobs/new">+ 워크로드 등록</Button>
+          </div>
+          {jobs.status === 'error' && <Retry what="작업 목록" onRetry={() => { setJobs({ status: 'loading' }); load() }} />}
+          {jobs.status === 'loading' && <ListSkeleton />}
+          {jobs.status === 'ready' && jobList.length === 0 && (
+            <section className="card animate-enter mx-auto flex w-full max-w-[640px] flex-col items-start gap-4 p-10">
+              <h3 className="text-h2 font-bold tracking-heading text-dark">아직 작업이 없습니다</h3>
+              <p className="text-[17px] text-text-muted">워크로드·모델·데이터셋을 고르고 견적을 확인하면 GPU 학습을 주문할 수 있습니다.</p>
+              <Button href="/jobs/new" size="lg">첫 워크로드 등록</Button>
+            </section>
+          )}
+          {jobs.status === 'ready' && jobList.length > 0 && (
+            <ul className="flex flex-col gap-3">
+              {jobList.map((j, i) => (
+                <DashboardJobRow key={j.jobId} job={j} index={i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
+              ))}
+            </ul>
+          )}
+        </section>
+      ) : (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-[24px] font-bold tracking-heading text-dark">내 워커</h2>
+          </div>
+          {workers.status === 'error' && <Retry what="워커 목록" onRetry={() => { setWorkers({ status: 'loading' }); load() }} />}
+          {workers.status === 'loading' && <ListSkeleton />}
+          {workers.status === 'ready' && workerList.length === 0 && <WorkerRegisterCard />}
+          {workers.status === 'ready' && workerList.length > 0 && (
+            <>
+              <ul className="flex flex-col gap-3">
+                {workerList.map((w, i) => (
+                  <DashboardWorkerCard key={w.workerId} worker={w} index={i + 1} now={now} onUnlink={onUnlink} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
+                ))}
+              </ul>
+              <Link href="/workers/new" className="card-quiet flex items-center justify-between gap-4 text-[17px] font-semibold text-dark transition-colors hover:bg-black/5">
+                내 GPU 등록하기
+                <span aria-hidden className="text-text-muted">→</span>
+              </Link>
+            </>
+          )}
+        </section>
+      )}
+      <ConfirmDialog open={unlinkTarget !== null} message="정말 해제할까요?" confirmLabel="해제" danger pending={unlinking} onConfirm={confirmUnlink} onCancel={() => !unlinking && setUnlinkTarget(null)} />
+    </>
+  )
+}
+
+function Retry({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <section className="card mx-auto flex w-full max-w-[640px] flex-col items-start gap-3 p-8">
+      <p className="text-[17px] text-dark">{what}을 불러오지 못했습니다.</p>
+      <button type="button" onClick={onRetry} className="text-[16px] text-primary hover:underline">
+        다시 시도 →
+      </button>
+    </section>
+  )
+}
+
+function ListSkeleton() {
+  return (
+    <div aria-busy aria-label="불러오는 중" className="flex flex-col gap-3">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="card h-[76px] animate-pulse" />
+      ))}
+    </div>
+  )
+}
+

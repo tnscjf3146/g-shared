@@ -3,6 +3,11 @@ import * as z from 'zod/mini'
 // 경로 상수는 여기(React 의존 없음) — mocks/handlers 가 api.ts 를 import 하면 auth store 가 서버(instrumentation MSW) 번들로 끌려감(wallet.md §3)
 export const WORKERS_PATH = '/workers'
 
+// 다운로드는 시스템 담당이 exe 를 올리는 곳에 따라 바뀐다(worker.md §8). 서버 컴포넌트(안내 카드)도 쓰므로 인증 스토어를 끌고 오는 api.ts 가 아니라 여기 → env 하나, 없으면 저장소 raw 파일
+export const WORKER_DOWNLOAD_URL =
+  process.env.NEXT_PUBLIC_WORKER_DOWNLOAD_URL ??
+  'https://lab.ssafy.com/s15-blochain-sub1/S15P21E204/-/raw/develop/system/G-shared/G-shared.exe?inline=false'
+
 /** back WorkerStatus: OFFLINE(미연결·하트비트 90초 초과) / ONLINE(대기) / RUNNING(작업 중) */
 export const workerStatusSchema = z.enum(['OFFLINE', 'ONLINE', 'RUNNING'])
 

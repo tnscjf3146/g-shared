@@ -1,4 +1,4 @@
-import { WORKER_DOWNLOAD_URL } from '../api'
+import { WORKER_DOWNLOAD_URL } from '../schema'
 
 // 웹이 맡는 "워커 등록" = 안내(worker.md §0·§4). 실제 등록은 G-shared 앱이 GPU 를 읽고 앱 안에서 로그인해 수행한다.
 // 서버 컴포넌트로도 쓸 수 있게 상태 없음. 목록이 있을 땐 <details> 안에 접어 재사용
@@ -10,7 +10,7 @@ const STEPS = [
 
 export function WorkerRegisterCard({ compact = false }: { compact?: boolean }) {
   return (
-    <section className={`card animate-enter flex w-full flex-col gap-6 ${compact ? '' : 'max-w-[640px] p-10'}`}>
+    <section className={`card animate-enter flex w-full flex-col gap-6 ${compact ? '' : 'mx-auto max-w-[640px] p-10'}`}>
       {!compact && (
         <div className="flex flex-col gap-2">
           <h2 className="text-h2 font-bold tracking-heading text-dark">아직 등록된 워커가 없습니다</h2>
@@ -21,7 +21,7 @@ export function WorkerRegisterCard({ compact = false }: { compact?: boolean }) {
       <ol className="flex flex-col gap-4">
         {STEPS.map((s, i) => (
           <li key={s.title} className="flex gap-4">
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-pill bg-primary/10 text-[13px] font-bold tabular-nums text-primary">{i + 1}</span>
+            <span className="w-5 shrink-0 text-[15px] font-semibold tabular-nums text-dark">{i + 1}.</span>
             <div className="flex flex-col gap-0.5">
               <span className="text-[15px] font-semibold text-dark">{s.title}</span>
               <span className="text-[14px] text-text-muted">{s.body}</span>

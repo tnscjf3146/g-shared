@@ -3,7 +3,7 @@ import * as z from 'zod/mini'
 // 경로 상수는 여기(React 의존 없음) — mocks 가 api.ts 를 import 하면 auth store 가 서버 번들로 끌려감(wallet.md §3)
 export const JOBS_PATH = '/jobs'
 // 카탈로그·견적은 백엔드에 아직 없다(job.md §1-2 요청 스펙). 경로만 먼저 정해 두고 목업으로 개발
-export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-models', datasets: '/datasets', gpus: '/gpus' } as const
+export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-models', gpus: '/gpus' } as const
 /** 파일 업로드(제안) — 등록 마지막 단계에서만 호출. multipart: file, kind(dataset|adapter|model), metadata(JSON) */
 export const UPLOADS_PATH = '/uploads'
 
@@ -45,7 +45,6 @@ export const datasetMetadataSchema = z.object({
   avgSeqLength: z.number().check(z.positive()),
   maxSeqLength: z.number().check(z.positive()),
 })
-export const datasetSchema = z.object({ id: z.number(), name: z.string(), createdAt: z.string(), ...datasetMetadataSchema.shape })
 /** Job.gpuId 는 특정 워커가 아니라 GPU 등급 */
 export const gpuSchema = z.object({ id: z.number(), model: z.string(), vramMb: z.number(), hourlyPrice: z.number() })
 /** POST /jobs/gpu-options(제안) 응답 원소 — 메타데이터·모델·설정 기준으로 백엔드가 적합도를 매긴 GPU 등급 */
@@ -54,7 +53,6 @@ export const gpuOptionSchema = z.object({ ...gpuSchema.shape, fit: gpuFitSchema,
 export const catalogSchema = z.object({
   workloads: z.array(workloadSchema),
   baseModels: z.array(baseModelSchema),
-  datasets: z.array(datasetSchema),
   gpus: z.array(gpuSchema),
 })
 
@@ -128,4 +126,7 @@ export const jobDetailSchema = z.object({
   createdAt: z.string(),
   startedAt: z.nullable(z.string()),
   finishedAt: z.nullable(z.string()),
+  // 데이터셋 파일명·분석 메타(3단계에서 업로드 때 보낸 5값). 백엔드 JobDetailResponse 에 아직 없어 optional — 오면 상세 [데이터셋] 표에 보인다
+  datasetName: z.optional(z.nullable(z.string())),
+  datasetMetadata: z.optional(z.nullable(datasetMetadataSchema)),
 })

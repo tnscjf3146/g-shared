@@ -55,7 +55,7 @@ develop 에는 "지갑이 있는지" 알 방법이 없었다(`/users/me` 없음,
 ```
 src/
   app/
-    (app)/                              로그인 필요 화면 라우트 그룹 — L0 배경 + 랜딩과 같은 고정 유리 네비(SiteNav 재사용)      ✅
+    (console)/                          로그인 후 화면 라우트 그룹 — 2026-09-10 부터 왼쪽 사이드바 셸(dashboard/_components/dashboardSidebar). (app)+SiteNav 셸은 삭제 ✅
       layout.tsx                        서버 컴포넌트. body[data-nav-theme] 없음 = 밝은 배경용 기본 색, 위 72px 비움           ✅
       wallet/page.tsx                   h1 + <WalletPage/>('use client' 는 잎으로)                                              ✅
       wallet/loading.tsx                <WalletSkeleton/>                                                                        ✅

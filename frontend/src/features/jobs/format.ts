@@ -12,6 +12,16 @@ export const STATUS_META: Record<JobStatus, { label: string; tone: 'success' | '
   FAILED: { label: '실패', tone: 'danger' },
   CANCELLED: { label: '취소됨', tone: 'neutral' },
 }
+/** 상태 → 상세에 보이는 한 문장 */
+export const STATUS_SENTENCE: Record<JobStatus, string> = {
+  CREATED: '예치 대기 — 지갑에서 예치하면 워커 배정이 시작됩니다. (예치 기능은 준비 중)',
+  FUNDED: '예치 확인됨. 조건에 맞는 워커에 배정되는 중입니다.',
+  ASSIGNED: '워커에 배정됐습니다. 곧 학습이 시작됩니다.',
+  RUNNING: '학습이 진행 중입니다.',
+  COMPLETED: '학습이 끝났습니다. 아래에서 결과를 받을 수 있습니다.',
+  FAILED: '학습이 실패했습니다. (실패 사유 표시는 백엔드 응답 추가 후)',
+  CANCELLED: '취소된 작업입니다.',
+}
 /** 아직 끝나지 않은 상태 — 상세 폴링 대상 */
 export const ACTIVE_STATUSES: ReadonlySet<JobStatus> = new Set(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING'])
 /** 사용자가 취소할 수 있는 상태(back JobService.cancelJob 과 동일) */

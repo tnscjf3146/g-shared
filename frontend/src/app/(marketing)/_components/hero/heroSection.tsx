@@ -24,7 +24,7 @@ export function HeroSection() {
           </p>
           <div className="flex items-center gap-4 pt-2">
             <Button href="/jobs/new" size="lg">지금 시작하기</Button>
-            <Button href="/workers" variant="ghost" size="lg">
+            <Button href="/dashboard/workers" variant="ghost" size="lg">
               내 GPU로 수익 내기
             </Button>
           </div>
