@@ -28,7 +28,7 @@ from .instance_guard import WorkerInstanceGuard, default_lock_directory
 from .auth_check import authenticate_worker
 from .logging_setup import LOGGER_NAME, stamp_the_build, start_debug_log
 from .runtime_check import ensure_runtime
-from .worker_socket import connect_to_backend
+from .worker_connection import connect_to_backend
 
 _debug = logging.getLogger(LOGGER_NAME)
 

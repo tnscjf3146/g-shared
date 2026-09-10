@@ -16,17 +16,16 @@ import json
 import unittest
 
 from gshared_worker.config import WorkerSettings
-from gshared_worker.exit_codes import WorkerExitCode
 from gshared_worker.worker_credentials import WorkerCredentials
 from gshared_worker.worker_socket import (
     WS_PATH,
     ConnectionWentAway,
     HandshakeRefused,
+    ProtocolViolation,
     SocketOutcome,
     TransportUnavailable,
-    connect_to_backend,
+    open_registered_socket,
     register_message,
-    register_over_websocket,
     websocket_url,
 )
 
@@ -86,6 +85,19 @@ class FakeSocket:
 
     def close(self) -> None:
         self.closed = True
+
+
+def register_only(*args, **kwargs):
+    """Open, register, and give the socket straight back.
+
+    Registration used to close the socket itself. It does not any more -- the
+    caller owns what comes back -- so the tests below that only care about the
+    *result* close it here rather than each saying so.
+    """
+    result, socket = open_registered_socket(*args, **kwargs)
+    if socket is not None:
+        socket.close()
+    return result
 
 
 def opener(socket: FakeSocket | None = None, raises=None):
@@ -190,14 +202,14 @@ class TestNoCredentialTravelsInTheMessage(unittest.TestCase):
     def test_the_register_message_does_not_carry_the_token(self):
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        register_only(settings(), CREDENTIALS, open_socket=opener(socket))
 
         self.assertNotIn(TOKEN, socket.sent[0])
 
     def test_it_carries_no_user_credential_either(self):
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        register_only(settings(), CREDENTIALS, open_socket=opener(socket))
 
         for forbidden in ("password", "accessToken", "refreshToken", "workerToken"):
             self.assertNotIn(forbidden, socket.sent[0])
@@ -205,7 +217,7 @@ class TestNoCredentialTravelsInTheMessage(unittest.TestCase):
     def test_the_payload_holds_the_id_and_nothing_else(self):
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        register_only(settings(), CREDENTIALS, open_socket=opener(socket))
 
         self.assertEqual(json.loads(socket.sent[0])["payload"], {"workerId": "worker-001"})
 
@@ -214,14 +226,14 @@ class TestTheHandshake(unittest.TestCase):
     def test_the_token_goes_to_the_transport_for_the_header(self):
         open_socket = opener(FakeSocket(ack()))
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=open_socket)
+        register_only(settings(), CREDENTIALS, open_socket=open_socket)
 
         self.assertEqual(open_socket.seen["token"], TOKEN)
 
     def test_the_url_it_connects_to_is_the_worker_socket(self):
         open_socket = opener(FakeSocket(ack()))
 
-        register_over_websocket(
+        register_only(
             settings("https://gpu.example.com"), CREDENTIALS, open_socket=open_socket)
 
         self.assertEqual(open_socket.seen["url"], "wss://gpu.example.com/ws/workers")
@@ -229,7 +241,7 @@ class TestTheHandshake(unittest.TestCase):
     def test_the_token_is_not_in_the_url(self):
         open_socket = opener(FakeSocket(ack()))
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=open_socket)
+        register_only(settings(), CREDENTIALS, open_socket=open_socket)
 
         self.assertNotIn(TOKEN, open_socket.seen["url"])
         self.assertNotIn("token=", open_socket.seen["url"])
@@ -251,14 +263,14 @@ class TestTheHandshake(unittest.TestCase):
 class TestARegistrationThatWorks(unittest.TestCase):
     def test_the_ack_the_backend_actually_sends_is_accepted(self):
         # payload {} and no jobId at all. This is the real reply.
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket(ack())))
 
         self.assertIs(result.outcome, SocketOutcome.REGISTERED)
         self.assertTrue(result.registered)
 
     def test_an_ack_that_does_name_this_machine_is_accepted_too(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket(ack("worker-001"))))
 
         self.assertTrue(result.registered)
@@ -266,7 +278,7 @@ class TestARegistrationThatWorks(unittest.TestCase):
     def test_register_is_sent_before_anything_is_read(self):
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        register_only(settings(), CREDENTIALS, open_socket=opener(socket))
 
         self.assertEqual(json.loads(socket.sent[0])["type"], "REGISTER")
 
@@ -274,55 +286,76 @@ class TestARegistrationThatWorks(unittest.TestCase):
         # No heartbeat, no second hello.
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        register_only(settings(), CREDENTIALS, open_socket=opener(socket))
 
         self.assertEqual(len(socket.sent), 1)
 
-    def test_the_socket_is_closed_afterwards(self):
-        # Staying attached belongs to the heartbeat stage.
+    def test_the_socket_is_left_open_for_the_caller(self):
+        # This is the change this build makes. Registration used to close the
+        # socket because nothing held it; now the caller does, and closing it
+        # here would take the connection away from the heartbeat that needs it.
         socket = FakeSocket(ack())
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        result, registered = open_registered_socket(
+            settings(), CREDENTIALS, open_socket=opener(socket))
+
+        self.assertTrue(result.registered)
+        self.assertIsNotNone(registered)
+        self.assertFalse(socket.closed)
+
+    def test_the_live_socket_knows_which_machine_it_is(self):
+        _, registered = open_registered_socket(
+            settings(), CREDENTIALS, open_socket=opener(FakeSocket(ack())))
+
+        self.assertEqual(registered.worker_id, "worker-001")
+        registered.close()
+
+    def test_closing_it_closes_the_transport(self):
+        socket = FakeSocket(ack())
+
+        _, registered = open_registered_socket(
+            settings(), CREDENTIALS, open_socket=opener(socket))
+        registered.close()
 
         self.assertTrue(socket.closed)
 
 
 class TestARegistrationThatDoesNot(unittest.TestCase):
     def test_an_ack_naming_a_different_machine(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket(ack("worker-999"))))
 
         self.assertIs(result.outcome, SocketOutcome.WRONG_WORKER)
         self.assertFalse(result.registered)
 
     def test_a_reply_that_is_not_json(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket("{ half written")))
 
         self.assertIs(result.outcome, SocketOutcome.MALFORMED_ACK)
 
     def test_a_reply_that_is_json_but_not_a_message(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket('"hello"')))
 
         self.assertIs(result.outcome, SocketOutcome.MALFORMED_ACK)
 
     def test_a_reply_of_a_different_type(self):
         # HEARTBEAT_ACK is a real type. It is still not a confirmation of this.
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS,
             open_socket=opener(FakeSocket(ack(kind="HEARTBEAT_ACK"))))
 
         self.assertIs(result.outcome, SocketOutcome.MALFORMED_ACK)
 
     def test_a_reply_with_no_type_at_all(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(FakeSocket('{"payload": {}}')))
 
         self.assertIs(result.outcome, SocketOutcome.MALFORMED_ACK)
 
     def test_nothing_arriving_in_time(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS,
             open_socket=opener(FakeSocket(raises=TimeoutError())))
 
@@ -331,13 +364,13 @@ class TestARegistrationThatDoesNot(unittest.TestCase):
     def test_the_wait_is_bounded_and_does_not_actually_sleep(self):
         socket = FakeSocket(ack())
 
-        register_over_websocket(
+        register_only(
             settings(), CREDENTIALS, open_socket=opener(socket), timeout=2.5)
 
         self.assertEqual(socket.timeout_used, 2.5)
 
     def test_the_socket_closing_before_the_ack(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS,
             open_socket=opener(FakeSocket(raises=ConnectionWentAway("gone"))))
 
@@ -346,20 +379,20 @@ class TestARegistrationThatDoesNot(unittest.TestCase):
     def test_the_socket_closing_before_register_could_be_sent(self):
         socket = FakeSocket(ack(), on_send=ConnectionWentAway("gone"))
 
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(socket))
 
         self.assertIs(result.outcome, SocketOutcome.CLOSED_BEFORE_ACK)
 
     def test_a_refused_handshake(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(), CREDENTIALS, open_socket=opener(raises=HandshakeRefused(401)))
 
         self.assertIs(result.outcome, SocketOutcome.HANDSHAKE_REFUSED)
         self.assertEqual(result.status, 401)
 
     def test_a_service_that_is_not_there(self):
-        result = register_over_websocket(
+        result = register_only(
             settings(),
             CREDENTIALS,
             open_socket=opener(raises=TransportUnavailable("nothing answered")),
@@ -367,11 +400,15 @@ class TestARegistrationThatDoesNot(unittest.TestCase):
 
         self.assertIs(result.outcome, SocketOutcome.UNREACHABLE)
 
-    def test_every_failure_still_closes_the_socket(self):
+    def test_every_failure_closes_the_socket_itself(self):
+        # Nothing is handed back on a failure, so nothing else can close it.
         socket = FakeSocket(ack("worker-999"))
 
-        register_over_websocket(settings(), CREDENTIALS, open_socket=opener(socket))
+        result, registered = open_registered_socket(
+            settings(), CREDENTIALS, open_socket=opener(socket))
 
+        self.assertIsNone(registered)
+        self.assertFalse(result.registered)
         self.assertTrue(socket.closed)
 
     def test_no_failure_leaks_the_token(self):
@@ -382,99 +419,10 @@ class TestARegistrationThatDoesNot(unittest.TestCase):
             opener(raises=HandshakeRefused(401)),
             opener(raises=TransportUnavailable("nothing answered")),
         ):
-            result = register_over_websocket(
+            result = register_only(
                 settings(), CREDENTIALS, open_socket=opened)
 
             self.assertNotIn(TOKEN, result.detail)
-
-
-class TestTheStage(unittest.TestCase):
-    """What the supplier is told, and what the launcher is given."""
-
-    def say(self):
-        lines: list[str] = []
-        return lines, lambda *parts: lines.append(" ".join(str(p) for p in parts))
-
-    def test_a_registered_machine_exits_ok(self):
-        lines, say = self.say()
-
-        code = connect_to_backend(
-            settings(), say,
-            open_socket=opener(FakeSocket(ack())), credentials=CREDENTIALS)
-
-        self.assertEqual(code, int(WorkerExitCode.OK))
-        self.assertIn("WEBSOCKET REGISTERED.", lines)
-
-    def test_a_service_that_is_down_is_worth_running_again(self):
-        lines, say = self.say()
-
-        code = connect_to_backend(
-            settings(), say,
-            open_socket=opener(raises=TransportUnavailable("nothing answered")),
-            credentials=CREDENTIALS)
-
-        self.assertEqual(code, int(WorkerExitCode.TRANSPORT_FAILURE))
-
-    def test_a_token_the_service_refuses_is_not(self):
-        lines, say = self.say()
-
-        code = connect_to_backend(
-            settings(), say,
-            open_socket=opener(raises=HandshakeRefused(401)), credentials=CREDENTIALS)
-
-        self.assertEqual(code, int(WorkerExitCode.CREDENTIAL_MISMATCH))
-
-    def test_a_path_that_is_not_there_is_not_a_credential_problem(self):
-        # 404 is the Backend not having the endpoint, not the token being wrong.
-        lines, say = self.say()
-
-        code = connect_to_backend(
-            settings(), say,
-            open_socket=opener(raises=HandshakeRefused(404)), credentials=CREDENTIALS)
-
-        self.assertEqual(code, int(WorkerExitCode.EXPECTED_FAILURE))
-
-    def test_an_ack_that_never_came_is_an_expected_failure(self):
-        lines, say = self.say()
-
-        code = connect_to_backend(
-            settings(), say,
-            open_socket=opener(FakeSocket(raises=TimeoutError())),
-            credentials=CREDENTIALS)
-
-        self.assertEqual(code, int(WorkerExitCode.EXPECTED_FAILURE))
-
-    def test_the_supplier_is_told_what_to_do_about_a_service_that_is_down(self):
-        lines, say = self.say()
-
-        connect_to_backend(
-            settings(), say,
-            open_socket=opener(raises=TransportUnavailable("nothing answered")),
-            credentials=CREDENTIALS)
-
-        self.assertTrue(any("could not be reached" in line for line in lines))
-
-    def test_nothing_it_prints_is_the_token(self):
-        for opened in (
-            opener(FakeSocket(ack())),
-            opener(raises=HandshakeRefused(401)),
-            opener(FakeSocket(ack("worker-999"))),
-        ):
-            lines, say = self.say()
-
-            connect_to_backend(
-                settings(), say, open_socket=opened, credentials=CREDENTIALS)
-
-            self.assertNotIn(TOKEN, "\n".join(lines))
-
-    def test_a_failure_never_claims_the_machine_is_registered(self):
-        lines, say = self.say()
-
-        connect_to_backend(
-            settings(), say,
-            open_socket=opener(FakeSocket(ack("worker-999"))), credentials=CREDENTIALS)
-
-        self.assertNotIn("WEBSOCKET REGISTERED.", lines)
 
 
 class TestItIsWiredIntoStartup(unittest.TestCase):
@@ -511,7 +459,8 @@ class TestWhatThisBuildDoesNotDo(unittest.TestCase):
 
         return inspect.getsource(worker_socket)
 
-    def test_there_is_no_heartbeat(self):
+    def test_it_does_not_beat(self):
+        # Heartbeats live in worker_connection. This module opens connections.
         self.assertNotIn("HEARTBEAT", self.source())
 
     def test_there_is_no_job_handling(self):
