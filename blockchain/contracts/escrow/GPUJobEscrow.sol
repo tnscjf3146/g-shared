@@ -40,6 +40,16 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// 추천 밖의 주소를 넣는 것은 막지 않습니다. 자기 자금으로 자기 상대를 고르는 일이라
 /// 온체인이 관여할 근거가 없습니다.
 ///
+/// @dev 정산 주소와 서명 주소를 나눈 이유
+/// `provider` 는 대금을 받는 주소이고 사람의 지갑입니다. 그런데 수락과 제출은 사람
+/// 없이 자동으로 일어나야 하므로 공급자 쪽 프로그램이 키를 들고 있어야 하고, 그 키를
+/// 사람의 지갑과 같게 둘 수 없습니다. 그래서 `setOperator` 로 정산 주소 본인이 자기
+/// 대신 서명할 기계를 승인합니다. 승인하지 않으면 본인만 부를 수 있어 기본값이 안전합니다.
+///
+/// 승인 검사는 `acceptJob` 에서 한 번만 합니다. 그 시점에 `job.operator` 를 확정하고,
+/// 이후 `submitResult` 와 `abortJob` 은 그 주소 본인인지만 봅니다. 진행 중인 작업이
+/// 승인 취소로 깨지지 않고, 승인된 다른 기계도 남이 맡은 작업에 끼어들 수 없습니다.
+///
 /// @dev 온체인이 보장하지 않는 것
 /// `resultHash` 제출은 올바른 연산을 했다는 증명이 아닙니다. 잘못된 결과의 해시를
 /// 올려도 온체인에서 되돌릴 수 없고, 제출과 동시에 정산이 최종 완료됩니다.
@@ -64,12 +74,14 @@ contract GPUJobEscrow is ReentrancyGuard {
     enum JobState { NONE, FUNDED, ASSIGNED, COMPLETED, CANCELLED }
 
     /// @notice 단일 작업(Job)에 대한 구조체
-    /// @dev 변수 배치를 통해 첫 슬롯에 맞춤: client(20) + state(1) + deadline(8) = 29 bytes.
+    /// @dev 첫 슬롯을 채워 배치한다: client(20) + state(1) + deadline(8) = 29 bytes.
+    ///      주소 셋은 어떻게 배치해도 각각 한 슬롯을 차지한다.
     struct Job {
         address  client;       // 의뢰자 지갑 주소
         JobState state;        // 현재 작업 상태
         uint64   deadline;     // 현재 상태의 제한 시간. 상태가 바뀔 때마다 새로 계산해 덮어쓴다
-        address  provider;     // 의뢰자가 예치할 때 지정한 공급자의 서명 주소
+        address  provider;     // 의뢰자가 지정한 공급자의 정산 주소. 대금이 여기로 간다
+        address  operator;     // 실제로 수락한 기계. acceptJob 에서 확정된다
         uint256  price;        // 작업 대금 (결제 토큰 최소 단위)
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
@@ -95,6 +107,10 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @notice Job ID와 작업 상세 정보 매핑
     mapping(uint256 => Job) public jobs;
 
+    /// @notice 정산 주소가 승인한 서명 대행자. provider => operator => 허용
+    /// @dev 백엔드와 프론트가 승인 여부를 조회할 수 있도록 public 으로 둔다.
+    mapping(address => mapping(address => bool)) public isOperator;
+
     // ─────────────────────────────────────────────────────────────
     // 오류(Errors)
     // ─────────────────────────────────────────────────────────────
@@ -118,8 +134,13 @@ contract GPUJobEscrow is ReentrancyGuard {
     ///      스스로 수락하고 제출해 대금을 되가져가는 경로가 되므로 둘 다 막습니다.
     error InvalidProvider();
 
-    /// @notice 지정되지 않은 주소가 공급자 함수를 부를 때 되돌립니다.
-    error NotAssignedProvider();
+    /// @notice 권한 없는 주소가 공급자 함수를 부를 때 되돌립니다.
+    /// @dev 수락 시점에는 정산 주소 본인이거나 승인된 대행자여야 하고,
+    ///      그 뒤에는 수락한 그 대행자 본인이어야 합니다.
+    error NotAuthorizedOperator();
+
+    /// @notice 대행자로 쓸 수 없는 값을 승인하려 할 때 되돌립니다.
+    error InvalidOperator();
 
     // ─────────────────────────────────────────────────────────────
     // 이벤트(Events)
@@ -135,18 +156,25 @@ contract GPUJobEscrow is ReentrancyGuard {
         uint256 price,
         uint64  deadline
     );
-    /// @notice 지정된 공급자가 작업을 수락했을 때 발생
-    event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
-    /// @notice 공급자가 작업 결과를 제출했을 때 발생. JobCompleted 와 같은 트랜잭션에 실린다
-    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash);
+    /// @notice 작업이 수락되었을 때 발생. 어느 기계가 맡았는지 operator 로 남는다
+    event JobAccepted(
+        uint256 indexed jobId,
+        address indexed provider,
+        address indexed operator,
+        uint64  deadline
+    );
+    /// @notice 작업 결과가 제출되었을 때 발생. JobCompleted 와 같은 트랜잭션에 실린다
+    event ResultSubmitted(uint256 indexed jobId, address indexed operator, bytes32 resultHash);
     /// @notice 작업이 완료되고 대금이 지급되었을 때 발생
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
     /// @notice 작업이 취소되거나 환불되어 종료되었을 때 발생. 환불 셋 모두가 이 이벤트를 낸다
     event JobCancelled(uint256 indexed jobId, address indexed client, uint256 refund);
-    /// @notice 공급자가 작업을 반납했을 때 발생. JobCancelled 와 함께 실려 사유를 구분한다
-    event JobAborted(uint256 indexed jobId, address indexed provider);
+    /// @notice 작업이 반납되었을 때 발생. JobCancelled 와 함께 실려 사유를 구분한다
+    event JobAborted(uint256 indexed jobId, address indexed operator);
     /// @notice 제한 시간 초과로 정리되었을 때 발생. JobCancelled 와 함께 실려 사유를 구분한다
     event JobTimedOut(uint256 indexed jobId, JobState fromState);
+    /// @notice 정산 주소가 대행자 승인을 바꿨을 때 발생
+    event OperatorUpdated(address indexed provider, address indexed operator, bool allowed);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
     /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 배포 승인을 받은 뒤 이 검사를 제거합니다.
@@ -172,7 +200,8 @@ contract GPUJobEscrow is ReentrancyGuard {
     ///      토큰 전송이 실패하면 작업 생성과 nextJobId 증가까지 함께 되돌아갑니다.
     /// @param externalRef 오프체인 작업을 가리키는 참조값. 백엔드가 발급하며 인증 수단이 아니다
     /// @param price 지급할 작업 대금 (결제 토큰 최소 단위)
-    /// @param provider 이 작업을 맡을 공급자의 서명 주소. 이 주소만 acceptJob 을 부를 수 있습니다
+    /// @param provider 이 작업을 맡을 공급자의 정산 주소. 대금이 여기로 갑니다.
+    ///                 이 주소 본인이나 이 주소가 승인한 대행자만 수락할 수 있습니다
     /// @return jobId 생성된 작업의 고유 ID
     function createAndFundJob(bytes32 externalRef, uint256 price, address provider)
         external
@@ -190,6 +219,7 @@ contract GPUJobEscrow is ReentrancyGuard {
             state:      JobState.FUNDED,
             deadline:   deadline,
             provider:   provider,
+            operator:   address(0),
             price:      price,
             resultHash: bytes32(0)
         });
@@ -221,21 +251,40 @@ contract GPUJobEscrow is ReentrancyGuard {
     // 공급자(Provider) 기능
     // ─────────────────────────────────────────────────────────────
 
+    /// @notice 자기 대신 온체인 함수를 부를 기계를 승인하거나 취소합니다.
+    /// @dev 정산 주소 본인만 자기 목록을 고칠 수 있습니다. msg.sender 가 곧 provider 라
+    ///      남의 대행자를 마음대로 등록할 수 없습니다.
+    ///      승인하지 않으면 본인만 수락할 수 있으므로 기본값이 안전합니다.
+    ///      취소해도 이미 수락된 작업은 끝까지 갑니다. acceptJob 에서 job.operator 를
+    ///      확정한 뒤에는 그 주소 본인인지만 보기 때문입니다.
+    /// @param operator 승인하거나 취소할 대행자 주소
+    /// @param allowed true 면 승인, false 면 취소
+    function setOperator(address operator, bool allowed) external {
+        if (operator == address(0)) revert InvalidOperator();
+        isOperator[msg.sender][operator] = allowed;
+        emit OperatorUpdated(msg.sender, operator, allowed);
+    }
+
     /// @notice 예치할 때 지정받은 작업을 수락합니다.
-    /// @dev 지정된 주소만 부를 수 있습니다. 경쟁이 없으므로 먼저 부르는 것이 이득이 되지 않습니다.
-    ///      수락하지 않고 두면 acceptTimeout 이 지난 뒤 의뢰자가 예치금을 되찾아 갑니다.
+    /// @dev 지정된 정산 주소 본인이거나 그가 승인한 대행자만 부를 수 있습니다. 경쟁이
+    ///      없으므로 먼저 부르는 것이 이득이 되지 않습니다. 수락하지 않고 두면
+    ///      acceptTimeout 이 지난 뒤 의뢰자가 예치금을 되찾아 갑니다.
+    ///
+    ///      여기서 job.operator 를 확정합니다. 승인 검사는 이 시점에만 하고, 이후
+    ///      제출과 반납은 확정된 주소 본인인지만 봅니다.
     /// @param jobId 수락할 작업 ID
     function acceptJob(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.state == JobState.FUNDED, "Escrow: not FUNDED");
-        if (msg.sender != job.provider) revert NotAssignedProvider();
+        if (!_isAuthorized(job.provider, msg.sender)) revert NotAuthorizedOperator();
         if (block.timestamp > job.deadline) revert DeadlineExpired();
 
+        job.operator = msg.sender;
         job.state = JobState.ASSIGNED;
         job.deadline = uint64(block.timestamp) + executionTimeout;
 
-        emit JobAccepted(jobId, msg.sender, job.deadline);
+        emit JobAccepted(jobId, job.provider, msg.sender, job.deadline);
     }
 
     /// @notice 결과물 해시를 등록하고 대금을 받습니다. 제출과 정산이 한 트랜잭션에서 끝납니다.
@@ -248,7 +297,7 @@ contract GPUJobEscrow is ReentrancyGuard {
         Job storage job = jobs[jobId];
 
         require(job.state == JobState.ASSIGNED, "Escrow: not ASSIGNED");
-        if (msg.sender != job.provider) revert NotAssignedProvider();
+        if (msg.sender != job.operator) revert NotAuthorizedOperator();
         require(resultHash != bytes32(0), "Escrow: empty result hash");
         if (block.timestamp > job.deadline) revert DeadlineExpired();
 
@@ -273,7 +322,7 @@ contract GPUJobEscrow is ReentrancyGuard {
         Job storage job = jobs[jobId];
 
         require(job.state == JobState.ASSIGNED, "Escrow: not ASSIGNED");
-        if (msg.sender != job.provider) revert NotAssignedProvider();
+        if (msg.sender != job.operator) revert NotAuthorizedOperator();
 
         uint256 refund = job.price;
 
@@ -316,4 +365,13 @@ contract GPUJobEscrow is ReentrancyGuard {
         emit JobTimedOut(jobId, fromState);
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // 내부(Internal)
+    // ─────────────────────────────────────────────────────────────
+
+    /// @dev 정산 주소 본인이거나 그가 승인한 대행자여야 합니다.
+    ///      본인이면 매핑을 읽지 않고 끝나므로 승인을 쓰지 않는 경우 비용이 늘지 않습니다.
+    function _isAuthorized(address provider, address caller) internal view returns (bool) {
+        return caller == provider || isOperator[provider][caller];
+    }
 }

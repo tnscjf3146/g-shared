@@ -91,7 +91,7 @@ contract ReentrancyTest is Test {
         _seedVictimJob();
         uint256 jobId = _assignedToAttacker();
 
-        (, , uint64 dl, , , ) = escrow.jobs(jobId);
+        (, , uint64 dl, , , , ) = escrow.jobs(jobId);
         vm.warp(dl + 1);
 
         uint256 honestBefore = token.balanceOf(honestC);
@@ -171,7 +171,7 @@ contract ReentrancyTest is Test {
         assertTrue(atkClient.crossReenterFailed(), "cross-function reentrancy was NOT blocked");
 
         // 예치는 정상적으로 끝나고 취소되지 않았다
-        (, GPUJobEscrow.JobState st, , , , ) = escrow.jobs(jobId);
+        (, GPUJobEscrow.JobState st, , , , , ) = escrow.jobs(jobId);
         assertEq(uint8(st), uint8(GPUJobEscrow.JobState.FUNDED));
         assertEq(token.balanceOf(address(escrow)), PRICE);
         assertEq(token.balanceOf(address(atkClient)), before - PRICE);

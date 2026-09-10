@@ -13,7 +13,9 @@ contract GPUJobEscrowTest is Test {
     GPUJobEscrow internal escrow;
 
     address internal client   = address(0xC11E27);
-    address internal provider = address(0x9401DE);
+    address internal provider = address(0x9401DE);   // 정산 주소. 사람 지갑
+    address internal operator = address(0x09E4A70);  // 서명 대행자. 기계 키
+    address internal operator2 = address(0x09E4A72); // 같은 사람의 다른 기계
     address internal stranger = address(0x57A9E7);
 
     uint256 internal constant SSAFY_CHAIN_ID   = 31221;
@@ -31,11 +33,17 @@ contract GPUJobEscrowTest is Test {
         uint256 price,
         uint64  deadline
     );
-    event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
-    event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash);
+    event JobAccepted(
+        uint256 indexed jobId,
+        address indexed provider,
+        address indexed operator,
+        uint64  deadline
+    );
+    event ResultSubmitted(uint256 indexed jobId, address indexed operator, bytes32 resultHash);
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
     event JobCancelled(uint256 indexed jobId, address indexed client, uint256 refund);
-    event JobAborted(uint256 indexed jobId, address indexed provider);
+    event JobAborted(uint256 indexed jobId, address indexed operator);
+    event OperatorUpdated(address indexed provider, address indexed operator, bool allowed);
     event JobTimedOut(uint256 indexed jobId, GPUJobEscrow.JobState fromState);
 
     function setUp() public {
@@ -62,18 +70,23 @@ contract GPUJobEscrowTest is Test {
     }
 
     function _state(uint256 jobId) internal view returns (GPUJobEscrow.JobState) {
-        (, GPUJobEscrow.JobState s, , , , ) = escrow.jobs(jobId);
+        (, GPUJobEscrow.JobState s, , , , , ) = escrow.jobs(jobId);
         return s;
     }
 
     function _deadline(uint256 jobId) internal view returns (uint64) {
-        (, , uint64 dl, , , ) = escrow.jobs(jobId);
+        (, , uint64 dl, , , , ) = escrow.jobs(jobId);
         return dl;
     }
 
     function _provider(uint256 jobId) internal view returns (address) {
-        (, , , address p, , ) = escrow.jobs(jobId);
+        (, , , address p, , , ) = escrow.jobs(jobId);
         return p;
+    }
+
+    function _operator(uint256 jobId) internal view returns (address) {
+        (, , , , address op, , ) = escrow.jobs(jobId);
+        return op;
     }
 
     // ── 생성자 ───────────────────────────────────────────────────
@@ -129,13 +142,21 @@ contract GPUJobEscrowTest is Test {
     function test_createAndFundJob_storesJobFields() public {
         uint256 jobId = _funded();
 
-        (address c, GPUJobEscrow.JobState s, uint64 dl, address p, uint256 price, bytes32 hash) =
-            escrow.jobs(jobId);
+        (
+            address c,
+            GPUJobEscrow.JobState s,
+            uint64 dl,
+            address p,
+            address op,
+            uint256 price,
+            bytes32 hash
+        ) = escrow.jobs(jobId);
 
         assertEq(c, client);
         assertEq(uint8(s), uint8(GPUJobEscrow.JobState.FUNDED));
         assertEq(dl, uint64(block.timestamp) + ACCEPT_TIMEOUT);
         assertEq(p, provider);
+        assertEq(op, address(0)); // operator 는 수락 시점에 정해진다
         assertEq(price, PRICE);
         assertEq(hash, bytes32(0));
     }
@@ -204,6 +225,204 @@ contract GPUJobEscrowTest is Test {
         assertEq(second, 2);
     }
 
+    // ── setOperator ──────────────────────────────────────────────
+    //
+    // 정산 주소 본인이 자기 대신 서명할 기계를 승인한다. 승인하지 않으면
+    // 본인만 부를 수 있어 기본값이 안전하다.
+
+    function test_setOperator_grantsAndRevokes() public {
+        assertFalse(escrow.isOperator(provider, operator));
+
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+        assertTrue(escrow.isOperator(provider, operator));
+
+        vm.prank(provider);
+        escrow.setOperator(operator, false);
+        assertFalse(escrow.isOperator(provider, operator));
+    }
+
+    function test_setOperator_rejectsZeroAddress() public {
+        vm.prank(provider);
+        vm.expectRevert(GPUJobEscrow.InvalidOperator.selector);
+        escrow.setOperator(address(0), true);
+    }
+
+    /// @notice 자기 목록만 고칠 수 있다. 남의 대행자를 등록할 수 없다.
+    function test_setOperator_onlyAffectsCallerOwnList() public {
+        vm.prank(stranger);
+        escrow.setOperator(operator, true);
+
+        assertTrue(escrow.isOperator(stranger, operator));
+        assertFalse(escrow.isOperator(provider, operator));
+    }
+
+    function test_setOperator_emitsOperatorUpdated() public {
+        vm.expectEmit(true, true, false, true);
+        emit OperatorUpdated(provider, operator, true);
+
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+    }
+
+    /// @notice 한 사람이 기계를 여럿 승인할 수 있다. User 1:N Worker 구조를 담는다.
+    function test_setOperator_supportsMultipleMachines() public {
+        vm.startPrank(provider);
+        escrow.setOperator(operator, true);
+        escrow.setOperator(operator2, true);
+        vm.stopPrank();
+
+        assertTrue(escrow.isOperator(provider, operator));
+        assertTrue(escrow.isOperator(provider, operator2));
+    }
+
+    // ── acceptJob · 권한 ─────────────────────────────────────────
+
+    /// @notice 승인된 대행자가 수락하면 job.operator 에 그 주소가 남는다.
+    function test_acceptJob_byApprovedOperator() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.ASSIGNED));
+        assertEq(_operator(jobId), operator);
+        assertEq(_provider(jobId), provider);
+    }
+
+    /// @notice 정산 주소 본인이 직접 수락하면 자기 주소가 operator 로 기록된다.
+    function test_acceptJob_byProviderRecordsSelfAsOperator() public {
+        uint256 jobId = _funded();
+        vm.prank(provider);
+        escrow.acceptJob(jobId);
+
+        assertEq(_operator(jobId), provider);
+    }
+
+    /// @notice 승인받지 않은 기계는 수락할 수 없다.
+    function test_acceptJob_rejectsUnapprovedOperator() public {
+        uint256 jobId = _funded();
+
+        vm.prank(operator);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.acceptJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.FUNDED));
+    }
+
+    /// @notice 다른 사람이 승인한 기계라도 이 작업에는 권한이 없다.
+    function test_acceptJob_rejectsOperatorApprovedByAnotherProvider() public {
+        vm.prank(stranger);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.acceptJob(jobId);
+    }
+
+    function test_acceptJob_emitsOperatorInEvent() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+
+        vm.expectEmit(true, true, true, true);
+        emit JobAccepted(jobId, provider, operator, uint64(block.timestamp) + EXECUTION_TIMEOUT);
+
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+    }
+
+    // ── 수락 이후 권한 ───────────────────────────────────────────
+    //
+    // 승인 검사는 수락 시점에만 한다. 그 뒤에는 확정된 operator 본인인지만 본다.
+
+    /// @notice 승인을 취소해도 이미 수락한 작업은 끝까지 간다.
+    ///         12시간 학습 중에 실수로 승인을 취소해 대금을 잃는 일을 막는다.
+    function test_revokedOperatorCanStillFinishOngoingJob() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        // 사용자가 승인을 취소한다
+        vm.prank(provider);
+        escrow.setOperator(operator, false);
+
+        uint256 before = token.balanceOf(provider);
+        vm.prank(operator);
+        escrow.submitResult(jobId, RESULT_HASH);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.COMPLETED));
+        assertEq(token.balanceOf(provider), before + PRICE);
+    }
+
+    /// @notice 승인된 다른 기계도 남이 맡은 작업에는 끼어들 수 없다.
+    function test_submitResult_rejectsAnotherApprovedOperator() public {
+        vm.startPrank(provider);
+        escrow.setOperator(operator, true);
+        escrow.setOperator(operator2, true);
+        vm.stopPrank();
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        vm.prank(operator2);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.submitResult(jobId, RESULT_HASH);
+    }
+
+    function test_abortJob_rejectsAnotherApprovedOperator() public {
+        vm.startPrank(provider);
+        escrow.setOperator(operator, true);
+        escrow.setOperator(operator2, true);
+        vm.stopPrank();
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        vm.prank(operator2);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.abortJob(jobId);
+    }
+
+    /// @notice 정산 주소 본인이라도 대행자가 맡은 작업을 대신 제출할 수 없다.
+    function test_submitResult_rejectsProviderWhenOperatorAccepted() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        vm.prank(provider);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
+        escrow.submitResult(jobId, RESULT_HASH);
+    }
+
+    /// @notice 대금은 언제나 정산 주소로 간다. 대행자에게 쌓이지 않는다.
+    function test_submitResult_paysProviderNotOperator() public {
+        vm.prank(provider);
+        escrow.setOperator(operator, true);
+
+        uint256 jobId = _funded();
+        vm.prank(operator);
+        escrow.acceptJob(jobId);
+
+        vm.prank(operator);
+        escrow.submitResult(jobId, RESULT_HASH);
+
+        assertEq(token.balanceOf(provider), PRICE);
+        assertEq(token.balanceOf(operator), 0);
+    }
+
     // ── acceptJob ────────────────────────────────────────────────
 
     function test_acceptJob_movesToAssigned() public {
@@ -235,7 +454,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _funded();
 
         vm.prank(client);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.acceptJob(jobId);
     }
 
@@ -244,7 +463,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _funded();
 
         vm.prank(stranger);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.acceptJob(jobId);
 
         assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.FUNDED));
@@ -255,7 +474,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _funded();
 
         vm.prank(stranger);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.acceptJob(jobId);
 
         vm.prank(provider);
@@ -267,8 +486,8 @@ contract GPUJobEscrowTest is Test {
     function test_acceptJob_emitsJobAccepted() public {
         uint256 jobId = _funded();
 
-        vm.expectEmit(true, true, false, true);
-        emit JobAccepted(jobId, provider, uint64(block.timestamp) + EXECUTION_TIMEOUT);
+        vm.expectEmit(true, true, true, true);
+        emit JobAccepted(jobId, provider, provider, uint64(block.timestamp) + EXECUTION_TIMEOUT);
 
         vm.prank(provider);
         escrow.acceptJob(jobId);
@@ -296,7 +515,7 @@ contract GPUJobEscrowTest is Test {
         vm.prank(provider);
         escrow.submitResult(jobId, RESULT_HASH);
 
-        (, , , , , bytes32 hash) = escrow.jobs(jobId);
+        (, , , , , , bytes32 hash) = escrow.jobs(jobId);
         assertEq(hash, RESULT_HASH);
     }
 
@@ -304,7 +523,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _assigned();
 
         vm.prank(stranger);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.submitResult(jobId, RESULT_HASH);
     }
 
@@ -370,7 +589,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _assigned();
 
         vm.prank(stranger);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.abortJob(jobId);
 
         assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.ASSIGNED));
@@ -380,7 +599,7 @@ contract GPUJobEscrowTest is Test {
         uint256 jobId = _assigned();
 
         vm.prank(client);
-        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        vm.expectRevert(GPUJobEscrow.NotAuthorizedOperator.selector);
         escrow.abortJob(jobId);
     }
 

@@ -33,7 +33,7 @@ describe("GPU Protocol e2e", async () => {
     "0x2222222222222222222222222222222222222222222222222222222222222222" as const;
 
   async function deployProtocol() {
-    const [deployer, client, provider, keeper] = await viem.getWalletClients();
+    const [deployer, client, provider, keeper, operator] = await viem.getWalletClients();
 
     const token = await viem.deployContract("GCoin", [client.account.address]);
     const escrow = await viem.deployContract("GPUJobEscrow", [
@@ -42,7 +42,7 @@ describe("GPU Protocol e2e", async () => {
       EXECUTION_TIMEOUT,
     ]);
 
-    return { token, escrow, deployer, client, provider, keeper };
+    return { token, escrow, deployer, client, provider, keeper, operator };
   }
 
   /**
@@ -89,6 +89,40 @@ describe("GPU Protocol e2e", async () => {
     const job = await escrow.read.jobs([jobId]);
     return BigInt(job[2]);
   }
+
+  it("대행 흐름 — 워커가 서명하고 대금은 소유자 지갑으로 간다", async () => {
+    const ctx = await networkHelpers.loadFixture(deployProtocol);
+    const { token, escrow, client, provider, operator } = ctx;
+
+    // 소유자가 자기 PC 를 승인한다. MetaMask 로 한 번 서명하는 자리다.
+    await escrow.write.setOperator([operator.account.address, true], {
+      account: provider.account,
+    });
+    assert.equal(
+      await escrow.read.isOperator([provider.account.address, operator.account.address]),
+      true,
+    );
+
+    const jobId = await createAndFund(ctx);
+
+    // 사람이 아니라 기계가 부른다
+    await escrow.write.acceptJob([jobId], { account: operator.account });
+
+    const job = await escrow.read.jobs([jobId]);
+    assert.equal(
+      (job[4] as string).toLowerCase(),
+      operator.account.address.toLowerCase(),
+      "어느 기계가 맡았는지 온체인에 남아야 합니다",
+    );
+
+    await escrow.write.submitResult([jobId, RESULT_HASH], { account: operator.account });
+
+    assert.equal(await stateOf(escrow, jobId), COMPLETED);
+    // 대금은 정산 주소로 간다. 기계에는 쌓이지 않는다.
+    assert.equal(await token.read.balanceOf([provider.account.address]), PRICE);
+    assert.equal(await token.read.balanceOf([operator.account.address]), 0n);
+    assert.equal(await token.read.balanceOf([escrow.address]), 0n);
+  });
 
   it("정상 흐름 — 결과를 제출하는 트랜잭션에서 정산까지 끝난다", async () => {
     const ctx = await networkHelpers.loadFixture(deployProtocol);

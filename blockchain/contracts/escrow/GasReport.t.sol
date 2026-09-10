@@ -83,7 +83,7 @@ contract GasReportTest is Test {
         token.approve(address(escrow), PRICE);
         uint256 c = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
         vm.stopPrank();
-        (, , uint64 dl, , , ) = escrow.jobs(c);
+        (, , uint64 dl, , , , ) = escrow.jobs(c);
         vm.warp(dl + 1);
         g = gasleft();
         escrow.settleTimeout(c);
@@ -96,7 +96,7 @@ contract GasReportTest is Test {
         vm.stopPrank();
         vm.prank(provider);
         escrow.acceptJob(d);
-        (, , uint64 dl2, , , ) = escrow.jobs(d);
+        (, , uint64 dl2, , , , ) = escrow.jobs(d);
         vm.warp(dl2 + 1);
         g = gasleft();
         escrow.settleTimeout(d);
