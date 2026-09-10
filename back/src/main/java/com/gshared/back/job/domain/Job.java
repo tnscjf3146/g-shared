@@ -54,6 +54,10 @@ public class Job extends BaseTimeEntity {
     @Column(length = 64)
     private String recommendedWorkerId;     // 추천 ≠ 배정 확정 (배정은 assignedWorkerId)
 
+    // 단위: TOKEN(GSC, 사람 단위). wei(×10^18)는 절대 저장하지 않는다 — BIGINT는 9 GSC에서 넘친다.
+    // 온체인 전송 시에만 BigInteger.valueOf(cost).multiply(TEN.pow(18)) 로 변환하고,
+    // 체인에서 읽은 uint256은 long이 아니라 BigInteger로 받는다. (03-에스크로-연동-규격.md)
+    // 아래 actualCost 도 같은 규칙이다.
     @Column(nullable = false)
     private Long estimatedCost;
     private Double actualRuntimeSec;
