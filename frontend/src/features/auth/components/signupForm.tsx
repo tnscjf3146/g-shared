@@ -64,7 +64,7 @@ export function SignupForm() {
           size="lg"
           type="email"
           autoComplete="email"
-          placeholder="gshared@gshared.com"
+          placeholder="g@shared.com"
           value={f.values.email}
           onChange={(e) => f.set('email', e.target.value)}
           aria-invalid={!!f.errors.email}
