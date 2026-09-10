@@ -1,0 +1,197 @@
+package com.gshared.back.job.service;
+
+import com.gshared.back.global.client.SchedulerClient;
+import com.gshared.back.global.client.SchedulerErrorCode;
+import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
+import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
+import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
+import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.job.dto.request.EstimateJobRequest;
+import com.gshared.back.job.dto.request.JobSpecRequest;
+import com.gshared.back.job.dto.response.EstimateResponse;
+import com.gshared.back.job.dto.response.GpuOptionResponse;
+import com.gshared.back.job.exception.JobErrorCode;
+import com.gshared.back.worker.domain.GpuGrade;
+import com.gshared.back.worker.service.GpuCatalogService;
+import com.gshared.back.workload.domain.Workload;
+import com.gshared.back.workload.exception.WorkloadErrorCode;
+import com.gshared.back.workload.repository.BaseModelRepository;
+import com.gshared.back.workload.repository.WorkloadRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 주문 전 단계 — GPU 후보와 견적.
+ *
+ * <p>아무것도 저장하지 않는다. 사용자가 화면에서 설정을 바꿀 때마다 불리는 곳이라,
+ * 여기서 행을 만들면 버려진 주문서가 쌓인다. 저장은 {@link JobService#create} 만 한다.
+ *
+ * <p>{@link JobService} 와 학습 설정·비용 계산을 공유한다({@link TrainingConfigResolver},
+ * {@link JobCostPolicy}). 견적에서 본 금액과 실제 주문 금액이 달라지면 안 되기 때문이다.
+ */
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class JobEstimateService {
+
+    /** 필요 VRAM 대비 이만큼은 넘어야 "여유 있다"고 본다. 1.25 = 25% 여유. */
+    private static final double COMFORTABLE_VRAM_RATIO = 1.25;
+
+    private final WorkloadRepository workloadRepository;
+    private final BaseModelRepository baseModelRepository;
+    private final GpuCatalogService gpuCatalogService;
+    private final SchedulerClient schedulerClient;
+    private final TrainingConfigResolver trainingConfigResolver;
+
+    /**
+     * 이 명세를 감당할 수 있는 GPU 등급들과 그 적합도.
+     *
+     * <p>지금 일할 수 있는 워커가 하나도 없으면 409 다 — 요청이 틀린 게 아니라 기다리면 되는
+     * 상황이라, 사용자에게 설정을 고치라고 말하면 안 된다.
+     */
+    public List<GpuOptionResponse> getGpuOptions(JobSpecRequest request) {
+        Workload workload = loadWorkload(request);
+        List<GpuGrade> grades = gpuCatalogService.grades();
+        if (grades.isEmpty()) {
+            throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);
+        }
+
+        SchedulerRecommendRequest.DatasetMeta datasetMeta = request.datasetMetadata().toSchedulerMeta();
+        SchedulerTrainingConfig config = trainingConfigResolver.resolve(
+                request.trainingMode(), request.autoMode(), request.trainingConfig(), datasetMeta);
+
+        // Scheduler 는 워커 단위로 답한다. 어느 등급이 1순위인지 알려면 추천 워커가 어느 등급인지 되짚어야 한다.
+        SchedulerRecommendResponse recommendation =
+                recommend(request, workload, datasetMeta, config, grades);
+        Long recommendedGradeId = gradeIdOf(recommendation.recommendedWorkerId(), grades);
+
+        int requiredVramMb = workload.getMinVramMb();
+        return grades.stream()
+                .map(grade -> toOption(grade, requiredVramMb, recommendedGradeId))
+                .toList();
+    }
+
+    /**
+     * 고른 GPU 등급으로 실행시간과 비용을 뽑는다.
+     *
+     * <p>등급 안의 워커 중 Scheduler 가 가장 빠르다고 본 값을 쓴다. 같은 등급이어도 벤치마크가
+     * 조금씩 달라 예측이 갈리는데, 사용자는 등급을 골랐지 특정 PC 를 고른 것이 아니다.
+     */
+    public EstimateResponse estimate(EstimateJobRequest request) {
+        JobSpecRequest spec = request.spec();
+        Workload workload = loadWorkload(spec);
+
+        GpuGrade grade = gpuCatalogService.grades().stream()
+                .filter(g -> g.id() == request.gpuId())
+                .findFirst()
+                // 조회 때 있던 등급이 사라졌다는 것은 그 PC 들이 모두 꺼졌다는 뜻 — 기다리면 되는 상황이다.
+                .orElseThrow(() -> new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER));
+
+        SchedulerRecommendRequest.DatasetMeta datasetMeta = spec.datasetMetadata().toSchedulerMeta();
+        SchedulerTrainingConfig config = trainingConfigResolver.resolve(
+                spec.trainingMode(), spec.autoMode(), spec.trainingConfig(), datasetMeta);
+
+        SchedulerRecommendResponse recommendation =
+                recommend(spec, workload, datasetMeta, config, List.of(grade));
+
+        double predictedRuntimeSec = recommendation.rankings().stream()
+                .mapToDouble(SchedulerRecommendResponse.Ranking::predictedRuntimeSec)
+                .min()
+                .orElseThrow(() -> new BusinessException(SchedulerErrorCode.NO_FEASIBLE_GPU));
+
+        long estimatedCost = JobCostPolicy.estimate(datasetMeta.effectiveTokens(), config.epochs());
+
+        return new EstimateResponse(config, predictedRuntimeSec, estimatedCost);
+    }
+
+    /**
+     * 카탈로그 확인. 모델이 그 이미지에 속하지 않는 조합은 여기서 막는다 —
+     * 주문 단계에서만 막으면, 견적까지 통과한 조합이 마지막에 거절당한다.
+     */
+    private Workload loadWorkload(JobSpecRequest request) {
+        Workload workload = workloadRepository.findByIdAndEnabledTrue(request.workloadId())
+                .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
+        var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
+                .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
+        if (!baseModel.getWorkload().getId().equals(request.workloadId())) {
+            throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
+        }
+        return workload;
+    }
+
+    private SchedulerRecommendResponse recommend(JobSpecRequest request, Workload workload,
+                                                 SchedulerRecommendRequest.DatasetMeta datasetMeta,
+                                                 SchedulerTrainingConfig config,
+                                                 List<GpuGrade> grades) {
+        List<SchedulerRecommendRequest.GpuCandidate> candidates = grades.stream()
+                .flatMap(grade -> grade.workers().stream())
+                // 벤치마크가 없는 워커는 후보에서 뺀다 — Scheduler 가 null 을 422 로 거절한다.
+                .filter(worker -> worker.getBenchmarkTokensPerSec() != null)
+                .map(worker -> new SchedulerRecommendRequest.GpuCandidate(
+                        worker.getId(), worker.getGpuModel(), worker.getVramMb(),
+                        worker.getBenchmarkTokensPerSec()))
+                .toList();
+        if (candidates.isEmpty()) {
+            throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);
+        }
+
+        SchedulerRecommendResponse response = schedulerClient.recommend(new SchedulerRecommendRequest(
+                request.baseModelId(), workload.getId(), datasetMeta, config, candidates));
+        // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
+        if (response.rankings() == null || response.rankings().isEmpty()) {
+            throw new BusinessException(SchedulerErrorCode.NO_FEASIBLE_GPU);
+        }
+        return response;
+    }
+
+    /** 추천 워커가 속한 등급. Scheduler 가 아무도 고르지 않았으면 null. */
+    private Long gradeIdOf(String recommendedWorkerId, List<GpuGrade> grades) {
+        if (recommendedWorkerId == null) {
+            return null;
+        }
+        Map<String, Long> gradeIdByWorker = grades.stream()
+                .flatMap(grade -> grade.workers().stream()
+                        .map(worker -> Map.entry(worker.getId(), grade.id())))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return gradeIdByWorker.get(recommendedWorkerId);
+    }
+
+    private GpuOptionResponse toOption(GpuGrade grade, int requiredVramMb, Long recommendedGradeId) {
+        GpuOptionResponse.Fit fit = fitOf(grade, requiredVramMb, recommendedGradeId);
+        return new GpuOptionResponse(
+                grade.id(), grade.model(), grade.vramMb(),
+                // 시간당 단가는 정책 미정 — GpuResponse 와 같은 이유로 0 이다.
+                0L,
+                fit, requiredVramMb, reasonOf(fit, grade, requiredVramMb),
+                grade.workers().size());
+    }
+
+    private GpuOptionResponse.Fit fitOf(GpuGrade grade, int requiredVramMb, Long recommendedGradeId) {
+        if (grade.vramMb() < requiredVramMb) {
+            return GpuOptionResponse.Fit.INSUFFICIENT;
+        }
+        if (recommendedGradeId != null && recommendedGradeId == grade.id()) {
+            return GpuOptionResponse.Fit.RECOMMENDED;
+        }
+        return grade.vramMb() < requiredVramMb * COMFORTABLE_VRAM_RATIO
+                ? GpuOptionResponse.Fit.TIGHT
+                : GpuOptionResponse.Fit.OK;
+    }
+
+    /** 화면에 그대로 나가는 한 줄. 왜 이 판정인지를 숫자로 말한다. */
+    private String reasonOf(GpuOptionResponse.Fit fit, GpuGrade grade, int requiredVramMb) {
+        int freeGb = Math.round((grade.vramMb() - requiredVramMb) / 1024f);
+        int shortGb = Math.round((requiredVramMb - grade.vramMb()) / 1024f);
+        return switch (fit) {
+            case RECOMMENDED -> "예상 실행 시간이 가장 짧습니다.";
+            case OK -> "여유 " + freeGb + " GB 로 넉넉합니다.";
+            case TIGHT -> "여유 " + freeGb + " GB 로 빠듯합니다. 설정에 따라 실패할 수 있습니다.";
+            case INSUFFICIENT -> "VRAM 이 " + shortGb + " GB 부족해 실행할 수 없습니다.";
+        };
+    }
+}
