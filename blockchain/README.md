@@ -82,6 +82,80 @@ npm run deploy:local
 `ignition/modules/GCoin.ts`의 `GCoinModule.initialHolder` 파라미터로 다른 수령자를 지정할 수 있다. 이 경로는 테스트에서도 검증한다.
 
 
+## 로컬 개발 체인 — 연동 개발용
+
+워커와 백엔드가 온체인 연동을 개발할 때 붙을 곳이다. 에스크로는 SSAFY 체인에 배포되어 있지 않고 체인 가드가 배포를 막고 있어, 로컬에 같은 구성을 세운다.
+
+**SSAFY 체인 대신 로컬을 쓰는 결정적인 이유는 시각을 조작할 수 있다는 점이다.** `abortJob` 과 시한 만료 경로를 시험하려면 시계를 앞으로 돌려야 하는데 SSAFY 체인에서는 못 한다. 여기서는 시한을 초 단위로 짧게 잡아 몇 분 안에 전 경로를 확인한다.
+
+### 준비
+
+터미널 하나에서 노드를 띄운다.
+
+```shell
+npm run dev:node
+```
+
+다른 터미널에서 컨트랙트를 올리고 계정을 준비한다.
+
+```shell
+npm run dev:chain
+```
+
+GCoin 과 에스크로가 배포되고, 의뢰자에게 10,000 GSC 가 들어가며, 소유자가 워커 키를 승인한 상태가 된다. 주소와 계정은 `deployments/localhost/dev-chain.json` 에 적힌다.
+
+```text
+acceptTimeout     60초
+executionTimeout  300초
+```
+
+### 공급자 노드 흉내
+
+```shell
+npm run dev:agent          정상 흐름 — 수락 → 학습 → 제출 → 지급
+npm run dev:agent:abort    실패 흐름 — 수락 → 반납 → 환불
+npm run dev:agent:idle     응답 불능 — 수락하지 않음
+```
+
+`scripts/provider-agent.ts` 는 **워커가 파이썬으로 옮겨 갈 참고물**이다. 수락 전 대조 일곱 항목, 결과 해시 만드는 법, 반납 경로가 주석과 함께 들어 있다.
+
+### 키퍼 흉내
+
+시한이 지난 작업을 정리한다. `settleTimeout` 은 누구나 부를 수 있지만 가스가 0 이라 아무도 자동으로 부르지 않는다.
+
+```shell
+npm run dev:keeper
+```
+
+시한 만료를 시험하려면 시계를 먼저 돌린다.
+
+```shell
+curl -s -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"evm_increaseTime","params":[120]}'
+curl -s -X POST http://127.0.0.1:8545 -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"evm_mine","params":[]}'
+```
+
+`scripts/keeper.ts` 는 **백엔드가 web3j 로 옮길 참고물**이다. 실제로는 전수를 훑지 않고 DB 에 보관한 만료 후보만 조회하면 된다.
+
+
+## ABI
+
+`artifacts/` 는 `.gitignore` 에 있어 저장소에 남지 않는다. 연동 측은 ABI 가 있어야 호출부를 만들 수 있고, 손으로 복사하면 반드시 코드와 어긋나므로 컴파일 산출물에서 뽑아 커밋한다.
+
+```shell
+npm run abi
+```
+
+```text
+blockchain/abi/GPUJobEscrow.json
+```
+
+`sourceCommit` 이 들어 있어 어느 코드에서 나온 ABI 인지 확인할 수 있다. 상태 enum 은 ABI 에 `uint8` 로만 나와 이름이 사라지므로 소스에서 읽어 함께 넣는다.
+
+연동 규격은 `docs/03-에스크로-연동-규격.md` 다. **이 문서와 ABI 파일이 정본이다.**
+
+
 ## SSAFY 체인 배포
 
 아래 명령은 `blockchain/`에서 실행한다. 실제 RPC와 Chain ID는 팀에서 확인한 값을 사용한다. 배포자와 초기 수령 지갑은 서로 달라도 된다.
