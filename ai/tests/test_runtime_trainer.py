@@ -112,6 +112,7 @@ class TestWhatTrainingProduces:
 
         assert metadata["modelVersion"] == MODEL_VERSION
         assert metadata["featureSchemaVersion"] == FEATURE_SCHEMA_VERSION
+        assert metadata["featureSchemaVersion"] == "runtime-features-v2"
         assert metadata["featureNames"] == list(RUNTIME_FEATURE_NAMES)
         assert metadata["target"] == TARGET_NAME
         assert metadata["targetTransform"] == TARGET_TRANSFORM

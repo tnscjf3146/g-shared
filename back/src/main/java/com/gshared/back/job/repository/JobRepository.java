@@ -88,7 +88,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     int completeIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
                           @Param("resultHash") String resultHash, @Param("resultUrl") String resultUrl,
-                          @Param("actualRuntimeSec") Integer actualRuntimeSec, @Param("now") LocalDateTime now);
+                          @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
     /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유 기록. */
     @Modifying(clearAutomatically = true)
@@ -133,4 +133,21 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
             """)
     int unassignIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId);
+
+    /**
+     * 원자적 예치 확인: "본인 Job이면서 아직 CREATED 일 때만" FUNDED 전이.
+     * 중복 호출·동시 호출은 조건 불일치(0행)로 한쪽만 성공한다.
+     *
+     * TODO: 블록체인 Escrow 연동 후 온체인 예치 확인으로 교체
+     * @return 영향받은 행 수 (1=전이 성공, 0=상태가 CREATED가 아님)
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+             WHERE j.id = :jobId
+               AND j.owner.id = :ownerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.CREATED
+            """)
+    int fundIfCreated(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId);
 }

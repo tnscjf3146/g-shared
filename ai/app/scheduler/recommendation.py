@@ -5,11 +5,16 @@
 요청은 직렬화와 왕복 비용을 내면서, 그 사이에 죽을 수 있는 지점을 하나 더 만들고,
 로그를 두 배로 늘린다. 얻는 것은 없다.
 
-세 책임이 각각 다른 곳에 있다.
+네 책임이 각각 다른 곳에 있다.
 
-* :mod:`app.scheduler.runtime_predictor` -- 몇 초 걸릴지
+* :mod:`app.scheduler.feasibility` -- 이 Job을 돌릴 수 있는 GPU인지
+* :mod:`app.scheduler.runtime_predictor` -- 그 GPU에서 몇 초 걸릴지
 * :mod:`app.scheduler.ranking` -- 그 숫자로 줄 세우고 하나 고르기
-* 이 파일 -- 둘을 잇고, 요청을 feature 행으로 바꾸기
+* 이 파일 -- 셋을 잇고, 요청을 feature 행으로 바꾸기
+
+**순서가 계약의 일부다.** 걸러내기가 예측보다 먼저다. 뒤바꿔도 최종 응답은 같아
+보이지만, 그때는 실행되지도 않을 GPU마다 XGBoost를 부르게 되고, 후보가 늘수록 그
+낭비도 같이 는다.
 
 예측기 안에 정렬과 추천까지 넣지 않은 이유는 그것들이 모델과 함께 바뀌지 않기
 때문이다. 순위 규칙은 모델을 다시 학습해도 그대로고, 모델을 바꿔도 그대로다.
@@ -21,6 +26,7 @@ from dataclasses import dataclass
 from typing import Protocol, Sequence
 
 from app.schemas.recommendation import RecommendationRequest
+from app.scheduler.feasibility import filter_feasible_candidates
 from app.scheduler.ranking import RankedCandidate, rank_candidates, recommend
 from app.scheduler.runtime_features import RuntimeFeatures, build_runtime_features
 
@@ -47,11 +53,23 @@ class Recommendation:
 def recommend_worker(
     request: RecommendationRequest, predictor: PredictsRuntime
 ) -> Recommendation:
-    """작업 하나와 후보들로 순위를 만들고 하나를 고른다.
+    """돌릴 수 있는 후보를 추리고, 그것들만 예측해 줄 세우고, 하나를 고른다.
+
+    **거르는 것이 먼저다.** 이 함수를 지나 예측기에 닿는 후보는 전부 이 Job을 돌릴
+    수 있는 GPU이며, 그래서 순위에도 실행 가능한 GPU만 남는다. 탈락한 후보는 응답
+    어디에도 나오지 않는다 -- Backend가 순위를 보고 고를 텐데 거기에 못 돌릴 GPU가
+    섞여 있으면 그 목록은 선택지가 아니다.
 
     후보를 한 번에 예측기에 넘긴다. 하나씩 부르면 같은 답이 나오지만 느리고,
     무엇보다 순서가 어긋날 자리가 생긴다.
+
+    돌릴 수 있는 GPU가 하나도 없으면
+    :class:`~app.scheduler.feasibility.NoFeasibleGpuError` 가 그대로 올라간다.
+    가장 큰 GPU를 골라 물러서지 않는다 -- 그건 못 돌린다는 답을 돌릴 수 있다는
+    답으로 바꿔치기하는 것이다.
     """
+    feasible = filter_feasible_candidates(request.requirements, request.gpu_candidates)
+
     rows = [
         build_runtime_features(
             dataset=request.dataset,
@@ -59,14 +77,14 @@ def recommend_worker(
             model_id=request.model_id,
             candidate=candidate,
         )
-        for candidate in request.gpu_candidates
+        for candidate in feasible
     ]
 
     seconds = predictor.predict(rows)
-    # zip이 순서를 지킨다. rows도 candidates 순서로 만들었으므로 i번째 예측은
+    # zip이 순서를 지킨다. rows도 feasible 순서로 만들었으므로 i번째 예측은
     # i번째 후보의 것이다.
     ranked = rank_candidates([
         (candidate.worker_id, predicted)
-        for candidate, predicted in zip(request.gpu_candidates, seconds)
+        for candidate, predicted in zip(feasible, seconds)
     ])
     return Recommendation(rankings=ranked, recommended_worker_id=recommend(ranked))

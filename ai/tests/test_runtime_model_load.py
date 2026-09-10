@@ -9,14 +9,25 @@ import json
 import shutil
 
 import pytest
+from fastapi.testclient import TestClient
 
+from app.main import app
+from app.scheduler.runtime_features import FEATURE_SCHEMA_VERSION
 from app.scheduler.runtime_model import LoadedRuntimeModel
-from app.scheduler.runtime_predictor import ModelUnavailableError, load_runtime_predictor
+from app.scheduler.runtime_predictor import (
+    IncompatibleModelError,
+    ModelUnavailableError,
+    load_runtime_predictor,
+)
 from app.training.runtime_trainer import (
     METADATA_FILE_NAME,
     MODEL_FILE_NAME,
     MODEL_VERSION,
 )
+
+#: 정수 modelId 이전의 schema. 그때 artifact의 categoryMappings는 모델 이름
+#: 문자열을 담고 있어서, 지금 오는 정수 modelId와는 한 값도 맞지 않는다.
+LEGACY_SCHEMA_VERSION = "runtime-features-v1"
 
 
 @pytest.fixture
@@ -130,3 +141,71 @@ class TestTheHolder:
 
     def test_no_fake_predictor_is_substituted(self, tmp_path):
         assert LoadedRuntimeModel.load_from(tmp_path).predictor is None
+
+
+class TestAModelThatDoesNotMatchThisBuild:
+    """읽히기는 하는데 다른 계약으로 학습된 모델. 없는 것과 다르게 다룬다.
+
+    없는 모델은 학습하면 풀리지만 이건 배포가 잘못 물린 것이라, 붙잡아 두고
+    요청 때 돌려주면 문제가 있는 곳(기동 환경)과 드러나는 곳(요청)이 어긋난다.
+    """
+
+    def test_a_stale_feature_schema_is_not_swallowed(self, directory):
+        rewrite_metadata(directory, featureSchemaVersion=LEGACY_SCHEMA_VERSION)
+
+        with pytest.raises(IncompatibleModelError):
+            LoadedRuntimeModel.load_from(directory)
+
+    def test_the_message_names_both_versions(self, directory):
+        # 어느 쪽을 고쳐야 하는지 알려면 둘 다 보여야 한다.
+        rewrite_metadata(directory, featureSchemaVersion=LEGACY_SCHEMA_VERSION)
+
+        with pytest.raises(IncompatibleModelError) as raised:
+            LoadedRuntimeModel.load_from(directory)
+
+        assert FEATURE_SCHEMA_VERSION in str(raised.value)
+        assert LEGACY_SCHEMA_VERSION in str(raised.value)
+
+    def test_different_feature_columns_stop_it_too(self, directory):
+        rewrite_metadata(directory, featureNames=["epochs", "batch_size"])
+
+        with pytest.raises(IncompatibleModelError):
+            LoadedRuntimeModel.load_from(directory)
+
+    def test_a_different_target_transform_stops_it_too(self, directory):
+        rewrite_metadata(directory, targetTransform="none")
+
+        with pytest.raises(IncompatibleModelError):
+            LoadedRuntimeModel.load_from(directory)
+
+    def test_a_missing_model_is_still_only_a_reason(self, tmp_path):
+        # 경계를 못 박는다. 시작을 막는 것은 "맞지 않는 모델"뿐이다.
+        loaded = LoadedRuntimeModel.load_from(tmp_path)
+
+        assert not loaded.is_available
+        assert loaded.error is not None
+
+
+class TestWhenItIsFound:
+    """mismatch가 드러나는 시점. 요청이 아니라 기동이어야 한다."""
+
+    def test_a_stale_artifact_stops_the_app_from_starting(self, directory, monkeypatch):
+        rewrite_metadata(directory, featureSchemaVersion=LEGACY_SCHEMA_VERSION)
+        monkeypatch.setenv("GSHARED_SCHEDULER_MODELS_DIR", str(directory))
+
+        with pytest.raises(IncompatibleModelError):
+            with TestClient(app):
+                pass
+
+    def test_the_current_artifact_starts_normally(self, directory, monkeypatch):
+        monkeypatch.setenv("GSHARED_SCHEDULER_MODELS_DIR", str(directory))
+
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200
+
+    def test_a_missing_model_still_lets_the_app_start(self, tmp_path, monkeypatch):
+        # 이 동작은 그대로다. 예측만 503으로 거절한다.
+        monkeypatch.setenv("GSHARED_SCHEDULER_MODELS_DIR", str(tmp_path))
+
+        with TestClient(app) as client:
+            assert client.get("/health").status_code == 200

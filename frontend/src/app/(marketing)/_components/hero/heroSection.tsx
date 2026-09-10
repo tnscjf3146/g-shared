@@ -23,7 +23,7 @@ export function HeroSection() {
             전국의 유휴 GPU를 연결해 클라우드보다 저렴하게 학습을 돌리고, 정산은 블록체인이 증명합니다.
           </p>
           <div className="flex items-center gap-4 pt-2">
-            <Button href="/" size="lg">지금 시작하기</Button>
+            <Button href="/jobs/new" size="lg">지금 시작하기</Button>
             <Button href="/workers" variant="ghost" size="lg">
               내 GPU로 수익 내기
             </Button>

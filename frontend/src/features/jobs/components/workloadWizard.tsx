@@ -1,0 +1,200 @@
+'use client'
+
+import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Stepper } from '@/components/ui/stepper'
+import { createJob, getCatalog, uploadFile } from '../api'
+import { jobMessageFor } from '../errors'
+import type { AutoMode, Catalog, DatasetMetadata, Estimate, JobSpec, TrainingConfig } from '../types'
+import { StepConfig } from './stepConfig'
+import { StepDataset } from './stepDataset'
+import { StepGpu } from './stepGpu'
+import { StepUpload } from './stepUpload'
+import { StepWorkload } from './stepWorkload'
+
+// /jobs/new "워크로드 등록" 5단계 위저드(job.md §4). 1 워크로드 → 2 설정 → 3 데이터셋(브라우저 분석) → 4 GPU 등급(메타데이터로 추천, 고르면 견적) → 5 업로드(지갑 잔액 ≥ 비용이면 업로드·등록, 부족하면 예치 안내)
+// 파일(데이터셋·어댑터·내 모델)은 마지막 [업로드하고 등록] 을 누를 때까지 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터만 보낸다
+export type WizardState = {
+  workloadId: number | null
+  baseModelId: number | null
+  modelSource: 'PROVIDED' | 'OWN' // 제공 모델 / 내가 가진 학습된 모델
+  ownModelFile: File | null
+  adapterFile: File | null // 기존 LoRA 어댑터(학습: 이어서 / 추론·평가: 적용)
+  level: AutoMode // 학습 수준(학습 워크로드만)
+  custom: TrainingConfig | null | 'invalid' // 고급: 직접 설정(있으면 level 대신). 'invalid' = 고급을 열었지만 값이 틀림 → 다음 단계 차단
+  datasetFile: File | null
+  datasetId: number | null // 파일 대신 기존 데이터셋
+  datasetMetadata: DatasetMetadata | null // 파일이면 브라우저 분석 결과, 기존이면 카탈로그 값
+  analyzing: boolean
+  gpuId: number | null
+  estimate: Estimate | null
+}
+const INITIAL: WizardState = {
+  workloadId: null, baseModelId: null, modelSource: 'PROVIDED', ownModelFile: null, adapterFile: null, level: 'BALANCED', custom: null,
+  datasetFile: null, datasetId: null, datasetMetadata: null, analyzing: false, gpuId: null, estimate: null,
+}
+const STEPS = [{ label: '워크로드' }, { label: '설정' }, { label: '데이터셋' }, { label: 'GPU 등급 · 견적' }, { label: '업로드' }]
+
+/** GPU 추천·견적이 공통으로 받는 스펙 — 파일 없이 메타데이터만 */
+function toSpec(s: WizardState): JobSpec | null {
+  if (!s.workloadId || !s.baseModelId || !s.datasetMetadata) return null
+  const custom = typeof s.custom === 'object' ? s.custom : null
+  return {
+    workloadId: s.workloadId,
+    baseModelId: s.baseModelId,
+    datasetMetadata: s.datasetMetadata,
+    trainingMode: custom ? 'CUSTOM' : 'AUTO',
+    autoMode: custom ? undefined : s.level,
+    trainingConfig: custom ?? undefined,
+    hasAdapter: s.adapterFile !== null,
+    ownModel: s.modelSource === 'OWN',
+  }
+}
+
+export function WorkloadWizard() {
+  const router = useRouter()
+  const [catalog, setCatalog] = useState<Catalog | null | 'error'>(null)
+  const [state, setState] = useState<WizardState>(INITIAL)
+  const [step, setStep] = useState(0)
+  const [maxReached, setMaxReached] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState<string | null>(null) // 진행 문구
+  const patch = (p: Partial<WizardState>) => {
+    setState((s) => ({ ...s, ...p }))
+    setError(null)
+  }
+
+  useEffect(() => {
+    getCatalog()
+      .then(setCatalog)
+      .catch(() => setCatalog('error'))
+  }, [])
+
+  if (catalog === null) return <div aria-busy className="card h-96 w-full animate-pulse" />
+  if (catalog === 'error') {
+    return (
+      <section className="card flex w-full flex-col items-start gap-3 p-10">
+        <p className="text-[15px] text-dark">선택 항목을 불러오지 못했습니다.</p>
+        <button type="button" onClick={() => location.reload()} className="text-[14px] text-primary hover:underline">
+          다시 시도 →
+        </button>
+      </section>
+    )
+  }
+
+  const workload = catalog.workloads.find((w) => w.id === state.workloadId) ?? null
+  const spec = toSpec(state)
+
+  // 단계별 완료 조건(job.md §4)
+  const validate = (i: number): string | null => {
+    if (i === 0) {
+      if (!state.workloadId) return '워크로드 유형을 선택해 주세요.'
+      if (!state.baseModelId) return '모델을 선택해 주세요.'
+    }
+    if (i === 1) {
+      if (state.modelSource === 'OWN' && !state.ownModelFile) return '가져올 모델 파일을 첨부하거나 제공 모델을 선택해 주세요.'
+      if (state.custom === 'invalid') return '고급 학습 설정 값을 확인해 주세요.'
+    }
+    if (i === 2) {
+      if (!state.datasetFile && !state.datasetId) return workload?.kind === 'INFERENCE' ? '입력 데이터 파일을 올리거나 기존 데이터셋을 선택해 주세요.' : '데이터셋 파일을 올리거나 기존 데이터셋을 선택해 주세요.'
+      if (state.analyzing) return '데이터셋 분석이 끝날 때까지 잠시 기다려 주세요.'
+      if (!state.datasetMetadata) return '데이터셋을 분석하지 못했습니다. 파일 형식을 확인해 주세요.'
+    }
+    if (i === 3) {
+      if (!state.gpuId) return 'GPU 등급을 선택해 주세요.'
+      if (!state.estimate) return '견적을 받는 중입니다. 잠시 기다려 주세요.'
+    }
+    return null
+  }
+  const next = () => {
+    const msg = validate(step)
+    if (msg) return setError(msg)
+    const n = step + 1
+    setStep(n)
+    setMaxReached((m) => Math.max(m, n))
+  }
+  const goTo = (i: number) => {
+    if (i <= maxReached && !submitting) {
+      setStep(i)
+      setError(null)
+    }
+  }
+
+  // 마지막: 파일 업로드(있는 것만, 순서대로) → POST /jobs → 상세로
+  const submit = async () => {
+    if (!spec || !state.gpuId || !state.estimate) return
+    setError(null)
+    try {
+      let datasetId = state.datasetId
+      if (state.datasetFile) {
+        setSubmitting('데이터셋 업로드 중…')
+        datasetId = (await uploadFile('dataset', state.datasetFile, spec.datasetMetadata)).id
+      }
+      let adapterId: number | undefined
+      if (state.adapterFile) {
+        setSubmitting('어댑터 업로드 중…')
+        adapterId = (await uploadFile('adapter', state.adapterFile)).id
+      }
+      let modelId: number | undefined
+      if (state.modelSource === 'OWN' && state.ownModelFile) {
+        setSubmitting('모델 업로드 중…')
+        modelId = (await uploadFile('model', state.ownModelFile)).id
+      }
+      setSubmitting('워크로드 등록 중…')
+      const jobId = await createJob({
+        workloadId: spec.workloadId,
+        baseModelId: spec.baseModelId,
+        datasetId: datasetId!,
+        gpuId: state.gpuId,
+        trainingMode: spec.trainingMode,
+        trainingConfig: spec.trainingMode === 'CUSTOM' ? state.estimate.trainingConfig : undefined,
+        predictedRuntimeSec: state.estimate.predictedRuntimeSec,
+        estimatedCost: state.estimate.estimatedCost,
+        adapterId,
+        modelId,
+      })
+      router.replace(`/jobs/${jobId}`)
+    } catch (e) {
+      setError(jobMessageFor(e))
+      setSubmitting(null)
+    }
+  }
+
+  const last = step === STEPS.length - 1
+  return (
+    <div className="flex w-full flex-col gap-6">
+      <Stepper steps={STEPS} current={step} maxReached={maxReached} onSelect={goTo} />
+
+      <section className="card animate-enter flex flex-col gap-6 p-8" key={step}>
+        {step === 0 && <StepWorkload catalog={catalog} state={state} onChange={patch} />}
+        {step === 1 && <StepConfig catalog={catalog} state={state} onChange={patch} />}
+        {step === 2 && <StepDataset catalog={catalog} state={state} onChange={patch} />}
+        {step === 3 && spec && <StepGpu spec={spec} state={state} onChange={patch} />}
+        {step === 4 && spec && <StepUpload catalog={catalog} spec={spec} state={state} submitting={submitting !== null} onSubmit={submit} />}
+
+        {(error || submitting) && (
+          <p role={error ? 'alert' : 'status'} className={`rounded-md px-4 py-3 text-[14px] ${error ? 'bg-danger-tint text-danger' : 'bg-neutral-tint text-dark'}`}>
+            {error ?? submitting}
+          </p>
+        )}
+
+        <div className="flex items-center justify-between border-t border-hairline pt-5">
+          <Button variant="secondary" disabled={step === 0 || submitting !== null} onClick={() => goTo(step - 1)}>
+            이전
+          </Button>
+          <span className="text-[13px] tabular-nums text-text-muted">
+            {step + 1} / {STEPS.length}
+          </span>
+          {last ? (
+            <span className="text-[13px] text-text-muted">위 카드의 업로드 버튼으로 마칩니다</span>
+          ) : (
+            <Button size="lg" onClick={next} disabled={state.analyzing && step === 2}>
+              {step === 2 && state.analyzing ? '분석 중…' : `다음: ${STEPS[step + 1].label}`}
+            </Button>
+          )}
+        </div>
+      </section>
+    </div>
+  )
+}

@@ -35,8 +35,8 @@ CANDIDATE = {
 
 def request_payload(**overrides):
     payload = {
-        "modelId": "qwen2.5-7b",
-        "dockerImageId": "qlora-sft-v1",
+        "modelId": 3,
+        "dockerImageId": 1,
         "dataset": DATASET,
         "trainingConfig": TRAINING,
         "gpuCandidates": [CANDIDATE],
@@ -137,9 +137,31 @@ class TestTheRequestAsAWhole:
         with pytest.raises(ValidationError):
             RuntimePredictionRequest(**request_payload(gpuCandidates=[]))
 
-    def test_an_empty_model_id_is_refused(self):
+    def test_the_ids_are_database_keys(self):
+        request = RuntimePredictionRequest(**request_payload(modelId=3, dockerImageId=1))
+
+        assert request.model_id == 3
+        assert request.docker_image_id == 1
+
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_an_id_that_cannot_be_a_primary_key_is_refused(self, field, bad):
+        # 0이나 음수인 PK는 없다. 그런 값이 왔다면 보내는 쪽이 잘못 만든 것이다.
         with pytest.raises(ValidationError):
-            RuntimePredictionRequest(**request_payload(modelId=""))
+            RuntimePredictionRequest(**request_payload(**{field: bad}))
+
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    def test_a_numeric_string_id_is_refused(self, field):
+        # strict 정책. JSON에 숫자 타입이 있으므로 "3" 으로 왔다면 보내는 쪽이 틀렸다.
+        with pytest.raises(ValidationError):
+            RuntimePredictionRequest(**request_payload(**{field: "3"}))
+
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    def test_a_missing_id_is_refused(self, field):
+        payload = {k: v for k, v in request_payload().items() if k != field}
+
+        with pytest.raises(ValidationError):
+            RuntimePredictionRequest(**payload)
 
     def test_an_unknown_top_level_field_is_refused(self):
         with pytest.raises(ValidationError):

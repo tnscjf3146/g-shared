@@ -27,13 +27,30 @@ PATH = "/scheduler/recommend"
 PREDICT_PATH = "/scheduler/runtime/predict"
 
 
+#: 세 후보(8188·12288·24564 MiB)가 모두 통과하는 요구량. 걸러내기를 확인하는
+#: 테스트만 이 값을 올려 잡는다.
+REQUIREMENTS = {"minVramMb": 8000}
+
+
 def body(**overrides):
     payload = {
-        "modelId": "qwen2.5-7b", "dockerImageId": "qlora-sft-v1",
+        "modelId": 3, "dockerImageId": 1,
         "dataset": DATASET, "trainingConfig": TRAINING,
+        "requirements": REQUIREMENTS,
         "gpuCandidates": [SLOW, MIDDLE, FAST],
     }
     payload.update(overrides)
+    return payload
+
+
+def predict_body(**overrides):
+    """``/runtime/predict`` 용. ``requirements`` 는 추천 쪽에만 있는 필드다.
+
+    예측은 그 GPU가 Job을 돌릴 수 있든 없든 답이 정해지는 질문이라 요구사항이
+    필요 없고, ``extra="forbid"`` 라 보내면 거절된다. 그 경계도 아래에서 확인한다.
+    """
+    payload = body(**overrides)
+    payload.pop("requirements")
     return payload
 
 
@@ -160,9 +177,19 @@ class TestRequestsThatAreRefused:
         assert response.status_code == 422
         assert response.json()["detail"][0]["type"] == "unknown_category"
 
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    @pytest.mark.parametrize("bad", [0, -1])
+    def test_an_id_that_cannot_be_a_primary_key(self, client, field, bad):
+        assert client.post(PATH, json=body(**{field: bad})).status_code == 422
+
+    @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
+    def test_a_numeric_string_id(self, client, field):
+        # strict 정책이라 "3" 은 3으로 고쳐 주지 않는다.
+        assert client.post(PATH, json=body(**{field: "3"})).status_code == 422
+
     def test_an_unknown_base_model(self, client):
         assert client.post(
-            PATH, json=body(modelId="a-model-nobody-has-seen")).status_code == 422
+            PATH, json=body(modelId=9999)).status_code == 422
 
     def test_a_zero_benchmark(self, client):
         broken = dict(MIDDLE, benchmarkTokensPerSec=0.0)
@@ -213,26 +240,181 @@ class TestWhenTheModelIsNotThere:
         assert "worker-4090" not in response.text
 
 
+class TestFeasibility:
+    """돌릴 수 있는 GPU만 순위에 오른다."""
+
+    def test_every_candidate_survives_a_low_requirement(self, client):
+        answer = client.post(PATH, json=body(requirements={"minVramMb": 8000})).json()
+
+        assert len(answer["rankings"]) == 3
+
+    def test_a_gpu_that_is_too_small_is_dropped(self, client):
+        # MIDDLE만 8188 MiB다.
+        answer = client.post(PATH, json=body(requirements={"minVramMb": 12000})).json()
+
+        workers = {entry["workerId"] for entry in answer["rankings"]}
+        assert workers == {"worker-3060", "worker-4090"}
+
+    def test_the_dropped_gpu_is_nowhere_in_the_response(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 12000}))
+
+        assert "worker-4070" not in response.text
+
+    def test_the_ranks_are_renumbered_over_what_is_left(self, client):
+        answer = client.post(PATH, json=body(requirements={"minVramMb": 12000})).json()
+
+        assert [entry["rank"] for entry in answer["rankings"]] == [1, 2]
+
+    def test_exactly_enough_vram_is_enough(self, client):
+        # 12288을 요구하고 12288을 가진 GPU. >= 다.
+        answer = client.post(PATH, json=body(
+            requirements={"minVramMb": 12288}, gpuCandidates=[SLOW])).json()
+
+        assert answer["recommendedWorkerId"] == "worker-3060"
+
+    def test_one_mib_short_is_not_enough(self, client):
+        response = client.post(PATH, json=body(
+            requirements={"minVramMb": 12289}, gpuCandidates=[SLOW]))
+
+        assert response.status_code == 409
+
+    def test_the_recommendation_still_comes_from_the_prediction(self, client):
+        # 걸러내기는 실행 가능 여부만 정한다. 남은 것 중 1위는 예측이 정한다.
+        answer = client.post(PATH, json=body(requirements={"minVramMb": 12000})).json()
+
+        assert answer["recommendedWorkerId"] == "worker-4090"
+        assert answer["rankings"][0]["predictedRuntimeSec"] < (
+            answer["rankings"][1]["predictedRuntimeSec"])
+
+
+class TestWhenNoGpuCanRunTheJob:
+    """요청도 모델도 멀쩡한데 답이 없는 경우. 셋을 섞지 않는다."""
+
+    def test_it_is_a_conflict_not_a_validation_error(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 40960}))
+
+        assert response.status_code == 409
+
+    def test_it_says_which_kind_of_failure_it_is(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 40960}))
+
+        assert response.json()["detail"][0]["type"] == "no_feasible_gpu"
+
+    def test_the_message_names_the_requirement(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 40960}))
+
+        assert "40960" in response.json()["detail"][0]["msg"]
+
+    def test_it_points_at_the_candidates(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 40960}))
+
+        assert response.json()["detail"][0]["loc"] == ["body", "gpuCandidates"]
+
+    def test_no_worker_is_recommended_anyway(self, client):
+        response = client.post(PATH, json=body(requirements={"minVramMb": 40960}))
+
+        assert "recommendedWorkerId" not in response.text
+        assert "worker-4090" not in response.text
+
+    def test_it_is_not_the_same_as_a_missing_model(self, tmp_path, monkeypatch):
+        # 503은 "나중에 다시 보내면 된다", 409는 "다시 보내도 같다"이다.
+        monkeypatch.setenv("GSHARED_SCHEDULER_MODELS_DIR", str(tmp_path))
+
+        with TestClient(app) as client:
+            assert client.post(PATH, json=body()).status_code == 503
+
+    def test_a_feasible_job_still_gets_503_when_the_model_is_gone(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GSHARED_SCHEDULER_MODELS_DIR", str(tmp_path))
+
+        with TestClient(app) as client:
+            response = client.post(PATH, json=body(requirements={"minVramMb": 8000}))
+
+        assert response.status_code == 503
+
+
+class TestTheRequirementsField:
+    def test_it_is_required(self, client):
+        payload = body()
+        payload.pop("requirements")
+
+        assert client.post(PATH, json=payload).status_code == 422
+
+    @pytest.mark.parametrize("bad", [0, -1, -12288])
+    def test_a_requirement_of_zero_or_less(self, client, bad):
+        assert client.post(
+            PATH, json=body(requirements={"minVramMb": bad})).status_code == 422
+
+    def test_a_numeric_string(self, client):
+        assert client.post(
+            PATH, json=body(requirements={"minVramMb": "12000"})).status_code == 422
+
+    def test_a_float(self, client):
+        assert client.post(
+            PATH, json=body(requirements={"minVramMb": 12000.5})).status_code == 422
+
+    def test_an_empty_requirements_object(self, client):
+        assert client.post(PATH, json=body(requirements={})).status_code == 422
+
+    def test_an_unknown_field_inside_requirements(self, client):
+        assert client.post(PATH, json=body(
+            requirements={"minVramMb": 8000, "minCudaVersion": "12.6"}
+        )).status_code == 422
+
+    def test_a_positive_integer_is_accepted(self, client):
+        assert client.post(
+            PATH, json=body(requirements={"minVramMb": 8000})).status_code == 200
+
+
+class TestTheOpenApiSaysSo:
+    """Backend 개발자가 코드를 읽지 않고도 계약을 알 수 있어야 한다."""
+
+    def test_requirements_is_part_of_the_recommend_request(self, client):
+        schema = client.get("/openapi.json").json()["components"]["schemas"]
+
+        assert "requirements" in schema["RecommendationRequest"]["properties"]
+        assert "requirements" in schema["RecommendationRequest"]["required"]
+
+    def test_min_vram_mb_is_a_positive_integer(self, client):
+        schema = client.get("/openapi.json").json()["components"]["schemas"]
+        field = schema["JobRequirements"]["properties"]["minVramMb"]
+
+        assert field["type"] == "integer"
+        assert field["exclusiveMinimum"] == 0
+
+    def test_the_unit_is_written_down(self, client):
+        # vramMb와 같은 단위라는 것이 설명에 있어야 비교가 성립한다.
+        schema = client.get("/openapi.json").json()["components"]["schemas"]
+
+        assert "MiB" in schema["JobRequirements"]["properties"]["minVramMb"]["description"]
+
+    def test_the_prediction_request_does_not_take_requirements(self, client):
+        schema = client.get("/openapi.json").json()["components"]["schemas"]
+
+        assert "requirements" not in schema["RuntimePredictionRequest"]["properties"]
+
+
 class TestTheRuntimePredictionApiIsUnchanged:
     """이번 작업 때문에 예측 API가 달라지면 안 된다."""
 
     def test_it_still_answers_predictions_only(self, client):
-        answer = client.post(PREDICT_PATH, json=body()).json()
+        answer = client.post(PREDICT_PATH, json=predict_body()).json()
 
         assert set(answer) == {"schedulerModelVersion", "predictions"}
 
     def test_it_has_no_rank(self, client):
-        answer = client.post(PREDICT_PATH, json=body()).json()
+        answer = client.post(PREDICT_PATH, json=predict_body()).json()
 
         for entry in answer["predictions"]:
             assert set(entry) == {"workerId", "predictedRuntimeSec"}
 
     def test_it_has_no_recommendation(self, client):
-        assert "recommendedWorkerId" not in client.post(PREDICT_PATH, json=body()).text
+        assert "recommendedWorkerId" not in client.post(
+            PREDICT_PATH, json=predict_body()).text
 
     def test_it_does_not_sort(self, client):
         # 느린 GPU를 먼저 넣으면 먼저 나온다.
-        answer = client.post(PREDICT_PATH, json=body()).json()
+        answer = client.post(PREDICT_PATH, json=predict_body()).json()
 
         seconds = [entry["predictedRuntimeSec"] for entry in answer["predictions"]]
         assert seconds == sorted(seconds, reverse=True)
@@ -240,15 +422,27 @@ class TestTheRuntimePredictionApiIsUnchanged:
     def test_it_still_accepts_a_duplicate_worker(self, client):
         # 중복 거절은 추천 쪽에만 더한 규칙이다. 예측만 하는 쪽에서는 같은 Worker를
         # 두 번 묻는 것이 쓸데없을 뿐 틀린 답을 만들지 않는다.
-        response = client.post(PREDICT_PATH, json=body(gpuCandidates=[MIDDLE, MIDDLE]))
+        response = client.post(
+            PREDICT_PATH, json=predict_body(gpuCandidates=[MIDDLE, MIDDLE]))
 
         assert response.status_code == 200
         assert len(response.json()["predictions"]) == 2
 
+    def test_it_does_not_filter_by_vram(self, client):
+        # 걸러내기는 추천 쪽에만 더한다. 예측은 그 GPU가 돌릴 수 있든 없든
+        # "몇 초 걸리나"에 답하는 자리다.
+        answer = client.post(
+            PREDICT_PATH, json=predict_body(gpuCandidates=[MIDDLE])).json()
+
+        assert len(answer["predictions"]) == 1
+
+    def test_it_refuses_requirements(self, client):
+        assert client.post(PREDICT_PATH, json=body()).status_code == 422
+
 
 class TestBothApisAgree:
     def test_the_same_job_gives_the_same_seconds_on_both_paths(self, client):
-        predicted = client.post(PREDICT_PATH, json=body()).json()["predictions"]
+        predicted = client.post(PREDICT_PATH, json=predict_body()).json()["predictions"]
         ranked = client.post(PATH, json=body()).json()["rankings"]
 
         by_worker = {e["workerId"]: e["predictedRuntimeSec"] for e in predicted}

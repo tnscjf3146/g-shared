@@ -47,6 +47,17 @@ class ModelUnavailableError(RuntimeError):
     """모델을 쓸 수 없다. 파일이 없거나, 깨졌거나, 지금 코드와 맞지 않는다."""
 
 
+class IncompatibleModelError(ModelUnavailableError):
+    """모델은 읽혔지만 지금 빌드와 **다른 계약**으로 학습됐다.
+
+    "아직 학습하지 않았다"와는 다른 종류의 문제다. 앞의 것은 학습을 돌리면 풀리는
+    운영 상태지만, 이것은 배포가 잘못 물려 있다는 뜻이라 기다린다고 달라지지 않고
+    요청을 고쳐도 달라지지 않는다. 그래서
+    :class:`~app.scheduler.runtime_model.LoadedRuntimeModel` 은 이 예외만은
+    붙잡지 않고 그대로 올려 보내 앱이 시작하지 못하게 한다.
+    """
+
+
 class PredictionError(RuntimeError):
     """모델이 답을 냈지만 실행 시간이라고 할 수 없는 값이다."""
 
@@ -124,23 +135,24 @@ def load_runtime_predictor(models_directory: Path) -> RuntimePredictor:
 
     schema_version = metadata.get("featureSchemaVersion")
     if schema_version != FEATURE_SCHEMA_VERSION:
-        raise ModelUnavailableError(
-            f"the runtime model was trained with feature schema {schema_version!r} "
-            f"but this build builds {FEATURE_SCHEMA_VERSION!r}. Retrain it.")
+        raise IncompatibleModelError(
+            "runtime model feature schema mismatch: "
+            f"expected={FEATURE_SCHEMA_VERSION!r}, actual={schema_version!r}. "
+            "Retrain it (python -m app.training.train_runtime).")
 
     names = metadata.get("featureNames")
     if list(RUNTIME_FEATURE_NAMES) != names:
         # 버전이 같은데 열이 다르면 둘 중 하나가 버전을 올리지 않고 바뀐 것이다.
-        raise ModelUnavailableError(
+        raise IncompatibleModelError(
             "the runtime model was trained on different feature columns "
             f"({names}) than this build produces ({list(RUNTIME_FEATURE_NAMES)}).")
 
     transform = metadata.get("targetTransform")
     if transform != TARGET_TRANSFORM:
         # log로 학습된 모델을 그대로 초로 읽으면 하루가 11초가 된다. 조용히.
-        raise ModelUnavailableError(
-            f"the runtime model was trained with target transform {transform!r} "
-            f"but this build expects {TARGET_TRANSFORM!r}. Retrain it.")
+        raise IncompatibleModelError(
+            "runtime model target transform mismatch: "
+            f"expected={TARGET_TRANSFORM!r}, actual={transform!r}. Retrain it.")
 
     mappings = metadata.get("categoryMappings")
     if not isinstance(mappings, dict):
