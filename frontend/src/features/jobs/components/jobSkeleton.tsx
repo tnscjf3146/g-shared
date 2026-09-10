@@ -15,12 +15,10 @@ export function JobListSkeleton() {
 export function JobDetailSkeleton() {
   return (
     <div aria-busy aria-label="불러오는 중" className="flex w-full flex-col gap-6">
-      <div className="h-8 w-56 animate-pulse rounded-xs bg-neutral-tint" />
-      <div className="card h-32 animate-pulse" />
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        <div className="card h-40 animate-pulse" />
-        <div className="card h-40 animate-pulse" />
-      </div>
+      <div className="h-9 w-72 animate-pulse rounded-xs bg-neutral-tint" />
+      <div className="card h-[104px] animate-pulse" />
+      <div className="card h-[140px] animate-pulse" />
+      <div className="card h-[140px] animate-pulse" />
     </div>
   )
 }

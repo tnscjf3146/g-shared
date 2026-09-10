@@ -24,7 +24,9 @@
 JobSummary: { jobId, status, workloadId, progressPercent, estimatedCost, createdAt }
 JobDetail : { jobId, status, workloadId, baseModelId, gpuId, trainingMode, predictedRuntimeSec, actualRuntimeSec,
               estimatedCost, actualCost, progressPercent, progressEpoch, progressTotalEpochs,
-              resultHash, resultUrl, createdAt, startedAt, finishedAt }          (LocalDateTime → "2026-09-09T10:00:00" 형태, Z 없음)
+              resultHash, resultUrl, createdAt, startedAt, finishedAt,
+              datasetName?, datasetMetadata? }   ← 프론트 제안(2026-09-10): 상세 [데이터셋] 표용. 백엔드엔 아직 없음(optional 로 받음)
+                                                                       (LocalDateTime → "2026-09-09T10:00:00" 형태, Z 없음)
 JobStatus : CREATED(예치 대기) → FUNDED(배정 대기) → ASSIGNED(시작 대기) → RUNNING → COMPLETED | FAILED,  CANCELLED
 ```
 
@@ -40,7 +42,7 @@ JobStatus : CREATED(예치 대기) → FUNDED(배정 대기) → ASSIGNED(시작
 | --- | --- | --- |
 | `GET /api/workloads` | `[{ id, name, description }]` 예: 텍스트 분류 파인튜닝 | 승인된 실행 이미지와 1:1 일 가능성 — 시스템 담당 확인 |
 | `GET /api/base-models` | `[{ id, name, params, workloadIds[] }]` 예: `bert-base`, `llama-3-8b` | workload 별 필터 |
-| `GET /api/datasets` (내 것) | `[{ id, name, sizeBytes, sampleCount, totalTokens, avgSeqLength, maxSeqLength, createdAt }]` | AI `DatasetMetadata` 와 같은 필드. **업로드 API 는 별도**(이번 범위 밖) |
+| ~~`GET /api/datasets`~~ (2026-09-10 제거 — 기존 데이터셋 선택 기능을 뺐다) | `[{ id, name, sizeBytes, sampleCount, totalTokens, avgSeqLength, maxSeqLength, createdAt }]` | AI `DatasetMetadata` 와 같은 필드. **업로드 API 는 별도**(이번 범위 밖) |
 | `GET /api/gpus` | `[{ id, model, vramMb, hourlyPrice }]` 예: RTX 4070 12GB | Job.gpuId 는 특정 워커가 아니라 **GPU 등급**(JobMatcher 가 gpuId 로 배정) |
 | **`POST /api/jobs/estimate`** | `{ workloadId, baseModelId, datasetId, gpuId, trainingMode, autoMode?: SPEED\|BALANCED\|TRAINING, trainingConfig? }` → `{ trainingConfig, predictedRuntimeSec, estimatedCost }` | 백엔드가 AI `/scheduler/training-config`(AUTO) + 예측을 호출해 감싼다. 프론트가 AI 서버를 직접 부르지 않게(오리진·인증 단일화) |
 
@@ -63,7 +65,10 @@ JobStatus : CREATED(예치 대기) → FUNDED(배정 대기) → ASSIGNED(시작
      /jobs/[id]       GET /jobs/{id} (RUNNING·ASSIGNED·FUNDED·CREATED 면 10초 폴링) → 진행률·비용·결과, [취소]
 ```
 
-- 보호 경로 `/jobs`(하위 포함) → `proxy.ts` `PROTECTED` + matcher. 네비 `[작업]` 을 `[워커]` 왼쪽에(authed 만). 랜딩 `지금 시작하기` href `/` → `/jobs/new`.
+- 보호 경로 `/jobs`(하위 포함) → `proxy.ts` `PROTECTED` + matcher. 랜딩 `지금 시작하기` href `/` → `/jobs/new`.
+- **2026-09-09 대시보드 통합**: 목록은 `/dashboard/jobs`(작업)·`/dashboard/workers`(공급) 로(2026-09-10 에 `?tab=` 쿼리 → 경로로 변경, 옛 `?tab=` 주소는 리다이렉트 호환). `/jobs`·`/workers` 는 대시보드 탭으로 리다이렉트(옛 링크 호환), `/jobs/new`·`/jobs/[id]` 는 그대로. 로그인 후 기본 목적지도 `/dashboard`(auth.md §8 결정 이행).
+- **2026-09-10 셸 통일**: 랜딩과 로그인/회원가입을 뺀 모든 화면(대시보드·지갑·워크로드 등록·작업 상세)이 라우트 그룹 `(console)` 의 사이드바 셸 안에 있다. `(app)` 그룹(상단 SiteNav 셸)은 삭제. 사이드바 현재 항목: `/jobs/[id]` 는 대시보드로 표시.
+- **2026-09-10 대시보드 개편(참고 디자인 "G-shared Dashboard" 구조 채택, 토큰은 AGENTS.md 유지)**: 라우트 그룹 `(console)/dashboard` — 상단 유리 네비 대신 **접히는 아이콘 사이드바**(56↔220px, localStorage; 대시보드·워크로드 등록·지갑·홈·내 계정·로그아웃), 헤더(킥커 "한 계정, 두 역할" · 실시간 시계 · 작업/워커 세그먼트 탭 + 개수), **지표 타일 4개**, **카드 그리드**(작업: #id·워크로드·상태·예상 비용·생성·진행 바·상세/취소 / 워커: id·OS·상태 점·GPU·VRAM·드라이버·벤치마크·힌트·해제). 백엔드에 없는 데이터(알림·수익·크레딧·온도·가동률·수신 토글)는 그리지 않음. 목록용 `jobsPage/jobRow`, `workersPage/workerCard` 는 삭제(대시보드 `_components` 로 대체).
 - `/jobs/new` 는 지갑 연결 여부를 **막지 않는다**(예치는 다음 단계, Escrow 미배포). 대신 상단에 "예치는 지갑에서 진행됩니다 — 지갑 미연결 시 연결 안내" 한 줄(지갑 GET 1회).
 
 ## 3. 파일 구조 (AGENTS.md 골격)
@@ -93,7 +98,7 @@ src/
     components/workloadWizard.tsx    'use client'. §4 위저드: WizardState · 스테퍼 · 단계별 완료 조건 · 이전/다음. 4·5 단계는 자리만
     components/stepWorkload.tsx      1단계: 유형 카드 3 → 제공 모델 카드
     components/stepConfig.tsx        2단계: 모델 출처(제공/내 모델 드롭) · 학습 수준 · 고급 직접 입력(use-zod-form) · 어댑터 드롭
-    components/stepDataset.tsx       3단계: 데이터셋 파일 드롭(→ 브라우저 분석·진행률·5값 표시) 또는 기존 데이터셋 select
+    components/stepDataset.tsx       3단계: 데이터셋 파일 드롭(→ 브라우저 분석·진행률·5값 표시). 기존 데이터셋 선택은 2026-09-10 제거
     components/stepGpu.tsx           4단계: POST /jobs/gpu-options 결과 카드(적합도 배지·필요 VRAM·대기 워커) + 선택 시 아래 견적(estimateCard, 버튼 없음). 스펙 key 로 재조회
     components/stepUpload.tsx        5단계: 선택 요약 + 지갑 잔액(GET wallet → RPC balanceOf) vs 예상 비용 → [업로드하고 등록] / [예치금 예치하기] / [지갑 연결하기]
     dataset-analysis.ts              파일 → DatasetMetadata(스트리밍, 토큰 근사) — §4-3
@@ -119,7 +124,7 @@ src/
 | --- | --- | --- | --- |
 | 1 워크로드 | 유형 카드 3개: **학습(LoRA) / 추론 / 평가**(`Workload.kind`) → 유형을 고르면 그 유형을 지원하는 **제공 모델** 카드(`BaseModel.workloadIds` 필터). 유형을 바꾸면 모델 선택 초기화 | 유형 + 모델 | ✅ |
 | 2 모델·설정 | **모델 출처**: 제공 모델 / **내 학습된 모델 가져오기**(파일 드롭) · **학습 수준**(학습 유형만): 빠르게/균형/충분히 + `<details>` "고급: 직접 입력" 4값(즉시 검증, 틀리면 다음 차단) · **기존 어댑터**(선택, 파일 드롭): 학습이면 "이어서 학습", 추론·평가면 "모델에 적용" | 내 모델 선택 시 파일 필수, 고급이 열려 있으면 값 유효 | ✅ |
-| 3 데이터셋 | 유형별 문구(학습 데이터셋 / 입력 데이터 / 평가 데이터셋). **파일 드롭**(주) 또는 기존 데이터셋 `<select>`(보조) — 둘 중 하나만 활성. 파일을 올리면 **브라우저가 즉시 분석**해 메타데이터 5값(크기·샘플·토큰(근사)·평균·최대 길이)을 표시(§4-3) | 파일(+분석 완료) 또는 기존 데이터셋 | ✅ |
+| 3 데이터셋 | 유형별 문구(학습 데이터셋 / 입력 데이터 / 평가 데이터셋). **파일 드롭**만(기존 데이터셋 선택은 2026-09-10 제거). 파일을 올리면 **브라우저가 즉시 분석**해 메타데이터 5값(크기·샘플·토큰(근사)·평균·최대 길이)을 표시(§4-3) | 파일(+분석 완료) 또는 기존 데이터셋 | ✅ |
 | 4 GPU 등급 · 견적 | `POST /jobs/gpu-options` 에 **메타데이터·모델·설정만** 보내 백엔드가 매긴 적합도(추천/가능/빡빡함/VRAM 부족)·필요 VRAM·대기 워커 수를 카드로. VRAM 부족은 비활성. **등급을 고르면 바로 아래에 견적**(`POST /jobs/estimate`, `estimateCard` 버튼 없음). 등급을 바꾸면 견적 다시 | GPU 선택 + 견적 수신 | ✅ |
 | 5 업로드 | 선택 요약 + 4단계 견적 + **지갑 잔액 확인**: 백엔드 `GET /users/me/wallet` → SSAFY RPC 로 GSC 잔액. 잔액 ≥ 예상 비용이면 **[업로드하고 등록]**(이때 처음으로 파일이 서버로 — `POST /uploads` 데이터셋+metadata → 어댑터 → 내 모델, 있는 것만 → `POST /jobs` → `/jobs/{id}`). 부족하면 **[예치금 예치하기]**(`/wallet?deposit=<비용>` 새 탭) + 부족액 표시 + [잔액 다시 확인]. 지갑 미연결이면 [지갑 연결하기](새 탭). 위저드 선택은 유지 | 잔액 충분 | ✅ |
 
@@ -152,7 +157,7 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 
 ## 6. 목업(MSW) — `jobHandlers`
 
-- 카탈로그 4 GET: fixture 그대로. `datasets` 는 AI `DatasetMetadata` 필드 포함.
+- 카탈로그 3 GET(workloads·base-models·gpus): fixture 그대로. `GET /datasets` 는 기존 데이터셋 선택 제거(2026-09-10)와 함께 뺐다.
 - `POST /jobs/estimate`: AUTO 면 mode 별 고정 설정(SPEED: 1 epoch/…), CUSTOM 이면 받은 설정. `predictedRuntimeSec = sampleCount×epochs / (gpu 계수)` 정도의 단순식, `estimatedCost = ceil(runtime/3600) × hourlyPrice`. **정확할 필요 없음** — 화면용.
 - `POST /jobs`: id 증가, `CREATED` 로 추가. 목업 전용 **자동 전이 타이머**: 5초 뒤 FUNDED → 5초 ASSIGNED → RUNNING(진행률 +10%/3초, epoch 갱신) → COMPLETED(`resultUrl` 가짜). 폴링 UI·상태 배지 전부를 목업만으로 확인.
 - `GET /jobs`: status 필터·페이지 계산 흉내(`page/size`). `GET /jobs/:id`: 404 재현용 id `999`.
@@ -173,6 +178,7 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 
 - [ ] **카탈로그 4종 + estimate API** — 백엔드 요청(§1-2). 이게 없으면 `/jobs/new` 는 목업으로만 동작. 지갑·워커와 같은 패턴으로, 직접 넣을지 요청할지는 사용자 결정. 카탈로그 **데이터**(어떤 workload/모델을 지원하는지)는 시스템·AI 담당이 정해야 함(승인 이미지 목록).
 - [ ] **`FAILED` 사유 노출** — `Job.failReason` 이 있는데 `JobDetailResponse` 에 없다. 한 필드 추가 요청.
+- [ ] **상세에 데이터셋 이름·메타** — `JobDetailResponse` 에 `datasetName`, `datasetMetadata{sizeBytes, sampleCount, totalTokens, avgSeqLength, maxSeqLength}` 추가 요청. 업로드(`POST /api/uploads`) 때 받은 값을 Job 에 저장해 돌려주면 됨. 프론트는 optional 로 받아 있으면 [데이터셋] 표를 그린다(목업은 이미 붙임).
 - [ ] **[예치금 예치하기] 의 목적지** — 지금은 `/wallet?deposit=<GSC>` 새 탭. Escrow(또는 예치금 계정) 가 정해지면 지갑 페이지에 `deposit` 쿼리를 읽어 예치 흐름을 붙인다. 잔액 기준은 지갑 GSC 보유량(예치금 계정이 따로 생기면 그 잔액으로 교체).
 - [ ] **예치(FUNDED) 흐름** — Escrow 배포 후: 상세의 "예치 대기" 카드에 [예치하기] → 지갑 `approve + fundJob` 서명 → 백엔드가 이벤트로 FUNDED. 이번 범위 밖, 화면 자리만 남김.
 - [ ] **데이터셋 업로드** — 백엔드·AI 어디에도 없음. 이번엔 목록 선택만, "업로드 준비 중" 안내. 별도 기획(파일 크기·저장소·메타 추출 주체).

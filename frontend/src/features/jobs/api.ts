@@ -5,7 +5,6 @@ import {
   UPLOADS_PATH,
   baseModelSchema,
   createJobResponseSchema,
-  datasetSchema,
   estimateSchema,
   gpuOptionSchema,
   gpuSchema,
@@ -65,13 +64,12 @@ export async function uploadFile(kind: 'dataset' | 'adapter' | 'model', file: Fi
   return uploadResponseSchema.parse(await authFetch<unknown>(UPLOADS_PATH, { method: 'POST', body: form }))
 }
 
-/** 카탈로그 4종(제안) 한 번에 */
+/** 카탈로그 3종(제안) 한 번에 */
 export async function getCatalog(): Promise<Catalog> {
-  const [workloads, baseModels, datasets, gpus] = await Promise.all([
+  const [workloads, baseModels, gpus] = await Promise.all([
     authFetch<unknown>(CATALOG_PATHS.workloads).then((r) => z.array(workloadSchema).parse(r)),
     authFetch<unknown>(CATALOG_PATHS.baseModels).then((r) => z.array(baseModelSchema).parse(r)),
-    authFetch<unknown>(CATALOG_PATHS.datasets).then((r) => z.array(datasetSchema).parse(r)),
     authFetch<unknown>(CATALOG_PATHS.gpus).then((r) => z.array(gpuSchema).parse(r)),
   ])
-  return { workloads, baseModels, datasets, gpus }
+  return { workloads, baseModels, gpus }
 }

@@ -5,7 +5,6 @@ import type {
   catalogSchema,
   createJobRequestSchema,
   datasetMetadataSchema,
-  datasetSchema,
   estimateRequestSchema,
   estimateSchema,
   gpuFitSchema,
@@ -32,7 +31,6 @@ export type WorkloadKind = z.infer<typeof workloadKindSchema>
 export type Workload = z.infer<typeof workloadSchema>
 export type BaseModel = z.infer<typeof baseModelSchema>
 export type DatasetMetadata = z.infer<typeof datasetMetadataSchema>
-export type Dataset = z.infer<typeof datasetSchema>
 export type Gpu = z.infer<typeof gpuSchema>
 export type GpuFit = z.infer<typeof gpuFitSchema>
 export type GpuOption = z.infer<typeof gpuOptionSchema>

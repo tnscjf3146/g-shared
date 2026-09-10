@@ -11,8 +11,3 @@ export async function getMyWorkers(): Promise<Worker[]> {
 export function deleteWorker(workerId: string): Promise<void> {
   return authFetch<void>(`${WORKERS_PATH}/${encodeURIComponent(workerId)}`, { method: 'DELETE' })
 }
-
-// 다운로드는 시스템 담당이 exe 를 올리는 곳에 따라 바뀐다(worker.md §8) → env 하나, 없으면 저장소 raw 파일
-export const WORKER_DOWNLOAD_URL =
-  process.env.NEXT_PUBLIC_WORKER_DOWNLOAD_URL ??
-  'https://lab.ssafy.com/s15-blochain-sub1/S15P21E204/-/raw/develop/system/G-shared/G-shared.exe?inline=false'

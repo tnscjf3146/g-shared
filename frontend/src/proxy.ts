@@ -9,7 +9,11 @@ const PROTECTED = ['/dashboard', '/wallet', '/workers', '/jobs']
 export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl
   const isProtected = PROTECTED.some((p) => pathname === p || pathname.startsWith(p + '/'))
-  if (!isProtected || request.cookies.has(REFRESH_COOKIE)) return NextResponse.next()
+  if (!isProtected || request.cookies.has(REFRESH_COOKIE)) {
+    // /dashboard → /dashboard/jobs (옛 ?tab=workers 는 /dashboard/workers). 페이지의 redirect() 는 loading 경계 때문에 메타 리프레시(1초 지연)로 나가서 여기서 307 로
+    if (pathname === '/dashboard') return NextResponse.redirect(new URL(request.nextUrl.searchParams.get('tab') === 'workers' ? '/dashboard/workers' : '/dashboard/jobs', request.url))
+    return NextResponse.next()
+  }
   const login = new URL('/login', request.url)
   login.searchParams.set('next', pathname + search)
   return NextResponse.redirect(login)
