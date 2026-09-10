@@ -49,7 +49,7 @@ export function LoginForm() {
 
   return (
     <form onSubmit={submit} noValidate className="card flex w-[440px] max-w-full flex-col gap-5 p-10">
-      <span className="font-logo text-[32px] font-semibold text-dark">G-shared</span>
+      <span className="text-center font-logo text-[32px] font-semibold text-dark">G-shared</span>
 
       {notice && (
         <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
@@ -68,7 +68,7 @@ export function LoginForm() {
           size="lg"
           type="email"
           autoComplete="email"
-          placeholder="email"
+          placeholder="gshared@gshared.com"
           value={f.values.email}
           onChange={(e) => f.set('email', e.target.value)}
           aria-invalid={!!f.errors.email}

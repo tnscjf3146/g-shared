@@ -23,7 +23,7 @@ export function NavAuth() {
 
   if (status !== 'authed') {
     return (
-      <Link href="/login" aria-label="로그인" className="nav-btn !px-2">
+      <Link href="/login" aria-label="로그인" className="inline-flex items-center rounded-md p-1.5 opacity-70 transition-opacity hover:opacity-100">
         <UserIcon />
       </Link>
     )
@@ -38,7 +38,7 @@ function AuthedMenu() {
 
   return (
     <div className="relative">
-      <button type="button" aria-label="내 메뉴" aria-expanded={open} className="nav-btn !px-2" onClick={() => setOpen((v) => !v)}>
+      <button type="button" aria-label="내 메뉴" aria-expanded={open} className="inline-flex items-center rounded-md p-1.5 opacity-70 transition-opacity hover:opacity-100" onClick={() => setOpen((v) => !v)}>
         <UserIcon />
       </button>
 
