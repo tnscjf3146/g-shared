@@ -7,6 +7,7 @@ import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
 import com.gshared.back.worker.dto.request.UpdateWorkerGpuRequest;
 import com.gshared.back.worker.dto.response.AuthenticateWorkerResponse;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
+import com.gshared.back.worker.dto.response.WorkerResponse;
 import com.gshared.back.worker.service.WorkerService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -15,6 +16,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 워커(공급자 PC) 관련 HTTP 창구.
@@ -42,6 +45,32 @@ public class WorkerController {
     ) {
         RegisterWorkerResponse response = workerService.register(userDetails.getId(), request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * 내 워커 목록. 공급자가 자기 PC 들의 상태를 보는 화면이 쓴다.
+     * 사람이 로그인해서 보는 곳이므로 인증 수단은 워커 토큰이 아니라 로그인 JWT 다.
+     */
+    @GetMapping("/me")
+    public ResponseEntity<List<WorkerResponse>> getMyWorkers(
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(workerService.getMyWorkers(userDetails.getId()));
+    }
+
+    /**
+     * 워커 등록 해제. 돌려줄 내용이 없으므로 204 다.
+     *
+     * <p>여기도 사람이 부르는 곳이라 로그인 JWT 로 막는다 — 워커 토큰으로 자기 자신을
+     * 지울 수 있게 두면, 토큰이 새어 나갔을 때 남의 PC 등록을 지워 버릴 수 있다.
+     */
+    @DeleteMapping("/{workerId}")
+    public ResponseEntity<Void> delete(
+            @PathVariable String workerId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        workerService.delete(userDetails.getId(), workerId);
+        return ResponseEntity.noContent().build();
     }
 
     /**
