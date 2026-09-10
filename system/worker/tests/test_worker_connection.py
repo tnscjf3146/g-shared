@@ -1,9 +1,10 @@
-"""Staying connected: beating, noticing it broke, coming back.
+"""Staying connected: reading, beating on time, noticing it broke, coming back.
 
-No sleeping and no threads. Every wait in the module under test goes through a
-:class:`StopSignal`, so the fake one below decides when a wait returns and the
-whole file runs in milliseconds -- a 30-second heartbeat is tested by asking
-what it waited on, not by waiting.
+No sleeping and no threads. The clock is a variable the fake transport moves
+forward by however long each read was told it could wait, so thirty seconds of
+heartbeat interval pass in a few dozen loop iterations and the whole file runs
+in milliseconds. The real constants are used rather than small test ones --
+what is being checked includes *when* a beat goes out.
 """
 
 from __future__ import annotations
@@ -18,14 +19,17 @@ from gshared_worker.worker_connection import (
     BACKOFF_MAX_SECONDS,
     HEARTBEAT_ACK_TIMEOUT_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
+    READ_SLICE_SECONDS,
     ConnectionOutcome,
     InterruptibleStop,
     backoff_delays,
+    _dispatch_to,
     connect_to_backend,
     heartbeat_message,
     keep_alive,
     stay_connected,
 )
+from gshared_worker.worker_job import JobSlot
 from gshared_worker.worker_socket import (
     ConnectionWentAway,
     HandshakeRefused,
@@ -83,10 +87,11 @@ HEARTBEAT_ACK = envelope("HEARTBEAT_ACK")
 class Stop:
     """A stop signal a test drives by hand.
 
-    ``waits`` records every timeout the code under test asked to wait for,
-    which is how the heartbeat interval and the backoff delays are checked
-    without any of them actually elapsing. ``stop_after`` sets the signal once
-    that many waits have happened.
+    ``waits`` records every timeout the code under test asked to wait for.
+    Only :func:`stay_connected` waits on this now -- for the backoff between
+    connections -- so that list is how the backoff policy is checked without
+    any of it elapsing. ``stop_after`` sets the signal once that many waits
+    have happened; :class:`FakeTransport` sets it when its script runs dry.
     """
 
     def __init__(self, stop_after: int | None = None, set_now: bool = False) -> None:
@@ -107,49 +112,152 @@ class Stop:
         self._set = True
 
 
-class FakeTransport:
-    """A transport that replies with whatever the test lined up."""
+class Clock:
+    """Fake monotonic time. Only :class:`FakeBackend` moves it."""
 
-    def __init__(self, *replies, on_send=None) -> None:
-        self._replies = list(replies)
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class At:
+    """Something the Backend sends of its own accord, at a given moment."""
+
+    def __init__(self, seconds: float, raw: str) -> None:
+        self.seconds = seconds
+        self.raw = raw
+
+
+class FakeBackend:
+    """A Backend that answers the way ``WorkerWebSocketHandler`` does.
+
+    Not a tape of replies: it **reacts**. A REGISTER gets a REGISTER_ACK, a
+    HEARTBEAT gets a HEARTBEAT_ACK, a JOB_ACCEPTED gets nothing -- which is what
+    the Java does. Messages it starts itself (JOB_ASSIGN) are scheduled with
+    :class:`At` so a test can say *when* they turn up rather than only in what
+    order.
+
+    Waiting is the only thing that costs time, and here it costs none: a read
+    that finds nothing moves the clock forward by however long it was allowed
+    to wait. Thirty seconds of heartbeat interval is sixty loop iterations.
+
+    ``beats`` ends the run: once that many heartbeats have been answered and
+    there is nothing left to send, the stop signal is set.
+    """
+
+    def __init__(self, *scheduled, clock=None, stop=None, beats=1,
+                 answers=True, on_send=None) -> None:
+        # A bare string or exception is something the Backend says straight
+        # away; At() is for something it says later.
+        self._scheduled = sorted(
+            (item if isinstance(item, At) else At(0, item) for item in scheduled),
+            key=lambda item: item.seconds)
+        self._pending: list[str] = []
+        self._clock = clock or Clock()
+        self._stop = stop
+        self._beats = beats
+        self._answers = answers
         self._on_send = on_send
         self.sent: list[str] = []
+        self.sent_at: list[float] = []
         self.closed = False
         self.timeouts: list[float] = []
+
+    @property
+    def clock(self) -> Clock:
+        return self._clock
 
     def send(self, text: str) -> None:
         if self._on_send is not None:
             raise self._on_send
         self.sent.append(text)
+        self.sent_at.append(self._clock.now)
+        if not self._answers:
+            return
+        kind = json.loads(text)["type"]
+        if kind == "HEARTBEAT":
+            self._pending.append(HEARTBEAT_ACK)
+        elif kind == "REGISTER":
+            self._pending.append(REGISTER_ACK)
+        # JOB_ACCEPTED is answered by nothing. handleJobAccepted sends no reply.
 
     def recv(self, timeout: float) -> str:
         self.timeouts.append(timeout)
-        if not self._replies:
-            raise TimeoutError
-        reply = self._replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
+        if self._pending:
+            return self._pending.pop(0)
+
+        due = [item for item in self._scheduled if item.seconds <= self._clock.now]
+        if due:
+            self._scheduled.remove(due[0])
+            if isinstance(due[0].raw, Exception):
+                raise due[0].raw
+            return due[0].raw
+
+        # Only a Backend that answers ends a run this way. One that stays
+        # silent is being asked what the Worker does about it, and setting the
+        # stop signal would answer the question for it.
+        if self._answers and not self._scheduled and self._stop is not None \
+                and len(self.heartbeats) >= self._beats:
+            self._stop.set()
+
+        # Never sleep past something the Backend is due to say.
+        if self._scheduled:
+            timeout = min(timeout, self._scheduled[0].seconds - self._clock.now)
+        self._clock.advance(max(timeout, 0.0))
+        raise TimeoutError
 
     def close(self) -> None:
         self.closed = True
 
+    def _of_type(self, kind: str) -> list[dict]:
+        return [json.loads(t) for t in self.sent if json.loads(t)["type"] == kind]
+
     @property
     def heartbeats(self) -> list[dict]:
-        return [json.loads(t) for t in self.sent if json.loads(t)["type"] == "HEARTBEAT"]
+        return self._of_type("HEARTBEAT")
+
+    @property
+    def registers(self) -> list[dict]:
+        return self._of_type("REGISTER")
+
+    @property
+    def accepteds(self) -> list[dict]:
+        return self._of_type("JOB_ACCEPTED")
 
 
-def live(*replies, on_send=None) -> tuple[RegisteredSocket, FakeTransport]:
-    transport = FakeTransport(*replies, on_send=on_send)
-    return RegisteredSocket(transport, "worker-001"), transport
+#: Kept as the old name so the reconnect tests below read unchanged.
+FakeTransport = FakeBackend
 
 
-def beat(*replies, stop=None, on_send=None, **kwargs):
-    """One trip through :func:`keep_alive` with a transport that answers."""
-    socket, transport = live(*replies, on_send=on_send)
+def live(*scheduled, on_send=None, stop=None, **kwargs):
+    """A registered socket over a fake Backend."""
+    clock = Clock()
+    backend = FakeBackend(
+        *scheduled, clock=clock, on_send=on_send, stop=stop, **kwargs)
+    return RegisteredSocket(backend, "worker-001"), backend
+
+
+def beat(*scheduled, stop=None, on_send=None, **kwargs):
+    """One trip through :func:`keep_alive` against a fake Backend.
+
+    Keyword arguments are split between the Backend (``beats``, ``answers``)
+    and :func:`keep_alive` (``on_message``, ...).
+    """
+    stop = stop or Stop()
+    backend_options = {
+        name: kwargs.pop(name) for name in ("beats", "answers") if name in kwargs}
+    socket, backend = live(
+        *scheduled, on_send=on_send, stop=stop, **backend_options)
     outcome, detail = keep_alive(
-        socket, stop or Stop(stop_after=2), interval=30, ack_timeout=10, **kwargs)
-    return outcome, detail, transport
+        socket, stop, interval=HEARTBEAT_INTERVAL_SECONDS,
+        ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
+        monotonic=backend.clock, **kwargs)
+    return outcome, detail, backend
 
 
 class TestTheHeartbeatMessage(unittest.TestCase):
@@ -203,78 +311,98 @@ class TestTheIntervals(unittest.TestCase):
 
 
 class TestBeatingOnALiveConnection(unittest.TestCase):
-    def test_it_waits_the_interval_before_the_first_beat(self):
-        stop = Stop(stop_after=2)
+    def test_the_first_beat_goes_out_one_interval_in(self):
+        _, _, backend = beat()
 
-        beat(HEARTBEAT_ACK, stop=stop)
-
-        self.assertEqual(stop.waits[0], 30)
+        self.assertEqual(backend.sent_at[0], HEARTBEAT_INTERVAL_SECONDS)
 
     def test_a_heartbeat_goes_out(self):
-        _, _, transport = beat(HEARTBEAT_ACK)
+        _, _, backend = beat()
 
-        self.assertEqual(len(transport.heartbeats), 1)
-        self.assertEqual(transport.heartbeats[0]["type"], "HEARTBEAT")
+        self.assertEqual(len(backend.heartbeats), 1)
+        self.assertEqual(backend.heartbeats[0]["type"], "HEARTBEAT")
 
     def test_an_ack_keeps_the_connection(self):
-        outcome, _, _ = beat(HEARTBEAT_ACK)
+        outcome, _, _ = beat()
 
         self.assertIs(outcome, ConnectionOutcome.STOPPED)
 
     def test_several_beats_go_out_on_the_same_socket(self):
-        outcome, _, transport = beat(
-            HEARTBEAT_ACK, HEARTBEAT_ACK, HEARTBEAT_ACK, stop=Stop(stop_after=4))
+        outcome, _, backend = beat(beats=3)
 
         self.assertIs(outcome, ConnectionOutcome.STOPPED)
-        self.assertEqual(len(transport.heartbeats), 3)
+        self.assertEqual(len(backend.heartbeats), 3)
 
-    def test_the_ack_wait_is_bounded(self):
-        _, _, transport = beat(HEARTBEAT_ACK)
+    def test_the_beats_are_one_interval_apart(self):
+        _, _, backend = beat(beats=3)
 
-        self.assertLessEqual(transport.timeouts[0], 10)
+        self.assertEqual(backend.sent_at, [30.0, 60.0, 90.0])
+
+    def test_no_single_read_blocks_longer_than_a_slice(self):
+        # A read that could wait half a minute is half a minute of ignoring
+        # Ctrl+C, for the same reason InterruptibleStop waits in pieces.
+        _, _, backend = beat()
+
+        self.assertTrue(all(waited <= READ_SLICE_SECONDS
+                            for waited in backend.timeouts))
 
     def test_keeping_alive_does_not_close_the_socket(self):
         # Whoever opened it closes it. One place, not two.
-        _, _, transport = beat(HEARTBEAT_ACK)
+        _, _, backend = beat()
 
-        self.assertFalse(transport.closed)
+        self.assertFalse(backend.closed)
 
     def test_no_beat_carries_a_credential(self):
-        _, _, transport = beat(HEARTBEAT_ACK, HEARTBEAT_ACK, stop=Stop(stop_after=3))
+        _, _, backend = beat(beats=2)
 
-        for raw in transport.sent:
+        for raw in backend.sent:
             self.assertNotIn(TOKEN, raw)
 
 
 class TestABeatThatIsNotAnswered(unittest.TestCase):
     def test_nothing_arriving_loses_the_connection(self):
-        outcome, detail, _ = beat()  # no replies queued -> TimeoutError
+        outcome, detail, _ = beat(answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
         self.assertIn("heartbeat", detail)
 
+    def test_it_gives_up_one_ack_timeout_after_the_beat(self):
+        _, _, backend = beat(answers=False)
+
+        self.assertAlmostEqual(
+            backend.clock.now,
+            HEARTBEAT_INTERVAL_SECONDS + HEARTBEAT_ACK_TIMEOUT_SECONDS,
+            places=6)
+
+    def test_the_deadline_is_not_pushed_back_by_later_beats(self):
+        # A connection that never answers must not stay alive one beat at a
+        # time. The deadline belongs to the first unanswered beat.
+        _, _, backend = beat(answers=False)
+
+        self.assertEqual(len(backend.heartbeats), 1)
+
     def test_the_socket_closing_while_sending(self):
-        outcome, _, _ = beat(HEARTBEAT_ACK, on_send=ConnectionWentAway("gone"))
+        outcome, _, _ = beat(on_send=ConnectionWentAway("gone"))
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_the_socket_closing_while_waiting(self):
-        outcome, _, _ = beat(ConnectionWentAway("gone"))
+        outcome, _, _ = beat(At(1, ConnectionWentAway("gone")), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_a_reply_that_is_not_json(self):
-        outcome, _, _ = beat("{ half written")
+        outcome, _, _ = beat(At(1, "{ half written"), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_a_reply_with_no_type(self):
-        outcome, _, _ = beat(json.dumps({"payload": {}}))
+        outcome, _, _ = beat(At(1, json.dumps({"payload": {}})), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_a_json_value_that_is_not_a_message(self):
-        outcome, _, _ = beat('"hello"')
+        outcome, _, _ = beat(At(1, '"hello"'), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
@@ -284,45 +412,252 @@ class TestOnlyAnAckCountsAsAnAck(unittest.TestCase):
 
     def test_a_register_ack_arriving_mid_beat_is_not_a_heartbeat_ack(self):
         # Well formed, and not a confirmation of this beat.
-        outcome, _, _ = beat(REGISTER_ACK)
+        outcome, _, _ = beat(At(31, REGISTER_ACK), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_an_unhandled_message_does_not_end_the_beat(self):
-        # It is noted and the wait continues to the real ACK.
         seen = []
-        outcome, _, _ = beat(
-            envelope("JOB_ASSIGN"), HEARTBEAT_ACK, on_message=seen.append)
+
+        outcome, _, _ = beat(At(31, envelope("JOB_ASSIGN")), on_message=seen.append)
 
         self.assertIs(outcome, ConnectionOutcome.STOPPED)
         self.assertEqual([m["type"] for m in seen], ["JOB_ASSIGN"])
 
     def test_an_unhandled_message_alone_still_loses_the_connection(self):
-        # It was noted, but the beat was never answered.
-        outcome, _, _ = beat(envelope("JOB_ASSIGN"), on_message=lambda m: None)
+        # It was noted, and the beat was never answered.
+        outcome, _, _ = beat(
+            At(31, envelope("JOB_ASSIGN")), answers=False, on_message=lambda m: None)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
     def test_the_default_handler_does_not_treat_it_as_an_ack(self):
-        outcome, _, _ = beat(envelope("JOB_ASSIGN"))
+        outcome, _, _ = beat(At(31, envelope("JOB_ASSIGN")), answers=False)
 
         self.assertIs(outcome, ConnectionOutcome.LOST)
 
-    def test_the_deadline_is_per_beat_not_per_read(self):
-        # A chatty Backend cannot postpone the deadline one message at a time.
-        # A pinned clock rather than a real one: on a fast machine three real
-        # reads all round to the same tenth of a second and the test proves
-        # nothing.
-        ticks = iter([0, 3, 6, 9, 12])
-        socket, transport = live(
-            envelope("JOB_ASSIGN"), envelope("JOB_ASSIGN"), HEARTBEAT_ACK)
+    def test_a_message_before_any_beat_is_still_handled(self):
+        # Nothing had been sent, so nothing could be being answered.
+        seen = []
 
-        keep_alive(socket, Stop(stop_after=2), interval=30, ack_timeout=10,
-                   on_message=lambda m: None, monotonic=lambda: next(ticks))
+        beat(At(5, envelope("JOB_ASSIGN")), on_message=seen.append)
 
-        # Three reads, and each one gets what is left of the ten seconds
-        # rather than ten seconds of its own.
-        self.assertEqual(transport.timeouts, [7, 4, 1])
+        self.assertEqual([m["type"] for m in seen], ["JOB_ASSIGN"])
+
+    def test_a_flood_of_messages_does_not_postpone_the_deadline(self):
+        # The deadline is per beat, not per read.
+        outcome, _, backend = beat(
+            *[At(30.1 + n / 10, envelope("JOB_ASSIGN")) for n in range(20)],
+            answers=False, on_message=lambda m: None)
+
+        self.assertIs(outcome, ConnectionOutcome.LOST)
+        self.assertAlmostEqual(backend.clock.now, 40.0, places=6)
+
+
+class TestAJobArrivingOnTheConnection(unittest.TestCase):
+    """The point of the read loop: a JOB_ASSIGN is acted on when it arrives.
+
+    Before this build the socket was only read just after a beat, so a Job
+    matched one second later waited most of half a minute. These tests pin the
+    moment it is handled, not just that it eventually is.
+    """
+
+    def assign(self, job_id="123", **changes):
+        payload = {
+            "dockerImageId": 1, "modelId": 3, "datasetId": 42,
+            "trainingMode": "AUTO",
+            "trainingConfig": {
+                "epochs": 3, "batchSize": 8,
+                "learningRate": 0.0002, "maxLength": 1024},
+        }
+        payload.update(changes)
+        return json.dumps({
+            "type": "JOB_ASSIGN", "jobId": job_id,
+            "timestamp": "2026-09-10T14:00:00+09:00", "payload": payload})
+
+    def run_with(self, *scheduled, slot=None, **kwargs):
+        stop = Stop()
+        clock = Clock()
+        backend = FakeBackend(*scheduled, clock=clock, stop=stop, **kwargs)
+        socket = RegisteredSocket(backend, "worker-001")
+        slot = slot if slot is not None else JobSlot()
+        lines = []
+        outcome, _ = keep_alive(
+            socket, stop,
+            interval=HEARTBEAT_INTERVAL_SECONDS,
+            ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
+            monotonic=clock,
+            on_message=_dispatch_to(
+                socket, slot, lambda *p: lines.append(" ".join(str(x) for x in p))))
+        return outcome, backend, slot, lines
+
+    def test_a_job_arriving_long_before_the_next_beat_is_accepted_then(self):
+        # Arrives at t=5. The next beat is at t=30. It must not wait for it.
+        _, backend, _, _ = self.run_with(At(5, self.assign()))
+
+        self.assertEqual(len(backend.accepteds), 1)
+        self.assertLess(backend.sent_at[0], HEARTBEAT_INTERVAL_SECONDS)
+
+    def test_it_is_answered_within_a_slice_of_arriving(self):
+        _, backend, _, _ = self.run_with(At(5, self.assign()))
+
+        self.assertLessEqual(backend.sent_at[0] - 5, READ_SLICE_SECONDS)
+
+    def test_the_reply_names_the_job(self):
+        _, backend, _, _ = self.run_with(At(5, self.assign("456")))
+
+        self.assertEqual(backend.accepteds[0]["jobId"], "456")
+
+    def test_the_job_is_held_afterwards(self):
+        _, _, slot, _ = self.run_with(At(5, self.assign()))
+
+        self.assertEqual(slot.held.job_id, "123")
+
+    def test_the_supplier_is_told(self):
+        _, _, _, lines = self.run_with(At(5, self.assign()))
+
+        self.assertTrue(any("accepted" in line for line in lines))
+
+    def test_the_reply_carries_no_credential(self):
+        _, backend, _, _ = self.run_with(At(5, self.assign()))
+
+        self.assertNotIn(TOKEN, json.dumps(backend.accepteds[0]))
+
+    def test_the_beat_still_goes_out_on_time_afterwards(self):
+        _, backend, _, _ = self.run_with(At(5, self.assign()))
+
+        self.assertEqual(backend.sent_at[-1], HEARTBEAT_INTERVAL_SECONDS)
+        self.assertEqual(len(backend.heartbeats), 1)
+
+    def test_an_assignment_that_cannot_be_read_is_not_accepted(self):
+        _, backend, slot, _ = self.run_with(At(5, self.assign(modelId=None)))
+
+        self.assertEqual(backend.accepteds, [])
+        self.assertTrue(slot.is_idle)
+
+    def test_a_bad_assignment_does_not_end_the_connection(self):
+        # Reconnecting would not change the message, and the next connection
+        # would carry the same one.
+        outcome, backend, _, _ = self.run_with(At(5, self.assign(modelId=None)))
+
+        self.assertIs(outcome, ConnectionOutcome.STOPPED)
+        self.assertEqual(len(backend.heartbeats), 1)
+
+    def test_nothing_is_confirmed_before_it_is_understood(self):
+        # The reply must never go out first and the validation fail after.
+        _, backend, _, _ = self.run_with(At(5, self.assign(datasetId="forty-two")))
+
+        self.assertEqual(backend.accepteds, [])
+
+
+class TestAJobAndTheHeartbeatTogether(unittest.TestCase):
+    """Neither is ever mistaken for the other."""
+
+    def assign(self, job_id="123"):
+        return TestAJobArrivingOnTheConnection.assign(self, job_id)
+
+    def run_with(self, *scheduled, **kwargs):
+        return TestAJobArrivingOnTheConnection.run_with(self, *scheduled, **kwargs)
+
+    def test_a_job_arriving_right_after_a_beat_does_not_answer_it(self):
+        # Case A: beat at 30, JOB_ASSIGN at 30.1, no ACK ever.
+        outcome, _, slot, _ = self.run_with(At(30.1, self.assign()), answers=False)
+
+        self.assertIs(outcome, ConnectionOutcome.LOST)
+        self.assertEqual(slot.held.job_id, "123")   # and it was still handled
+
+    def test_a_job_before_the_beat_leaves_the_beat_to_be_answered(self):
+        # Case B: JOB_ASSIGN at 5, beat at 30, ACK for the beat.
+        outcome, backend, _, _ = self.run_with(At(5, self.assign()))
+
+        self.assertIs(outcome, ConnectionOutcome.STOPPED)
+        self.assertEqual(len(backend.accepteds), 1)
+        self.assertEqual(len(backend.heartbeats), 1)
+
+    def test_a_job_does_not_extend_the_ack_deadline(self):
+        # Case C: beat at 30, a Job at 30.1, no ACK. Given up at 40, not later.
+        _, backend, _, _ = self.run_with(At(30.1, self.assign()), answers=False)
+
+        self.assertAlmostEqual(
+            backend.clock.now,
+            HEARTBEAT_INTERVAL_SECONDS + HEARTBEAT_ACK_TIMEOUT_SECONDS, places=6)
+
+    def test_a_heartbeat_ack_is_never_handed_to_the_job_dispatcher(self):
+        seen = []
+        stop = Stop()
+        socket, backend = live(stop=stop)
+
+        keep_alive(socket, stop, interval=HEARTBEAT_INTERVAL_SECONDS,
+                   ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
+                   monotonic=backend.clock,
+                   on_message=lambda message: seen.append(message["type"]))
+
+        self.assertEqual(seen, [])
+
+    def test_two_sends_never_interleave(self):
+        # One thread does both, so a JOB_ACCEPTED and a HEARTBEAT cannot be
+        # halfway through each other. Every frame is whole JSON.
+        _, backend, _, _ = self.run_with(At(29.9, self.assign()))
+
+        for raw in backend.sent:
+            self.assertIsInstance(json.loads(raw), dict)
+
+
+class TestHoldingOneJobAcrossConnections(unittest.TestCase):
+    """The slot belongs to the run, not to a socket."""
+
+    def assign(self, job_id="123"):
+        return TestAJobArrivingOnTheConnection.assign(self, job_id)
+
+    def offer(self, raw, slot):
+        return TestAJobArrivingOnTheConnection.run_with(self, At(5, raw), slot=slot)
+
+    def test_the_same_job_offered_again_is_not_a_second_job(self):
+        slot = JobSlot()
+        for _ in range(2):
+            self.offer(self.assign("123"), slot)
+
+        self.assertEqual(slot.held.job_id, "123")
+
+    def test_it_is_confirmed_again_in_case_the_first_reply_was_lost(self):
+        # Nothing acknowledges a JOB_ACCEPTED, and acceptJob does nothing the
+        # second time, so saying it again is safe and sometimes necessary.
+        slot = JobSlot()
+        self.offer(self.assign("123"), slot)
+        _, second, _, _ = self.offer(self.assign("123"), slot)
+
+        self.assertEqual(len(second.accepteds), 1)
+
+    def test_a_different_job_is_not_accepted_while_one_is_held(self):
+        slot = JobSlot()
+        self.offer(self.assign("123"), slot)
+
+        _, backend, _, _ = self.offer(self.assign("456"), slot)
+
+        self.assertEqual(backend.accepteds, [])
+        self.assertEqual(slot.held.job_id, "123")
+
+    def test_the_supplier_is_told_a_second_job_was_refused(self):
+        slot = JobSlot()
+        self.offer(self.assign("123"), slot)
+
+        _, _, _, lines = self.offer(self.assign("456"), slot)
+
+        self.assertTrue(
+            any("456" in line and "not accepted" in line for line in lines))
+
+    def test_the_supervisor_keeps_one_slot_across_a_reconnect(self):
+        # A reconnect does not forget: the Backend still has it assigned here.
+        slot = JobSlot()
+        first = FakeBackend(REGISTER_ACK, At(1, self.assign("123")),
+                            At(2, ConnectionWentAway("gone")), answers=False)
+        second = FakeBackend(REGISTER_ACK, At(1, self.assign("123")))
+
+        supervisor = Supervisor(first, second)
+        supervisor.run(slot=slot)
+
+        self.assertEqual(slot.held.job_id, "123")
+        self.assertEqual(len(second.registers), 1)
 
 
 class TestTheBackoff(unittest.TestCase):
@@ -367,13 +702,41 @@ def registering(*replies) -> FakeTransport:
     return FakeTransport(REGISTER_ACK, *replies)
 
 
-def supervise(*attempts, stop=None, say=None):
-    lines = [] if say is None else say
-    stop = stop or Stop(stop_after=1)
-    code = stay_connected(
-        settings(), CREDENTIALS, lambda *p: lines.append(" ".join(str(x) for x in p)),
-        stop, open_socket=opener(*attempts), interval=30, ack_timeout=10)
-    return code, stop, lines
+class Supervisor:
+    """One :func:`stay_connected` run, with a clock every attempt shares.
+
+    Each attempt gets the same clock, because the supervisor is one loop over
+    time: a connection that beat twice before dying has moved the clock on for
+    whatever comes next. The clock is also what ends a run -- ``ends_when_dry``
+    hands the stop signal to every transport, so a script that has said
+    everything it wanted to stops the loop instead of beating for ever.
+    """
+
+    def __init__(self, *attempts, stop=None, ends_when_dry=True):
+        self.clock = Clock()
+        self.stop = stop or Stop()
+        self.lines: list[str] = []
+        for attempt in attempts:
+            if isinstance(attempt, FakeTransport):
+                attempt._clock = self.clock
+                if ends_when_dry:
+                    attempt._stop = self.stop
+        self.open_socket = opener(*attempts)
+
+    def run(self, **kwargs):
+        return stay_connected(
+            settings(), CREDENTIALS,
+            lambda *p: self.lines.append(" ".join(str(x) for x in p)),
+            self.stop, open_socket=self.open_socket,
+            interval=HEARTBEAT_INTERVAL_SECONDS,
+            ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
+            monotonic=self.clock, **kwargs)
+
+
+def supervise(*attempts, stop=None, ends_when_dry=True, **kwargs):
+    supervisor = Supervisor(*attempts, stop=stop, ends_when_dry=ends_when_dry)
+    code = supervisor.run(**kwargs)
+    return code, supervisor.stop, supervisor.lines
 
 
 class TestReconnecting(unittest.TestCase):
@@ -400,8 +763,11 @@ class TestReconnecting(unittest.TestCase):
             down,
             stop=stop)
 
-        # waits: 1, 2, 4 (failures), 30 (the heartbeat interval), 1 (reset)
-        self.assertEqual(stop.waits, [1, 2, 4, 30, 1, 2])
+        # Only the backoff waits on the stop signal now -- the heartbeat loop
+        # reads with its own deadlines -- so this list is the policy itself:
+        # three failures, then a connection that registered, then three more
+        # failures starting over from one second.
+        self.assertEqual(stop.waits, [1, 2, 4, 1, 2, 4])
 
     def test_every_attempt_registers_again(self):
         # The Backend tracks registration per session and drops everything
@@ -472,7 +838,10 @@ class TestFailuresNotWorthRetrying(unittest.TestCase):
         self.assertEqual(code, int(WorkerExitCode.EXPECTED_FAILURE))
 
     def test_being_confirmed_as_another_machine_stops(self):
-        wrong = FakeTransport(envelope("REGISTER_ACK", workerId="worker-999"))
+        # answers=False: 이 Backend는 REGISTER에 "올바른" ACK를 주지 않는다.
+        # 시나리오 자체가 잘못된 ACK를 주는 경우다.
+        wrong = FakeTransport(
+            envelope("REGISTER_ACK", workerId="worker-999"), answers=False)
 
         code, stop, _ = supervise(wrong, stop=Stop(stop_after=99))
 
@@ -480,7 +849,8 @@ class TestFailuresNotWorthRetrying(unittest.TestCase):
         self.assertEqual(stop.waits, [])
 
     def test_a_service_speaking_another_protocol_stops(self):
-        code, _, _ = supervise(FakeTransport("{ half written"), stop=Stop(stop_after=99))
+        code, _, _ = supervise(
+            FakeTransport("{ half written", answers=False), stop=Stop(stop_after=99))
 
         self.assertEqual(code, int(WorkerExitCode.EXPECTED_FAILURE))
 
@@ -490,7 +860,8 @@ class TestFailuresNotWorthRetrying(unittest.TestCase):
         self.assertEqual(stop.waits, [1])
 
     def test_a_registration_that_timed_out_is_retried(self):
-        _, stop, _ = supervise(FakeTransport(), stop=Stop(stop_after=1))
+        # A Backend that accepts the socket and never confirms.
+        _, stop, _ = supervise(FakeTransport(answers=False), stop=Stop(stop_after=1))
 
         self.assertEqual(stop.waits, [1])
 
@@ -628,10 +999,16 @@ class TestTheStage(unittest.TestCase):
 
     def stage(self, *attempts, stop=None):
         lines: list[str] = []
+        clock = Clock()
+        stop = stop or Stop()
+        for attempt in attempts:
+            if isinstance(attempt, FakeBackend):
+                attempt._clock = clock
+                attempt._stop = stop
         code = connect_to_backend(
             settings(), lambda *p: lines.append(" ".join(str(x) for x in p)),
             open_socket=opener(*attempts), credentials=CREDENTIALS,
-            stop=stop or Stop(stop_after=1))
+            stop=stop, monotonic=clock)
         return code, lines
 
     def test_a_connection_that_registers_says_so(self):
