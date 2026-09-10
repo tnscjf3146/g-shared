@@ -36,6 +36,15 @@ from .config import WorkerSettings
 from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
 from .worker_credentials import WorkerCredentials, load_credentials
+from .worker_job import (
+    JOB_ASSIGN,
+    AssignedJob,
+    JobAssignmentError,
+    JobSlot,
+    OfferOutcome,
+    job_accepted_message,
+    read_assignment,
+)
 from .worker_socket import (
     ConnectionWentAway,
     ProtocolViolation,
@@ -61,6 +70,18 @@ HEARTBEAT_INTERVAL_SECONDS = 30
 #: also far inside the Backend's 90 seconds: the Worker should be reconnecting
 #: long before the sweeper has to decide anything about it.
 HEARTBEAT_ACK_TIMEOUT_SECONDS = 10
+
+#: How long a single read may block for, whatever the deadlines allow.
+#:
+#: The same reason :class:`InterruptibleStop` waits in pieces: on Windows a
+#: blocking call finishes before ``KeyboardInterrupt`` is raised, so a read that
+#: could wait half a minute is half a minute of ignoring Ctrl+C. Messages do not
+#: wait for the slice to end -- a read returns the moment one arrives -- so this
+#: costs two buffered reads a second and nothing else.
+READ_SLICE_SECONDS = 0.5
+
+#: A read always waits a little. Zero would make the loop spin.
+_SHORTEST_READ_SECONDS = 0.001
 
 #: How long to wait before the first attempt after a failure, and the ceiling.
 #:
@@ -179,6 +200,66 @@ def _note_unhandled(message: dict[str, Any]) -> None:
                 message.get("type"))
 
 
+def take_the_job(
+    message: dict[str, Any],
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    *,
+    clock: Callable[[], str] | None = None,
+) -> None:
+    """A JOB_ASSIGN: check it, hold it, and say yes -- **in that order.**
+
+    Nothing is confirmed before it has been understood. Sending JOB_ACCEPTED
+    first and validating after would have the Backend move a Job to RUNNING on
+    a machine that had already decided it could not run it.
+
+    Nothing is started either. Accepting is agreeing to do the work; doing it
+    is the GPU runtime stage and is not in this build.
+    """
+    try:
+        job = read_assignment(message)
+    except JobAssignmentError as refused:
+        # The connection is fine and this message was well formed -- it just
+        # does not describe a Job that can be run. Dropping the connection over
+        # it would take a working machine offline and the next one would carry
+        # the same message. Said, and carried on.
+        _debug.info("job: refused an assignment -- %s", refused)
+        say(f"  A job was offered but could not be read: {refused}")
+        return
+
+    outcome = slot.offer(job)
+    if outcome is OfferOutcome.BUSY:
+        # One GPU, one Job. Staying quiet is the answer the Backend already
+        # anticipates: JobMatcher has a TODO for Jobs whose JOB_ACCEPTED never
+        # arrives, and inventing a refusal message it does not read would not
+        # reach anybody.
+        _debug.info(
+            "job: %s offered while holding %s -- not accepted",
+            job.job_id, slot.held.job_id)
+        say(f"  A second job ({job.job_id}) was offered while {slot.held.job_id}"
+            " is still held. It was not accepted.")
+        return
+
+    _debug.info("job: %s %s", job.job_id, outcome.value.lower())
+    try:
+        socket.send(job_accepted_message(job.job_id, (clock or now_in_iso8601)()))
+    except ConnectionWentAway:
+        # The read loop is about to find the same thing and say so. The Job
+        # stays held: the Backend still has it assigned to this machine, and
+        # the reply goes again if it offers it after the reconnect.
+        _debug.info("job: %s accepted but the reply did not get out", job.job_id)
+        return
+
+    if outcome is OfferOutcome.ALREADY_HELD:
+        # Worth repeating. Nothing acknowledges a JOB_ACCEPTED, so the first
+        # one may have gone down with a connection, and acceptJob is a
+        # conditional UPDATE that does nothing the second time.
+        _debug.info("job: %s was already held -- said yes again", job.job_id)
+        return
+    say(f"  Job {job.job_id} accepted. Waiting for the job execution stage.")
+
+
 def keep_alive(
     socket: RegisteredSocket,
     stop: StopSignal,
@@ -189,78 +270,92 @@ def keep_alive(
     on_message: OnMessage | None = None,
     monotonic: Callable[[], float] | None = None,
 ) -> tuple[ConnectionOutcome, str]:
-    """Beat on this connection until it fails or somebody says stop.
+    """Read this connection until it fails or somebody says stop, beating on time.
+
+    **Reading is what this loop does; the heartbeat is something it does on the
+    way.** It used to be the other way round -- wait thirty seconds, beat, read
+    until the ACK -- and that meant a JOB_ASSIGN arriving one second after a
+    beat sat unread for most of half a minute. The Backend sends those whenever
+    a Job is matched, so the loop is now shaped around always having a read
+    outstanding, and the beat is a deadline the read is cut short for.
+
+    **One reader.** Every ``receive`` on a connection happens here, so nothing
+    else has to wonder whether a message it wanted went to somebody else. The
+    same applies to sending: this is the only thread in the Worker, so two
+    frames cannot interleave and there is no lock to get wrong.
 
     Does not close the socket. Whoever opened it closes it -- see
     :func:`stay_connected` -- so there is exactly one place that does.
     """
+    tick = monotonic or _real_monotonic()
+    handle = on_message or _note_unhandled
+    beat_due_at = tick() + interval
+    ack_due_at: float | None = None
+
     while True:
-        if stop.wait(interval):
+        if stop.is_set():
             return ConnectionOutcome.STOPPED, "asked to stop"
 
-        try:
-            socket.send(heartbeat_message((clock or now_in_iso8601)()))
-        except ConnectionWentAway as gone:
-            return ConnectionOutcome.LOST, str(gone)
-
-        lost = _wait_for_ack(
-            socket, stop, ack_timeout, on_message or _note_unhandled, monotonic)
-        if lost is not None:
-            return lost
-
-
-def _wait_for_ack(
-    socket: RegisteredSocket,
-    stop: StopSignal,
-    ack_timeout: float,
-    on_message: OnMessage,
-    monotonic: Callable[[], float] | None = None,
-) -> tuple[ConnectionOutcome, str] | None:
-    """Read until HEARTBEAT_ACK. None means it arrived and the beat is done.
-
-    **The next message is not assumed to be the ACK.** The Backend can send on
-    this socket whenever it likes, and reading whatever turns up as a
-    confirmation would mean a JOB_ASSIGN could keep a dead connection looking
-    alive. Anything that is not the ACK goes to ``on_message`` and the wait
-    continues -- which is the seam the next build hangs JOB_ASSIGN on.
-
-    The deadline is per beat rather than per read, so a chatty Backend cannot
-    postpone it indefinitely one message at a time.
-    """
-    deadline = _Deadline(ack_timeout, monotonic)
-    while True:
-        remaining = deadline.remaining()
-        if remaining <= 0:
+        now = tick()
+        if ack_due_at is not None and now >= ack_due_at:
+            # The beat went out and nothing came back in time. Messages may
+            # well have arrived meanwhile -- they are not the answer to this.
             return ConnectionOutcome.LOST, "the service did not answer the heartbeat"
+
+        if now >= beat_due_at:
+            try:
+                socket.send(heartbeat_message((clock or now_in_iso8601)()))
+            except ConnectionWentAway as gone:
+                return ConnectionOutcome.LOST, str(gone)
+            beat_due_at = now + interval
+            # Only the first unanswered beat starts a deadline. Resetting it on
+            # every beat would let a connection that never answers live for
+            # ever, one beat at a time.
+            if ack_due_at is None:
+                ack_due_at = now + ack_timeout
+            continue
+
         try:
-            message = socket.receive(remaining)
+            message = socket.receive(_how_long_to_wait(now, beat_due_at, ack_due_at))
         except TimeoutError:
-            return ConnectionOutcome.LOST, "the service did not answer the heartbeat"
+            # Nothing arrived in this slice. The deadlines above decide what
+            # that means; here it only means go round again.
+            continue
         except ConnectionWentAway as gone:
             return ConnectionOutcome.LOST, str(gone)
         except ProtocolViolation as violation:
-            # Not a message at all. The connection is no longer carrying the
-            # protocol, so a new one is the answer rather than reading on.
+            # Not a message at all. The connection is not carrying the protocol
+            # any more, so a new one is the answer rather than reading on.
             return ConnectionOutcome.LOST, str(violation)
 
         if message["type"] == "HEARTBEAT_ACK":
-            return None
-        if stop.is_set():
-            return ConnectionOutcome.STOPPED, "asked to stop"
-        on_message(message)
+            ack_due_at = None
+            continue
+        # Anything else is somebody else's. It never answers a heartbeat, no
+        # matter how well formed or how recently one went out.
+        handle(message)
 
 
-class _Deadline:
-    """A per-heartbeat clock. Monotonic, so the wall clock changing is not a loss."""
+def _how_long_to_wait(
+    now: float, beat_due_at: float, ack_due_at: float | None
+) -> float:
+    """How long a single read may block for.
 
-    def __init__(self, seconds: float, monotonic: Callable[[], float] | None = None) -> None:
-        import time
+    Bounded by whichever deadline comes first, so a beat is never late because
+    a read was waiting on something that had not arrived. Bounded again by
+    :data:`READ_SLICE_SECONDS` so a Worker asked to stop is not held by a read
+    that could have half a minute left in it.
 
-        self._monotonic = monotonic or time.monotonic
-        self._ends_at = self._monotonic() + seconds
+    Never zero or less: a read that cannot wait at all turns this into a spin.
+    """
+    until = beat_due_at if ack_due_at is None else min(beat_due_at, ack_due_at)
+    return max(min(until - now, READ_SLICE_SECONDS), _SHORTEST_READ_SECONDS)
 
-    def remaining(self) -> float:
-        return self._ends_at - self._monotonic()
+
+def _real_monotonic() -> Callable[[], float]:
+    import time
+
+    return time.monotonic
 
 
 #: Failures worth opening another connection for. Everything else is a decision
@@ -335,6 +430,8 @@ def stay_connected(
     interval: float = HEARTBEAT_INTERVAL_SECONDS,
     ack_timeout: float = HEARTBEAT_ACK_TIMEOUT_SECONDS,
     on_message: OnMessage | None = None,
+    monotonic: Callable[[], float] | None = None,
+    slot: JobSlot | None = None,
 ) -> int:
     """Hold a registered connection open for as long as the Worker is running.
 
@@ -353,6 +450,11 @@ def stay_connected(
     ends this function on its own.
     """
     delays = backoff_delays()
+    # One slot for the whole run, not one per connection. A Job this Worker
+    # took does not stop being its Job because a socket closed -- the Backend
+    # still has it assigned here, and forgetting would mean accepting it twice
+    # after the reconnect.
+    slot = slot if slot is not None else JobSlot()
 
     while not stop.is_set():
         result, socket = open_registered_socket(
@@ -378,7 +480,8 @@ def stay_connected(
         try:
             outcome, detail = keep_alive(
                 socket, stop, interval=interval, ack_timeout=ack_timeout,
-                on_message=on_message)
+                on_message=on_message or _dispatch_to(socket, slot, say),
+                monotonic=monotonic)
         finally:
             # The one place a socket this function opened is closed.
             socket.close()
@@ -392,6 +495,26 @@ def stay_connected(
     say("")
     say("Disconnected from the G-shared service.")
     return int(WorkerExitCode.OK)
+
+
+def _dispatch_to(
+    socket: RegisteredSocket, slot: JobSlot, say: Callable[..., None]
+) -> OnMessage:
+    """What to do with a message that did not answer a heartbeat.
+
+    The whole dispatch table, and it has one entry. A mapping rather than a
+    chain of ``if``s so the next build adds a line instead of a branch --
+    JOB_CANCEL and the rest arrive the same way. Anything not in it is noted
+    and ignored: a Backend that learns to send something new must not be able
+    to take a working Worker offline by doing so.
+    """
+    def dispatch(message: dict[str, Any]) -> None:
+        if message["type"] == JOB_ASSIGN:
+            take_the_job(message, socket, slot, say)
+            return
+        _note_unhandled(message)
+
+    return dispatch
 
 
 def _report_giving_up(say: Callable[..., None], result: SocketResult) -> int:
@@ -418,6 +541,7 @@ def connect_to_backend(
     open_socket: Any = None,
     credentials: WorkerCredentials | None = None,
     stop: StopSignal | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> int:
     """The stage: attach this machine to the service and stay attached.
 
@@ -449,4 +573,4 @@ def connect_to_backend(
 
     return stay_connected(
         settings, credentials, say, stop or InterruptibleStop(),
-        open_socket=open_socket)
+        open_socket=open_socket, monotonic=monotonic)
