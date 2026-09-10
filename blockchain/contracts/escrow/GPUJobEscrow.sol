@@ -213,6 +213,7 @@ contract GPUJobEscrow is ReentrancyGuard {
 
         require(job.client == msg.sender, "Escrow: not the client");
         require(job.state == JobState.SUBMITTED, "Escrow: not SUBMITTED");
+        if (block.timestamp > job.deadline) revert DeadlineExpired();
 
         job.state = JobState.COMPLETED;
 

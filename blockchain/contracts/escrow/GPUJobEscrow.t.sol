@@ -327,6 +327,34 @@ contract GPUJobEscrowTest is Test {
         escrow.approveResult(jobId);
     }
 
+    /// @dev 승인 기한 정각까지는 의뢰자가 직접 승인할 수 있다.
+    function test_approveResult_succeedsAtDeadline() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId));
+
+        vm.prank(client);
+        escrow.approveResult(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.COMPLETED));
+        assertEq(token.balanceOf(provider), PRICE);
+    }
+
+    /// @dev 기한이 지나면 settleTimeout 을 부르지 않았어도 직접 승인이 막힌다.
+    ///      기존 test_afterTimeout_approveResultRejected 는 상태가 이미 바뀐 뒤를 보므로
+    ///      시한 자체를 검증하지 못한다.
+    function test_approveResult_rejectsAfterDeadline() public {
+        uint256 jobId = _submitted();
+        vm.warp(_deadline(jobId) + 1);
+
+        vm.prank(client);
+        vm.expectRevert(GPUJobEscrow.DeadlineExpired.selector);
+        escrow.approveResult(jobId);
+
+        // 상태는 그대로이고 돈도 움직이지 않았다
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.SUBMITTED));
+        assertEq(token.balanceOf(address(escrow)), PRICE);
+    }
+
     // ── 중복 정산 차단 ───────────────────────────────────────────
 
     function test_completedJob_cannotBeSettledTwice() public {
