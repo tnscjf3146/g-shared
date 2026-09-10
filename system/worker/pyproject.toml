@@ -9,9 +9,21 @@ description = "G-shared Worker: the program a GPU supplier runs on their own Win
 # Nothing in this package needs a newer interpreter, and 3.10 is what the team
 # has installed. Raise this when a ported stage actually requires more.
 requires-python = ">=3.10"
-# Deliberately empty. Startup is standard library and ctypes only; the GPU,
-# container and WebSocket dependencies arrive with the stages that use them.
-dependencies = []
+# The Worker is standard library and ctypes wherever it can be. The one
+# exception is the Backend connection: RFC 6455 framing, masking and close
+# handshakes are a lot of subtle code to own for something a maintained
+# package does correctly, and getting it subtly wrong shows up as a Worker
+# that silently stops being reachable.
+#
+# Only ``gshared_worker.worker_socket.open_worker_socket`` imports it, and it
+# imports it inside the function, so every other module -- and every test of
+# this one -- still runs without it installed.
+dependencies = [
+    # The sync client (websockets.sync.client), so the Worker stays the
+    # thread-and-blocking-call program it already is rather than growing an
+    # event loop for one connection. 13.0 is where that client arrived.
+    "websockets>=13.0",
+]
 
 [project.scripts]
 g-shared-worker = "gshared_worker.main:run"

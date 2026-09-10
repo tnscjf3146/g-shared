@@ -262,8 +262,6 @@ def _report(say: Callable[..., None], result: WorkerAuthResult) -> int:
         say(f"  Registered as {result.worker_id}.")
         say("")
         say("AUTH READY.")
-        say("")
-        say("Connecting to the Backend is not part of this build yet.")
         return int(WorkerExitCode.OK)
 
     said, remedy = _IN_PLAIN_WORDS.get(
