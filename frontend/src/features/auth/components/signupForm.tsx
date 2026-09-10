@@ -35,7 +35,7 @@ export function SignupForm() {
 
   return (
     <form onSubmit={submit} noValidate className="card flex w-[440px] max-w-full flex-col gap-[18px] p-10">
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 text-center">
         <span className="font-logo text-[32px] font-semibold text-dark">G-shared</span>
         <p className="text-[15px] text-text-muted">계정을 만들고 GPU를 쓰거나, 공유해 보세요</p>
       </div>
@@ -64,7 +64,7 @@ export function SignupForm() {
           size="lg"
           type="email"
           autoComplete="email"
-          placeholder="email"
+          placeholder="g@shared.com"
           value={f.values.email}
           onChange={(e) => f.set('email', e.target.value)}
           aria-invalid={!!f.errors.email}
@@ -99,7 +99,6 @@ export function SignupForm() {
           size="lg"
           type={pwType}
           autoComplete="new-password"
-          placeholder="password"
           value={f.values.passwordConfirm}
           onChange={(e) => f.set('passwordConfirm', e.target.value)}
           aria-invalid={!!f.errors.passwordConfirm}

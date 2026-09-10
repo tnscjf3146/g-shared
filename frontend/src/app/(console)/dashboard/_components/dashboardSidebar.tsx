@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, useSyncExternalStore } from 'react'
@@ -46,7 +47,6 @@ const writeWidth = (w: number) => {
   }
   window.dispatchEvent(new Event('storage'))
 }
-const HOME = { href: '/', label: '홈', d: 'M3 11l9-8 9 8M5 10v10h14V10' }
 // 상위 항목을 누르면 그 화면으로 가면서 하위 메뉴가 펼쳐진다(현재 위치가 그 구역이면 펼침 — 별도 상태 없음)
 type Item = { href: string; label: string; d: string; children?: Item[] }
 const ITEMS: Item[] = [
@@ -104,29 +104,27 @@ export function DashboardSidebar() {
           className={`absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/40 ${dragging ? 'bg-primary/60' : ''}`}
         />
       )}
-      {/* 맨 위 토글(패널 아이콘) — 로고 위. 접힘/펼침 모두 같은 기호 */}
-      <div className="flex-none px-2 pt-2">
-        <button type="button" onClick={toggle} title={open ? '메뉴 접기' : '메뉴 펼치기'} aria-expanded={open} className={`${item} w-full text-left`}>
-          <span className="grid size-5 flex-none place-items-center text-text-muted">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="16" rx="2.5" />
-              <path d="M9 4v16" />
-            </svg>
-          </span>
-          {label(open ? '메뉴 접기' : '메뉴 펼치기')}
+      {/* 로고 줄 — 펼침: 로고 + 우측 ◀(접기) / 접힘: 화살표만 가운데 ▶(펴기) */}
+      <div className="flex h-[60px] flex-none items-center gap-3 border-b border-hairline pr-3 pl-[17px]">
+        {open && (
+          <Link href="/" aria-label="G-shared 홈" className="flex min-w-0 items-center">
+            <Image src="/logo-wordmark.png" alt="G-shared" width={104} height={18} unoptimized className="h-[18px] w-auto" />
+          </Link>
+        )}
+        <button
+          type="button"
+          onClick={toggle}
+          title={open ? '메뉴 접기' : '메뉴 펼치기'}
+          aria-expanded={open}
+          className={`grid size-8 flex-none place-items-center rounded-md text-text-muted transition-colors hover:bg-black/5 ${open ? 'ml-auto' : 'mx-auto'}`}
+        >
+          {/* 사이드바.png 예시 — 패널 아이콘(둥근 사각 + 세로선). 접힘 땐 왼쪽 칸을 채워 '펼치기'로 구분 */}
+          <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" />
+            <path d="M9 4v16" />
+            {!open && <rect x="3" y="4" width="6" height="16" rx="2.5" fill="currentColor" stroke="none" />}
+          </svg>
         </button>
-      </div>
-      {/* 로고 줄 */}
-      <div className="flex h-[60px] flex-none items-center gap-3 border-b border-hairline px-4">
-        <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
-          <span aria-hidden className="flex size-[22px] flex-none items-center justify-center rounded-sm bg-primary text-white">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="4" width="16" height="16" />
-              <rect x="9" y="9" width="6" height="6" />
-            </svg>
-          </span>
-          <span className={`font-logo whitespace-nowrap text-[20px] font-semibold text-black transition-opacity ${open ? 'opacity-100 delay-100' : 'opacity-0'}`}>G-shared</span>
-        </Link>
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 px-2 py-2">
@@ -163,16 +161,13 @@ export function DashboardSidebar() {
             </div>
           )
         })}
-        {/* 홈 — 목록 맨 아래, 계정 구역 구분선 바로 위 */}
-        <Link href={HOME.href} title={HOME.label} className={`${item} mt-auto`}>
-          <span className="grid size-5 flex-none place-items-center text-text-muted" dangerouslySetInnerHTML={{ __html: `<svg ${ICON}><path d="${HOME.d}"></path></svg>` }} />
-          {label(HOME.label)}
-        </Link>
       </div>
 
       <div className="flex flex-col gap-0.5 border-t border-hairline px-2 py-2">
         <div className={item} title="내 계정">
-          <span className="grid size-5 flex-none place-items-center rounded-sm border border-primary text-[12px] font-bold text-primary">G</span>
+          <span className="grid size-5 flex-none place-items-center">
+            <Image src="/logo-icon.png" alt="" width={20} height={20} unoptimized className="size-5 object-contain" />
+          </span>
           {label('내 계정')}
         </div>
         <button

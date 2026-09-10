@@ -193,7 +193,6 @@
   .nav-glass {
     color: var(--color-black);
     background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--color-black) 8%, transparent);
     /* 아래로 떨어지는 부드러운 그림자 + 상단 안쪽 하이라이트 → 항상 한 층 떠 있는 유리 */
     box-shadow:
       0 8px 20px rgba(13, 15, 11, 0.16),
@@ -211,7 +210,6 @@
   body[data-nav-theme="dark"] .nav-glass {
     color: var(--color-white);
     background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
-    border-bottom-color: color-mix(in srgb, var(--color-surface-2) 12%, transparent);
     box-shadow:
       0 10px 28px rgba(0, 0, 0, 0.6),
       0 2px 4px rgba(0, 0, 0, 0.4),

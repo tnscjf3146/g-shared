@@ -21,7 +21,7 @@ export function LoginForm() {
   const f = useZodForm(loginSchema, { email: '', password: '' })
   const [showPw, setShowPw] = useState(false)
 
-  const nextPath = params.get('next') ? safeNextPath(params.get('next')) : '/dashboard' // 오픈 리다이렉트 차단: 같은 오리진 절대 경로만. next 없으면 대시보드
+  const nextPath = params.get('next') ? safeNextPath(params.get('next')) : '/' // 오픈 리다이렉트 차단: 같은 오리진 절대 경로만. next 없으면 홈
   const expired = params.get('reason') === 'expired' // 보호 API 에서 만료로 돌려보내진 경우
   const signedUp = params.get('signup') === 'done' // 회원가입 직후
 
@@ -49,7 +49,7 @@ export function LoginForm() {
 
   return (
     <form onSubmit={submit} noValidate className="card flex w-[440px] max-w-full flex-col gap-5 p-10">
-      <span className="font-logo text-[32px] font-semibold text-dark">G-shared</span>
+      <span className="text-center font-logo text-[32px] font-semibold text-dark">G-shared</span>
 
       {notice && (
         <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
@@ -68,7 +68,7 @@ export function LoginForm() {
           size="lg"
           type="email"
           autoComplete="email"
-          placeholder="email"
+          placeholder="g@shared.com"
           value={f.values.email}
           onChange={(e) => f.set('email', e.target.value)}
           aria-invalid={!!f.errors.email}
