@@ -39,7 +39,7 @@ contract GasReportTest is Test {
         console.log("token.approve  ", g - gasleft());
 
         g = gasleft();
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
         console.log("fundJob        ", g - gasleft());
 
         vm.stopPrank();
@@ -68,7 +68,7 @@ contract GasReportTest is Test {
         vm.startPrank(client);
         uint256 a = escrow.createJob(PRICE);
         token.approve(address(escrow), PRICE);
-        escrow.fundJob(a);
+        escrow.fundJob(a, provider);
         g = gasleft();
         escrow.cancelJob(a);
         console.log("cancelJob      ", g - gasleft());
@@ -78,7 +78,7 @@ contract GasReportTest is Test {
         vm.startPrank(client);
         uint256 b = escrow.createJob(PRICE);
         token.approve(address(escrow), PRICE);
-        escrow.fundJob(b);
+        escrow.fundJob(b, provider);
         vm.stopPrank();
         (, , uint64 dl, , , ) = escrow.jobs(b);
         vm.warp(dl + 1);
@@ -90,7 +90,7 @@ contract GasReportTest is Test {
         vm.startPrank(client);
         uint256 c = escrow.createJob(PRICE);
         token.approve(address(escrow), PRICE);
-        escrow.fundJob(c);
+        escrow.fundJob(c, provider);
         vm.stopPrank();
         vm.startPrank(provider);
         escrow.acceptJob(c);

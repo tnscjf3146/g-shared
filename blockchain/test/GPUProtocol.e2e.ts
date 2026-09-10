@@ -39,19 +39,20 @@ describe("GPU Protocol e2e", async () => {
 
   /**
    * 작업을 만들고 대금을 예치한다. 승인과 예치가 트랜잭션 두 번인 것을 그대로 보여준다.
+   * 예치할 때 공급자를 함께 지정한다. 화면에서 의뢰자가 고른 결과가 이 자리에 들어온다.
    *
    * jobId 는 반드시 JobCreated 이벤트에서 읽는다. nextJobId 를 미리 읽어 두면
    * 다른 사용자의 createJob 이 사이에 끼어들 때 다른 작업을 가리키게 된다.
    * 프론트와 백엔드도 같은 방식으로 읽어야 한다.
    */
   async function createAndFund(ctx: Awaited<ReturnType<typeof deployProtocol>>) {
-    const { token, escrow, client } = ctx;
+    const { token, escrow, client, provider } = ctx;
 
     const hash = await escrow.write.createJob([PRICE], { account: client.account });
     const jobId = await jobIdFrom(hash, escrow);
 
     await token.write.approve([escrow.address, PRICE], { account: client.account });
-    await escrow.write.fundJob([jobId], { account: client.account });
+    await escrow.write.fundJob([jobId, provider.account.address], { account: client.account });
 
     return jobId;
   }

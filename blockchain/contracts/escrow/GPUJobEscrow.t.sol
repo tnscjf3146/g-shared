@@ -24,7 +24,7 @@ contract GPUJobEscrowTest is Test {
     bytes32 internal constant RESULT_HASH    = keccak256("result");
 
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 price);
-    event JobFunded(uint256 indexed jobId, uint256 price, uint64 deadline);
+    event JobFunded(uint256 indexed jobId, address indexed provider, uint256 price, uint64 deadline);
     event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
     event ResultSubmitted(uint256 indexed jobId, address indexed provider, bytes32 resultHash, uint64 deadline);
     event JobCompleted(uint256 indexed jobId, address indexed provider, uint256 payout);
@@ -48,7 +48,7 @@ contract GPUJobEscrowTest is Test {
         vm.prank(client);
         token.approve(address(escrow), PRICE);
         vm.prank(client);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
     }
 
     function _assigned() internal returns (uint256 jobId) {
@@ -150,7 +150,7 @@ contract GPUJobEscrowTest is Test {
 
         vm.prank(client);
         vm.expectRevert();
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
     }
 
     function test_fundJob_movesTokensIntoEscrow() public {
@@ -167,7 +167,7 @@ contract GPUJobEscrowTest is Test {
 
         vm.prank(stranger);
         vm.expectRevert(bytes("Escrow: not the client"));
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
     }
 
     function test_fundJob_rejectsWhenNotCreated() public {
@@ -177,7 +177,7 @@ contract GPUJobEscrowTest is Test {
         token.approve(address(escrow), PRICE);
         vm.prank(client);
         vm.expectRevert(bytes("Escrow: not CREATED"));
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
     }
 
     function test_fundJob_emitsJobFunded() public {
@@ -185,11 +185,46 @@ contract GPUJobEscrowTest is Test {
         vm.prank(client);
         token.approve(address(escrow), PRICE);
 
-        vm.expectEmit(true, false, false, true);
-        emit JobFunded(jobId, PRICE, uint64(block.timestamp) + ACCEPT_TIMEOUT);
+        vm.expectEmit(true, true, false, true);
+        emit JobFunded(jobId, provider, PRICE, uint64(block.timestamp) + ACCEPT_TIMEOUT);
 
         vm.prank(client);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
+    }
+
+    /// @notice 예치 시점에 지정한 공급자가 그대로 기록되는지 본다.
+    function test_fundJob_recordsDesignatedProvider() public {
+        uint256 jobId = _funded();
+
+        (, , , address p, , ) = escrow.jobs(jobId);
+        assertEq(p, provider);
+    }
+
+    /// @notice 영주소를 지정하면 수락할 주체가 없어 자금이 시한까지 묶인다. 미리 막는다.
+    function test_fundJob_rejectsZeroProvider() public {
+        uint256 jobId = _created();
+        vm.prank(client);
+        token.approve(address(escrow), PRICE);
+
+        vm.prank(client);
+        vm.expectRevert(GPUJobEscrow.InvalidProvider.selector);
+        escrow.fundJob(jobId, address(0));
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CREATED));
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    /// @notice 자기 자신을 지정하면 스스로 수락하고 승인해 대금을 되가져가는 경로가 된다.
+    function test_fundJob_rejectsClientAsProvider() public {
+        uint256 jobId = _created();
+        vm.prank(client);
+        token.approve(address(escrow), PRICE);
+
+        vm.prank(client);
+        vm.expectRevert(GPUJobEscrow.InvalidProvider.selector);
+        escrow.fundJob(jobId, client);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.CREATED));
     }
 
     // ── acceptJob ────────────────────────────────────────────────
@@ -222,12 +257,38 @@ contract GPUJobEscrowTest is Test {
         escrow.acceptJob(jobId);
     }
 
+    /// @notice 의뢰자는 애초에 자신을 지정할 수 없으므로 수락 자격도 없다.
     function test_acceptJob_rejectsClient() public {
         uint256 jobId = _funded();
 
         vm.prank(client);
-        vm.expectRevert(bytes("Escrow: client cannot accept"));
+        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
         escrow.acceptJob(jobId);
+    }
+
+    /// @notice 지정되지 않은 주소는 수락할 수 없다. 선점으로 작업을 가로챌 수 없다는 뜻이다.
+    function test_acceptJob_rejectsUndesignatedProvider() public {
+        uint256 jobId = _funded();
+
+        vm.prank(stranger);
+        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        escrow.acceptJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.FUNDED));
+    }
+
+    /// @notice 지정되지 않은 주소가 먼저 시도해도 지정된 공급자가 그대로 수락할 수 있다.
+    function test_acceptJob_designatedProviderStillSucceedsAfterAttempt() public {
+        uint256 jobId = _funded();
+
+        vm.prank(stranger);
+        vm.expectRevert(GPUJobEscrow.NotAssignedProvider.selector);
+        escrow.acceptJob(jobId);
+
+        vm.prank(provider);
+        escrow.acceptJob(jobId);
+
+        assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.ASSIGNED));
     }
 
     function test_acceptJob_emitsJobAccepted() public {

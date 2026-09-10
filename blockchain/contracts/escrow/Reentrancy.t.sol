@@ -45,14 +45,14 @@ contract ReentrancyTest is Test {
         vm.prank(victim);
         token.approve(address(escrow), PRICE);
         vm.prank(victim);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, address(atkProvider));
     }
 
     // ── 훅 토큰이 실제로 콜백을 부르는가 ─────────────────────────
 
     /// @dev 이 확인이 없으면 "공격이 시도조차 안 됐는데 통과" 를 구분할 수 없다.
     function test_hookTokenActuallyCallsBack() public {
-        atkClient.createAndFund(PRICE);
+        atkClient.createAndFund(PRICE, address(atkProvider));
         atkClient.attackCancel();
 
         assertGt(atkClient.callbackCount(), 0, "callback never fired");
@@ -65,7 +65,7 @@ contract ReentrancyTest is Test {
         _seedVictimJob();
         assertEq(token.balanceOf(address(escrow)), PRICE);
 
-        atkClient.createAndFund(PRICE);
+        atkClient.createAndFund(PRICE, address(atkProvider));
         assertEq(token.balanceOf(address(escrow)), PRICE * 2);
 
         atkClient.attackCancel();
@@ -85,7 +85,7 @@ contract ReentrancyTest is Test {
         vm.prank(honestC);
         token.approve(address(escrow), PRICE);
         vm.prank(honestC);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, address(atkProvider));
 
         atkProvider.accept(jobId);
         atkProvider.submit(RESULT_HASH);
@@ -113,7 +113,7 @@ contract ReentrancyTest is Test {
         vm.prank(honestC);
         token.approve(address(escrow), PRICE);
         vm.prank(honestC);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, address(atkProvider));
 
         atkProvider.accept(jobId);
         atkProvider.submit(RESULT_HASH);
@@ -137,7 +137,7 @@ contract ReentrancyTest is Test {
         vm.prank(honestC);
         token.approve(address(escrow), PRICE);
         vm.prank(honestC);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, address(atkProvider));
 
         atkProvider.accept(jobId);
         atkProvider.submit(RESULT_HASH);
@@ -157,7 +157,7 @@ contract ReentrancyTest is Test {
     function test_fundJob_crossFunctionReentrancyIsBlocked() public {
         uint256 before = token.balanceOf(address(atkClient));
 
-        uint256 jobId = atkClient.attackFundThenCancel(PRICE);
+        uint256 jobId = atkClient.attackFundThenCancel(PRICE, address(atkProvider));
 
         assertGt(atkClient.crossCallbackCount(), 0, "sender callback never fired");
         assertGt(atkClient.crossReenterCount(), 0, "no cross-function reentry attempted");

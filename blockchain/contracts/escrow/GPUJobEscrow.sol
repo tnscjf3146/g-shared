@@ -10,7 +10,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 ///
 /// @dev 상태 전이와 자금 이동
 /// ```
-///   CREATED  --fundJob-->      FUNDED     대금이 잠긴다
+///   CREATED  --fundJob-->      FUNDED     대금이 잠기고 공급자가 지정된다
 ///   FUNDED   --acceptJob-->    ASSIGNED
 ///   ASSIGNED --submitResult--> SUBMITTED  결과 해시가 봉인된다
 ///   SUBMITTED --approveResult--> COMPLETED  공급자 지급
@@ -35,8 +35,16 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 /// 분쟁·중재는 후속 작업입니다. 실제 가치가 걸리기 전에 반드시 추가해야 합니다.
 ///
 /// @dev 공급자 선택
-/// 현재는 의뢰자 본인을 제외한 누구나 선착순으로 수락합니다. 백엔드가 배정한
-/// 공급자만 수락하도록 하는 검증은 아직 구현되지 않았습니다.
+/// 의뢰자가 예치하면서 공급자를 직접 지정합니다. 지정된 주소만 수락할 수 있으므로
+/// 선착순 경쟁이 없고, 가스가 0 인 체인에서도 제3자가 작업을 선점할 수 없습니다.
+/// 화면에서는 Scheduler 가 추천한 후보 가운데 의뢰자가 고른 결과가 이 인자로 들어옵니다.
+/// 추천 밖의 주소를 넣는 것은 막지 않습니다. 자기 자금으로 자기 상대를 고르는 일이라
+/// 온체인이 관여할 근거가 없습니다.
+///
+/// @dev 이 방식으로 온체인이 보장하지 않는 것
+/// 대금은 여전히 의뢰자가 `createJob` 에 적어 넣습니다. 공급자가 자동으로 수락하는
+/// 운영 형태에서는 그 값을 걸러 줄 사람이 없으므로, 공급자 쪽 프로그램이 수락 전에
+/// `jobs(jobId).price` 를 읽어 자기 단가와 대조해야 합니다. 온체인 강제가 아닙니다.
 ///
 /// @dev 안전 장치
 /// 자금이 나가는 함수는 CEI 순서를 지켜 상태를 먼저 바꾸고 토큰을 나중에 보냅니다.
@@ -59,7 +67,7 @@ contract GPUJobEscrow is ReentrancyGuard {
         address  client;       // 의뢰자 지갑 주소
         JobState state;        // 현재 작업 상태
         uint64   deadline;     // 현재 상태의 제한 시간. 상태가 바뀔 때마다 새로 계산해 덮어쓴다
-        address  provider;     // 작업을 수락한 제공자 (수락 전에는 address(0))
+        address  provider;     // 의뢰자가 예치할 때 지정한 공급자 (예치 전에는 address(0))
         uint256  price;        // 작업 대금 (결제 토큰 최소 단위)
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
@@ -89,10 +97,11 @@ contract GPUJobEscrow is ReentrancyGuard {
     // 오류(Errors)
     // ─────────────────────────────────────────────────────────────
 
-    /// @notice 공급자 매칭 검증이 없는 버전을 SSAFY 체인에 배포하려 할 때 되돌립니다.
-    /// @dev 취소·환불·타임아웃은 구현을 마쳤습니다. 지금 가드가 남아 있는 이유는
-    ///      acceptJob 이 선착순이라, 가스가 0 인 SSAFY 체인에서 악성 주소가
-    ///      작업을 비용 없이 선점할 수 있기 때문입니다.
+    /// @notice 아직 배포 승인을 받지 않은 버전을 SSAFY 체인에 올리려 할 때 되돌립니다.
+    /// @dev 선착순 선점 문제는 의뢰자 지정으로 해소했습니다. 가드를 남겨 둔 이유는
+    ///      공급자 선택 방식이 팀 확인을 기다리는 중이고, 대금이 온체인에서
+    ///      강제되지 않아 공급자 쪽 대조가 전제로 남아 있기 때문입니다.
+    ///      두 가지가 정리되면 이 검사를 제거합니다.
     error SsafyDeploymentBlocked();
 
     /// @notice 제한 시간이 지난 뒤에 정상 경로 함수를 부를 때 되돌립니다.
@@ -103,14 +112,22 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @dev 정각에는 아직 정산할 수 없습니다. 정상 경로가 우선합니다.
     error DeadlineNotReached();
 
+    /// @notice 예치할 때 지정한 공급자 주소가 쓸 수 없는 값일 때 되돌립니다.
+    /// @dev 영주소는 수락할 주체가 없어 자금이 시한까지 묶이고, 의뢰자 자신은
+    ///      스스로 승인해 대금을 되가져가는 경로가 되므로 둘 다 막습니다.
+    error InvalidProvider();
+
+    /// @notice 지정되지 않은 주소가 수락하려 할 때 되돌립니다.
+    error NotAssignedProvider();
+
     // ─────────────────────────────────────────────────────────────
     // 이벤트(Events)
     // ─────────────────────────────────────────────────────────────
 
     /// @notice 새로운 작업이 생성되었을 때 발생
     event JobCreated(uint256 indexed jobId, address indexed client, uint256 price);
-    /// @notice 작업 대금이 에스크로에 예치되었을 때 발생
-    event JobFunded(uint256 indexed jobId, uint256 price, uint64 deadline);
+    /// @notice 작업 대금이 에스크로에 예치되었을 때 발생. 지정된 공급자를 함께 알린다
+    event JobFunded(uint256 indexed jobId, address indexed provider, uint256 price, uint64 deadline);
     /// @notice 제공자가 작업을 수락했을 때 발생
     event JobAccepted(uint256 indexed jobId, address indexed provider, uint64 deadline);
     /// @notice 제공자가 작업 결과를 제출했을 때 발생
@@ -123,7 +140,7 @@ contract GPUJobEscrow is ReentrancyGuard {
     event JobTimedOut(uint256 indexed jobId, JobState fromState);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
-    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 공급자 매칭 검증을 구현한 뒤 이 검사를 제거합니다.
+    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 배포 승인을 받은 뒤 이 검사를 제거합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
     /// @param acceptTimeout_ 예치 후 수락까지의 기한(초)
     /// @param executionTimeout_ 수락 후 제출까지의 기한(초)
@@ -170,21 +187,25 @@ contract GPUJobEscrow is ReentrancyGuard {
         emit JobCreated(jobId, msg.sender, price);
     }
 
-    /// @notice 작업 대금을 에스크로 컨트랙트에 예치합니다.
-    /// @dev 호출 전에 반드시 paymentToken.approve를 통해 컨트랙트가 대금을 출금할 수 있도록 허용해야 합니다.
+    /// @notice 작업 대금을 예치하면서 작업을 맡을 공급자를 지정합니다.
+    /// @dev 호출 전에 반드시 paymentToken.approve 로 컨트랙트가 대금을 출금할 수 있게 해야 합니다.
+    ///      지정은 이 시점에만 하고 이후에는 바꿀 수 없습니다. 상대를 바꾸려면 취소하고 다시 만듭니다.
     /// @param jobId 대금을 예치할 작업 ID
-    function fundJob(uint256 jobId) external nonReentrant {
+    /// @param provider 이 작업을 맡을 공급자 주소. 이 주소만 acceptJob 을 부를 수 있습니다
+    function fundJob(uint256 jobId, address provider) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.client == msg.sender, "Escrow: not the client");
         require(job.state == JobState.CREATED, "Escrow: not CREATED");
+        if (provider == address(0) || provider == msg.sender) revert InvalidProvider();
 
+        job.provider = provider;
         job.state = JobState.FUNDED;
         job.deadline = uint64(block.timestamp) + acceptTimeout;
 
         paymentToken.safeTransferFrom(msg.sender, address(this), job.price);
 
-        emit JobFunded(jobId, job.price, job.deadline);
+        emit JobFunded(jobId, provider, job.price, job.deadline);
     }
 
     /// @notice 아직 수락되지 않은 작업을 취소하고 예치금을 돌려받습니다.
@@ -226,17 +247,17 @@ contract GPUJobEscrow is ReentrancyGuard {
     // 공급자(Provider) 기능
     // ─────────────────────────────────────────────────────────────
 
-    /// @notice 예치된 일감을 수락하여 작업을 배정받습니다.
-    /// @dev 선착순으로 처리되며, 늦게 도착한 트랜잭션은 revert 처리됩니다 (정상 상황).
+    /// @notice 예치할 때 지정받은 작업을 수락합니다.
+    /// @dev 지정된 주소만 부를 수 있습니다. 경쟁이 없으므로 먼저 부르는 것이 이득이 되지 않습니다.
+    ///      수락하지 않고 두면 acceptTimeout 이 지난 뒤 의뢰자가 예치금을 되찾아 갑니다.
     /// @param jobId 수락할 작업 ID
     function acceptJob(uint256 jobId) external nonReentrant {
         Job storage job = jobs[jobId];
 
         require(job.state == JobState.FUNDED, "Escrow: not FUNDED");
-        require(job.client != msg.sender, "Escrow: client cannot accept");
+        if (msg.sender != job.provider) revert NotAssignedProvider();
         if (block.timestamp > job.deadline) revert DeadlineExpired();
 
-        job.provider = msg.sender;
         job.state = JobState.ASSIGNED;
         job.deadline = uint64(block.timestamp) + executionTimeout;
 

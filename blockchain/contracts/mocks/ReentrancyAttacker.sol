@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 interface IEscrowTarget {
     function createJob(uint256 price) external returns (uint256);
-    function fundJob(uint256 jobId) external;
+    function fundJob(uint256 jobId, address provider) external;
     function cancelJob(uint256 jobId) external;
     function acceptJob(uint256 jobId) external;
     function submitResult(uint256 jobId, bytes32 resultHash) external;
@@ -33,10 +33,11 @@ contract ReentrantClient {
         token  = IApprovable(token_);
     }
 
-    function createAndFund(uint256 price) external returns (uint256) {
+    /// @param provider 예치할 때 지정할 공급자. 취소 경로 공격에서는 수락되지 않으므로 값만 채운다
+    function createAndFund(uint256 price, address provider) external returns (uint256) {
         jobId = escrow.createJob(price);
         token.approve(address(escrow), price);
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
         return jobId;
     }
 
@@ -58,12 +59,12 @@ contract ReentrantClient {
     uint256 public crossReenterCount;
     bool    public crossReenterFailed;
 
-    function attackFundThenCancel(uint256 price) external returns (uint256) {
+    function attackFundThenCancel(uint256 price, address provider) external returns (uint256) {
         jobId = escrow.createJob(price);
         token.approve(address(escrow), price);
 
         crossArmed = true;
-        escrow.fundJob(jobId);
+        escrow.fundJob(jobId, provider);
         crossArmed = false;
 
         return jobId;
