@@ -20,6 +20,7 @@ from unittest.mock import patch
 from gshared_worker import environment_check
 from gshared_worker import auth_check
 from gshared_worker import runtime_check
+from gshared_worker import worker_socket
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
 from gshared_worker.errors import WorkerAlreadyRunningError, WorkerError
@@ -143,14 +144,36 @@ class AConfiguredMachineStartsTest(StartupTestCase):
         with patch.object(worker_main, "check_environment",
                           lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "ensure_runtime",
                           lambda settings, say: reached.append("runtime") or WorkerExitCode.OK),              patch.object(worker_main, "authenticate_worker",
-                          lambda settings, say: reached.append("auth") or WorkerExitCode.OK):
+                          lambda settings, say: reached.append("auth") or WorkerExitCode.OK),              patch.object(worker_main, "connect_to_backend",
+                          lambda settings, say: reached.append("socket") or WorkerExitCode.OK):
             code = self.start(run_worker=worker_main.start_the_machine)
 
         self.assertEqual(code, WorkerExitCode.OK)
-        self.assertEqual(reached, ["runtime", "auth"])
+        self.assertEqual(reached, ["runtime", "auth", "socket"])
 
     def test_authentication_is_the_stage_after_the_runtime(self):
         self.assertIs(worker_main.authenticate_worker, auth_check.authenticate_worker)
+
+    def test_the_backend_connection_is_the_stage_after_authentication(self):
+        self.assertIs(worker_main.connect_to_backend, worker_socket.connect_to_backend)
+
+    def test_a_machine_that_did_not_authenticate_is_never_offered_to_the_backend(self):
+        # The only credential that connection accepts is the machine's own
+        # token, and whether the service still accepts it is exactly what the
+        # stage before it establishes. Connecting anyway would offer the
+        # service a machine it has just refused.
+        self.enrol()
+        reached = []
+
+        with patch.object(worker_main, "check_environment",
+                          lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "ensure_runtime",
+                          lambda settings, say: WorkerExitCode.OK),              patch.object(worker_main, "authenticate_worker",
+                          lambda settings, say: WorkerExitCode.CREDENTIAL_MISMATCH),              patch.object(worker_main, "connect_to_backend",
+                          lambda settings, say: reached.append("socket") or 0):
+            code = self.start(run_worker=worker_main.start_the_machine)
+
+        self.assertEqual(code, WorkerExitCode.CREDENTIAL_MISMATCH)
+        self.assertEqual(reached, [])
 
     def test_nobody_is_asked_to_sign_in_on_a_machine_without_a_runtime(self):
         # Attaching a machine to an account before knowing it can do the work

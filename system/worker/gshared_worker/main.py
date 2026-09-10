@@ -5,10 +5,11 @@ the Worker, give the identity back. This file owns that order, what the supplier
 is told, and which exit code the launcher gets -- and deliberately owns nothing
 else.
 
-The stage that follows is ``run_worker``. Today it is three steps -- diagnosing
-the machine, bringing the GPU runtime up inside our own WSL distribution, and
-establishing whose account the machine belongs to. Connecting to the Backend
-arrives with its own branch and takes the same place.
+The stage that follows is ``run_worker``. Today it is four steps -- diagnosing
+the machine, bringing the GPU runtime up inside our own WSL distribution,
+establishing whose account the machine belongs to, and telling the Backend the
+machine is here. Waiting on that connection for work arrives with its own
+branch and takes the same place.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from .instance_guard import WorkerInstanceGuard, default_lock_directory
 from .auth_check import authenticate_worker
 from .logging_setup import LOGGER_NAME, stamp_the_build, start_debug_log
 from .runtime_check import ensure_runtime
+from .worker_socket import connect_to_backend
 
 _debug = logging.getLogger(LOGGER_NAME)
 
@@ -179,14 +181,21 @@ def _run_the_worker(
 
 
 def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int:
-    """Diagnose the machine, bring its GPU runtime up, then say whose it is.
+    """Diagnose the machine, bring its GPU runtime up, say whose it is, connect.
 
     Separate stages because they answer different questions and may do
     different things: the first only looks at a machine nobody may alter, the
     second installs into a distribution G-shared owns, the third asks a person
-    to sign in. Each one is reached only when the one before it passed -- there
-    is no point attaching a machine to an account before knowing it can do the
-    work, and no point installing into a machine that failed diagnosis.
+    to sign in, the fourth speaks to the Backend as the machine. Each one is
+    reached only when the one before it passed -- there is no point attaching a
+    machine to an account before knowing it can do the work, no point
+    installing into a machine that failed diagnosis, and no point offering a
+    machine to the Backend before the Backend has said it accepts it.
+
+    That last one is the reason the connection is a stage of its own rather
+    than the tail of the one before it: the only credential it may use is the
+    machine's own token, and whether that token is still accepted is exactly
+    what the stage before it establishes.
     """
     code = check_environment(settings, say)
     if code != WorkerExitCode.OK:
@@ -194,7 +203,10 @@ def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int
     code = ensure_runtime(settings, say)
     if code != WorkerExitCode.OK:
         return code
-    return authenticate_worker(settings, say)
+    code = authenticate_worker(settings, say)
+    if code != WorkerExitCode.OK:
+        return code
+    return connect_to_backend(settings, say)
 
 
 def _this_process_owns_the_console() -> bool:
