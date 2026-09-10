@@ -42,6 +42,12 @@ export function sampleText(line: string): string {
   return t
 }
 
+/** 파일 SHA-256 → "0x" + 64자(back datasets.data_hash CHAR(66)). POST /datasets 의 dataHash */
+export async function hashFile(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  return '0x' + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 /** 샘플 텍스트 목록 → 5값 */
 export function summarize(sampleTokens: number[], sizeBytes: number): DatasetMetadata {
   const n = sampleTokens.length

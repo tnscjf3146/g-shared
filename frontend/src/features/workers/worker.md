@@ -35,7 +35,13 @@ G-shared.exe 실행
 
 `Worker` 엔티티: `id, owner, workerToken(SHA-256), deviceName, osVersion, gpuModel, vramMb, driverVersion, benchmarkTokensPerSec, status(OFFLINE|ONLINE|RUNNING), currentJobId, lastHeartbeatAt, createdAt, updatedAt`. 하트비트 90초 미수신이면 스위퍼가 OFFLINE.
 
-### 1-2. 없는 것 → 백엔드에 요청 (웹 화면의 선행 조건)
+### 1-2. (해결됨 2026-09-10) `GET /api/workers/me` · `DELETE /api/workers/{workerId}` — develop 에 들어왔다
+
+- `GET /me` 원소에 **`walletLinked: boolean`** 추가. false 면 예치 때 넣을 공급자 주소가 없어 **작업 후보에 오르지 못한다** → 워커 카드 상태 칸에 "지갑 미연결 · 작업을 받을 수 없습니다" 표시.
+- `DELETE` 성공 204. 작업 중(`RUNNING` 또는 `currentJobId` 있음)이면 **409 `WORKER_BUSY`** → "작업을 먼저 취소해 주세요".
+- 아래는 요청 당시 스펙(참고용).
+
+### 1-2-old. 없는 것 → 백엔드에 요청 (웹 화면의 선행 조건)
 
 웹이 쓸 **조회가 하나도 없다.** PoC 백엔드(`poc/gpu-compute-poc/backend/.../WorkerController`)에는 `GET /api/workers`, `GET /api/workers/{id}` 가 있었지만 본 프로젝트로 이관되지 않았다.
 
@@ -139,6 +145,7 @@ src/
 | --- | --- | --- |
 | `WORKER_NOT_FOUND` 404 | 이미 해제된 워커입니다. 목록을 새로 고칩니다. | 카드 인라인 → 자동 재조회 |
 | `FORBIDDEN` 403 | 내 워커만 해제할 수 있습니다. | 카드 인라인 |
+| `WORKER_BUSY` 409 | 작업 중인 워커는 해제할 수 없습니다. 작업을 먼저 취소해 주세요. | 등록 해제 후 알림 |
 | 토큰 401 | (authFetch 가 처리) | — |
 | 조회 실패/네트워크 | 워커 목록을 불러오지 못했습니다. [다시 시도] | 페이지 |
 

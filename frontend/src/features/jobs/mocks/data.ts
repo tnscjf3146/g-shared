@@ -1,5 +1,5 @@
-import { catalogSchema, jobDetailSchema } from '../schema'
-import type { Catalog, JobDetail } from '../types'
+import { catalogSchema, datasetSchema, jobDetailSchema } from '../schema'
+import type { Catalog, Dataset, JobDetail } from '../types'
 import * as z from 'zod/mini'
 
 // 고정 fixture(schema 통과값만). 카탈로그는 백엔드 제안 스펙(job.md §1-2)의 모양
@@ -22,11 +22,23 @@ export const MOCK_CATALOG: Catalog = catalogSchema.parse({
   ],
 })
 
+/** 등록된 데이터셋(back DatasetResponse). 새로 등록한 것은 id 5000 부터 */
+export const MOCK_DATASETS: Dataset[] = z.array(datasetSchema).parse([
+  { datasetId: 101, sizeBytes: 61_217, sampleCount: 300, totalTokens: 10_522, effectiveTokens: 10_522, avgSeqLength: 35, maxSeqLength: 40, dataHash: '0x' + '3c'.repeat(32), storageUri: null, createdAt: '2026-09-09T09:00:00' },
+  { datasetId: 102, sizeBytes: 9_161, sampleCount: 100, totalTokens: 1_073, effectiveTokens: 1_073, avgSeqLength: 11, maxSeqLength: 14, dataHash: '0x' + '7e'.repeat(32), storageUri: null, createdAt: '2026-09-09T08:40:00' },
+])
+
 const base = {
   workloadId: 1,
   baseModelId: 11,
-  gpuId: 2,
+  datasetId: 101,
   trainingMode: 'AUTO',
+  epochs: 3,
+  batchSize: 16,
+  learningRate: 3e-5,
+  maxLength: 40,
+  assignedWorkerId: null,
+  failReason: null,
   predictedRuntimeSec: 4800,
   actualRuntimeSec: null,
   estimatedCost: 1200,
@@ -38,22 +50,20 @@ const base = {
   resultUrl: null,
   startedAt: null,
   finishedAt: null,
-  datasetName: 'instruct-300.jsonl',
-  datasetMetadata: { sizeBytes: 61_217, sampleCount: 300, totalTokens: 10_522, avgSeqLength: 35, maxSeqLength: 40 },
 }
 
 /** 상태별 1건씩. 새로 만든 작업은 id 1000 부터 */
 export const MOCK_JOBS: JobDetail[] = z.array(jobDetailSchema).parse([
-  { ...base, jobId: 7, status: 'RUNNING', progressPercent: 42, progressEpoch: 2, progressTotalEpochs: 3, createdAt: '2026-09-09T09:10:00', startedAt: '2026-09-09T09:20:00' },
-  { ...base, jobId: 6, status: 'ASSIGNED', createdAt: '2026-09-09T09:05:00' },
-  { ...base, jobId: 5, status: 'FUNDED', workloadId: 2, baseModelId: 21, gpuId: 3, predictedRuntimeSec: 9000, estimatedCost: 3600, createdAt: '2026-09-09T08:50:00', datasetName: 'inference-inputs-100.json', datasetMetadata: { sizeBytes: 9_161, sampleCount: 100, totalTokens: 1_073, avgSeqLength: 11, maxSeqLength: 14 } },
-  { ...base, jobId: 4, status: 'CREATED', trainingMode: 'CUSTOM', createdAt: '2026-09-09T08:30:00' },
+  { ...base, jobId: 7, status: 'RUNNING', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', progressPercent: 42, progressEpoch: 2, progressTotalEpochs: 3, createdAt: '2026-09-09T09:10:00', startedAt: '2026-09-09T09:20:00' },
+  { ...base, jobId: 6, status: 'ASSIGNED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', createdAt: '2026-09-09T09:05:00' },
+  { ...base, jobId: 5, status: 'FUNDED', workloadId: 2, baseModelId: 21, predictedRuntimeSec: 9000, estimatedCost: 3600, datasetId: 102, maxLength: 14, createdAt: '2026-09-09T08:50:00' },
+  { ...base, jobId: 4, status: 'CREATED', trainingMode: 'CUSTOM', epochs: 5, batchSize: 8, learningRate: 2e-5, maxLength: 40, createdAt: '2026-09-09T08:30:00' },
   {
-    ...base, jobId: 3, status: 'COMPLETED', actualRuntimeSec: 4410, actualCost: 1200, progressPercent: 100, progressEpoch: 3, progressTotalEpochs: 3,
+    ...base, jobId: 3, status: 'COMPLETED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', actualRuntimeSec: 4410, actualCost: 1200, progressPercent: 100, progressEpoch: 3, progressTotalEpochs: 3,
     resultHash: '0x9f2c1e7ab4d3c6f0e1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8', resultUrl: 'https://example.com/results/job-3.tar.gz',
     createdAt: '2026-09-08T15:00:00', startedAt: '2026-09-08T15:12:00', finishedAt: '2026-09-08T16:25:30',
   },
-  { ...base, jobId: 2, status: 'FAILED', progressPercent: 18, progressEpoch: 1, progressTotalEpochs: 3, actualRuntimeSec: 900, createdAt: '2026-09-08T11:00:00', startedAt: '2026-09-08T11:05:00', finishedAt: '2026-09-08T11:20:00' },
+  { ...base, jobId: 2, status: 'FAILED', assignedWorkerId: 'worker-22222222-2222-4222-8222-222222222222', failReason: 'CUDA_OOM: 학습 도중 GPU 메모리가 부족했습니다(batch 16 × max length 40).', progressPercent: 18, progressEpoch: 1, progressTotalEpochs: 3, actualRuntimeSec: 900, createdAt: '2026-09-08T11:00:00', startedAt: '2026-09-08T11:05:00', finishedAt: '2026-09-08T11:20:00' },
   { ...base, jobId: 1, status: 'CANCELLED', createdAt: '2026-09-07T10:00:00' },
 ])
 

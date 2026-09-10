@@ -30,7 +30,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
     <>
       <header className="flex flex-col gap-1">
         <h2 className="text-h2 font-bold tracking-heading text-dark">5. 업로드</h2>
-        <p className="text-[15px] text-text-muted">아래 내용으로 워크로드를 등록합니다. 지갑에 예상 비용만큼 GSC 가 있어야 업로드할 수 있습니다.</p>
+        <p className="text-[15px] text-text-muted">아래 내용으로 워크로드를 등록합니다. 지갑에 예상 비용만큼 GSC 가 있어야 등록할 수 있습니다. GPU 배정과 최종 견적은 서버가 다시 계산합니다.</p>
       </header>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-hairline bg-surface-1 p-5 text-[14px]">
@@ -114,7 +114,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
       </section>
 
       {state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}
-      {uploads && <p className="text-[13px] text-text-muted">업로드 대상: {uploads}</p>}
+      {uploads && <p className="text-[13px] text-text-muted">파일({uploads})은 저장 위치가 정해질 때까지 서버로 보내지 않습니다. 지금은 데이터셋 분석 정보와 파일 해시만 등록됩니다.</p>}
     </>
   )
 }

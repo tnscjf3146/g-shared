@@ -26,7 +26,9 @@ export const workerHandlers = [
   http.delete(`${URL}/:workerId`, async ({ request, params }) => {
     await delay()
     if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
-    if (!workers.some((w) => w.workerId === params.workerId)) return error(404, 'WORKER_NOT_FOUND', 'Worker를 찾을 수 없습니다.')
+    const target = workers.find((w) => w.workerId === params.workerId)
+    if (!target) return error(404, 'WORKER_NOT_FOUND', 'Worker를 찾을 수 없습니다.')
+    if (target.status === 'RUNNING' || target.currentJobId) return error(409, 'WORKER_BUSY', '작업 중인 Worker는 등록 해제할 수 없습니다. 작업을 먼저 취소해주세요.')
     workers = workers.filter((w) => w.workerId !== params.workerId)
     return new HttpResponse(null, { status: 204 })
   }),
