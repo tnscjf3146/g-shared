@@ -10,6 +10,7 @@
     "build": "hardhat build",
     "typecheck": "tsc --noEmit",
     "test": "hardhat test",
+    "abi": "hardhat build && node scripts/export-abi.mjs",
     "check": "npm run build && npm run typecheck && npm test",
     "deploy:local": "hardhat ignition deploy ignition/modules/GCoin.ts",
     "preflight:ssafy": "hardhat run scripts/preflight-ssafy.ts",
