@@ -193,6 +193,7 @@ def train_runtime_model(
     *,
     models_directory: Path,
     training_data_type: str = TRAINING_DATA_TYPE,
+    model_version: str = MODEL_VERSION,
 ) -> TrainingReport:
     """학습하고, 저장하고, 무엇으로 학습했는지 함께 남긴다.
 
@@ -249,7 +250,10 @@ def train_runtime_model(
     model.save_model(model_path)
 
     metadata = {
-        "modelVersion": MODEL_VERSION,
+        # 기본값은 현역 버전이다. 재학습이 후보를 만들 때만 다른 이름을 준다 --
+        # 후보가 현역과 같은 이름을 달고 있으면 어느 쪽을 읽었는지 metadata만
+        # 보고는 알 수 없다.
+        "modelVersion": model_version,
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
         "featureNames": list(RUNTIME_FEATURE_NAMES),
         "categoricalFeatureNames": list(CATEGORICAL_FEATURE_NAMES),
