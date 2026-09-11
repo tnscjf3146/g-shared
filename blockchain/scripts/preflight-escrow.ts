@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { artifacts, network } from "hardhat";
-import { encodeDeployData, formatEther, getContract } from "viem";
-import { ESCROW_PARAMETER_PATH, readChainConfig, readEscrowParameters, requireDeploymentKey } from "./ssafy-config.js";
+import { encodeDeployData, formatEther, getContract, parseUnits } from "viem";
+import { ESCROW_PARAMETER_PATH, expectedEscrowChainId, readChainConfig, readEscrowParameters, requireDeploymentKey } from "./ssafy-config.js";
 
 /**
  * 에스크로 배포 전 점검. 트랜잭션을 보내지 않는다.
@@ -10,6 +10,12 @@ import { ESCROW_PARAMETER_PATH, readChainConfig, readEscrowParameters, requireDe
  * 확인할 수 있도록 paymentToken · acceptTimeout · executionTimeout 을 반드시 출력한다.
  */
 const { chainId } = readChainConfig();
+const expectedChainId = expectedEscrowChainId();
+assert.equal(
+  chainId,
+  expectedChainId,
+  `SSAFY_CHAIN_ID is ${chainId}, but the escrow deployment target is ${expectedChainId}`,
+);
 requireDeploymentKey();
 assert.ok(
   !process.env.ESCROW_CONTRACT_ADDRESS?.trim(),
@@ -19,7 +25,7 @@ const { paymentToken, acceptTimeout, executionTimeout } = await readEscrowParame
 const connection = await network.create("ssafy");
 try {
   const client = await connection.viem.getPublicClient();
-  assert.equal(await client.getChainId(), chainId, "RPC chain ID does not match SSAFY_CHAIN_ID");
+  assert.equal(await client.getChainId(), expectedChainId, `RPC chain ID does not match the escrow deployment target (${expectedChainId})`);
   const block = await client.getBlock();
   assert.equal(block.baseFeePerGas ?? 0n, 0n, "Non-zero base fee: check the zero-gas-price policy");
   const [wallet] = await connection.viem.getWalletClients();
@@ -31,9 +37,14 @@ try {
   const tokenCode = await client.getCode({ address: paymentToken });
   assert.ok(tokenCode && tokenCode !== "0x", `No contract code at paymentToken ${paymentToken} on chain ${chainId}`);
   const token = getContract({ address: paymentToken, abi: tokenArtifact.abi, client });
-  const [symbol, decimals] = await Promise.all([token.read.symbol(), token.read.decimals()]);
+  const [name, symbol, decimals, totalSupply] = await Promise.all([
+    token.read.name(), token.read.symbol(), token.read.decimals(), token.read.totalSupply(),
+  ]);
+  assert.equal(name, "G Coin", "paymentToken name must be G Coin");
   assert.equal(symbol, "GSC", "paymentToken symbol must be GSC");
   assert.equal(decimals, 18, "paymentToken decimals must be 18");
+  // GCoin 은 외부 발행도 소각도 없는 고정 공급이라, 총발행량이 다르면 다른 토큰이다.
+  assert.equal(totalSupply, parseUnits("1000000", 18), "paymentToken total supply must be 1,000,000 GSC");
 
   const escrowArtifact = await artifacts.readArtifact("GPUJobEscrow");
   const gas = await client.estimateGas({
@@ -49,9 +60,11 @@ try {
   const balance = await client.getBalance({ address: wallet.account.address });
   console.log(JSON.stringify({
     chainId,
+    expectedChainId,
     deployer: wallet.account.address,
     parameterFile: ESCROW_PARAMETER_PATH,
     paymentToken,
+    paymentTokenName: name,
     paymentTokenSymbol: symbol,
     acceptTimeout: acceptTimeout.toString(),
     executionTimeout: executionTimeout.toString(),

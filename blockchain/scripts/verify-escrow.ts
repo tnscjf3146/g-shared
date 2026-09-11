@@ -2,7 +2,27 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { artifacts, network } from "hardhat";
 import { getContract } from "viem";
-import { ESCROW_PARAMETER_PATH, publicAddress, readChainConfig, readEscrowParameters } from "./ssafy-config.js";
+import { ESCROW_PARAMETER_PATH, expectedEscrowChainId, publicAddress, readChainConfig, readEscrowParameters } from "./ssafy-config.js";
+
+/** 컴파일 산출물이 알려 주는 immutable 치환 지점. astId 별로 오프셋과 길이를 담는다. */
+type ImmutableReferences = Record<string, { start: number; length: number }[]>;
+
+/**
+ * immutable 값이 박히는 구간을 0 으로 덮어 런타임 바이트코드를 비교 가능한 형태로 만든다.
+ *
+ * 생성자 인자 셋이 런타임 코드에 직접 새겨지므로 배포된 코드와 빌드 산출물은 그대로는
+ * 일치하지 않는다. 값이 들어가는 자리만 같은 방식으로 지우면 나머지 전 구간을 대조할 수 있다.
+ */
+function maskImmutables(bytecode: string, references: ImmutableReferences): string {
+  const bytes = Buffer.from(bytecode.replace(/^0x/, ""), "hex");
+  for (const slots of Object.values(references)) {
+    for (const { start, length } of slots) {
+      assert.ok(start + length <= bytes.length, "immutable reference is out of range");
+      bytes.fill(0, start, start + length);
+    }
+  }
+  return bytes.toString("hex");
+}
 
 /**
  * 배포 뒤 검증. 트랜잭션을 보내지 않는다.
@@ -11,6 +31,12 @@ import { ESCROW_PARAMETER_PATH, publicAddress, readChainConfig, readEscrowParame
  * 여기서 어긋나면 고치는 길은 재배포뿐이다.
  */
 const { chainId } = readChainConfig();
+const expectedChainId = expectedEscrowChainId();
+assert.equal(
+  chainId,
+  expectedChainId,
+  `SSAFY_CHAIN_ID is ${chainId}, but the escrow deployment target is ${expectedChainId}`,
+);
 const { paymentToken, acceptTimeout, executionTimeout } = await readEscrowParameters();
 let rawAddress = process.env.ESCROW_CONTRACT_ADDRESS?.trim();
 if (!rawAddress) {
@@ -22,13 +48,19 @@ const address = publicAddress(rawAddress ?? "", "ESCROW_CONTRACT_ADDRESS / Ignit
 const connection = await network.create("ssafy");
 try {
   const client = await connection.viem.getPublicClient();
-  assert.equal(await client.getChainId(), chainId, "RPC chain ID mismatch");
+  assert.equal(await client.getChainId(), expectedChainId, `RPC chain ID does not match the escrow deployment target (${expectedChainId})`);
   const artifact = await artifacts.readArtifact("GPUJobEscrow");
   const code = await client.getCode({ address });
-  // immutable 셋이 런타임 바이트코드에 박히므로 전체 문자열 비교는 할 수 없다.
-  // 길이가 같은지만 보고, 값 자체는 아래에서 읽어 대조한다.
   assert.ok(code && code !== "0x", `No contract code at ${address} on chain ${chainId}`);
-  assert.equal(code.length, artifact.deployedBytecode.length, "Deployed bytecode length does not match this GPUJobEscrow build");
+  // immutable 셋이 런타임 바이트코드에 박히므로 그대로는 일치하지 않는다. 값이 들어가는
+  // 자리만 양쪽에서 지우고 나머지 전 구간을 대조해, 길이만 같은 다른 코드를 걸러낸다.
+  const references = (artifact as unknown as { immutableReferences?: ImmutableReferences }).immutableReferences ?? {};
+  assert.ok(Object.keys(references).length > 0, "Artifact has no immutableReferences; rebuild with `npm run build`");
+  assert.equal(
+    maskImmutables(code, references),
+    maskImmutables(artifact.deployedBytecode, references),
+    "Deployed runtime bytecode does not match this GPUJobEscrow build",
+  );
 
   const escrow = getContract({ address, abi: artifact.abi, client });
   const [onchainToken, onchainAccept, onchainExecution, nextJobId] = await Promise.all([
@@ -47,6 +79,7 @@ try {
     address,
     contractName: "GPUJobEscrow",
     parameterFile: ESCROW_PARAMETER_PATH,
+    runtimeBytecodeVerified: true,
     paymentToken,
     acceptTimeout: acceptTimeout.toString(),
     executionTimeout: executionTimeout.toString(),

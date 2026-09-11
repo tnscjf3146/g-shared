@@ -1,6 +1,8 @@
 // 가스 가격 0 인 로컬 HTTP RPC 에 실제 CLI 배포 경로를 그대로 태워 본다.
 // GCoin 배포 → 에스크로 preflight → Ignition 배포 → verify 까지 한 바퀴를 돌리고,
-// 잘못된 Chain ID · 코드 없는 결제 토큰 · 재배포 · 잘못된 주소 검증까지 확인한다.
+// 잘못된 Chain ID · 코드 없는 결제 토큰 · 재배포 · 잘못된 주소 · 시한 불일치 ·
+// 런타임 바이트코드 불일치까지 거부되는지 확인한다.
+// 배포 대상 체인은 31221 로 못박혀 있으므로, 이 예행만 ESCROW_EXPECT_CHAIN_ID 로 31337 을 쓴다.
 // 실제 SSAFY RPC 는 쓰지 않는다. 개인키는 하드햇 기본 계정 것만 쓴다.
 import assert from "node:assert/strict";
 import { network } from "hardhat";
@@ -20,14 +22,14 @@ const ACCEPT_TIMEOUT = 600;
 const EXECUTION_TIMEOUT = 86400;
 const params = resolve(root, "ignition/parameters/ssafy-escrow.json");
 const originalParams = await readFile(params);
-const writeParams = (paymentToken) => writeFile(params, JSON.stringify({
-  GPUJobEscrowModule: { paymentToken, acceptTimeout: ACCEPT_TIMEOUT, executionTimeout: EXECUTION_TIMEOUT },
+const writeParams = (paymentToken, accept = ACCEPT_TIMEOUT, execution = EXECUTION_TIMEOUT) => writeFile(params, JSON.stringify({
+  GPUJobEscrowModule: { paymentToken, acceptTimeout: accept, executionTimeout: execution },
 }, null, 2) + "\n");
 const server = await network.createServer({override:{allowBlocksWithSameTimestamp:true,initialBaseFeePerGas:0n,accounts:{accountsBalance:"0"},mining:{interval:200}}},"127.0.0.1",0);
 const {port} = await server.listen();
 const account = mnemonicToAccount("test test test test test test test test test test test junk");
 const key = "0x" + Buffer.from(account.getHdKey().privateKey).toString("hex");
-const env = {...process.env,SSAFY_RPC_URL:"http://127.0.0.1:"+port,SSAFY_CHAIN_ID:"31337",SSAFY_PRIVATE_KEY:key,GSC_INITIAL_HOLDER:account.address,GSC_CONTRACT_ADDRESS:"",ESCROW_CONTRACT_ADDRESS:""};
+const env = {...process.env,SSAFY_RPC_URL:"http://127.0.0.1:"+port,SSAFY_CHAIN_ID:"31337",SSAFY_PRIVATE_KEY:key,GSC_INITIAL_HOLDER:account.address,GSC_CONTRACT_ADDRESS:"",ESCROW_CONTRACT_ADDRESS:"",ESCROW_EXPECT_CHAIN_ID:"31337"};
 async function run(args, extra={}, success=true) {
   const result = await new Promise((resolveResult,reject)=>{
     const child=spawn(process.execPath,["node_modules/hardhat/dist/src/cli.js",...args],{cwd:root,env:{...env,...extra},windowsHide:true});
@@ -57,6 +59,7 @@ try {
  await writeParams(token);
 
  await run(["run","scripts/preflight-escrow.ts"],{SSAFY_CHAIN_ID:"31338"},false);
+ await run(["run","scripts/preflight-escrow.ts"],{ESCROW_EXPECT_CHAIN_ID:""},false);   // 기대 체인 31221 고정
  await run(["run","scripts/preflight-escrow.ts"],{ESCROW_CONTRACT_ADDRESS:account.address},false);
  await writeParams(account.address);                       // 코드가 없는 EOA 주소
  await run(["run","scripts/preflight-escrow.ts"],{},false);
@@ -82,8 +85,20 @@ try {
 
  await run(deploy);                                        // 기록이 있으면 다시 배포하지 않는다
  assert.equal(await nonce(),afterDeploy);
+
+ // 배포된 값과 파라미터 파일이 어긋나면 검증이 잡아내야 한다. 시한은 immutable 이라
+ // 여기서 놓치면 재배포 말고는 고칠 방법이 없다.
+ await writeParams(token, ACCEPT_TIMEOUT + 1);
+ await run(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""},false);
+ await writeParams(token, ACCEPT_TIMEOUT, EXECUTION_TIMEOUT + 1);
+ await run(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""},false);
+ await writeParams(token);
+
+ // 코드는 있지만 다른 컨트랙트인 주소. 런타임 바이트코드 대조로 걸러야 한다.
+ await run(["run","scripts/verify-escrow.ts"],{ESCROW_CONTRACT_ADDRESS:token,SSAFY_PRIVATE_KEY:""},false);
  await run(["run","scripts/verify-escrow.ts"],{ESCROW_CONTRACT_ADDRESS:account.address,SSAFY_PRIVATE_KEY:""},false);
- console.log("PASS: zero-native-balance deployment, three printed parameters, read-only verification, wrong chain/token/address rejection, idempotent redeploy.");
+ await run(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""});   // 원복 뒤 다시 통과
+ console.log("PASS: zero-native-balance deployment, pinned target chain, three printed parameters, read-only verification, runtime bytecode match, wrong chain/token/address/timeout rejection, idempotent redeploy.");
 } finally {
  await server.close();
  for(const p of paths) {

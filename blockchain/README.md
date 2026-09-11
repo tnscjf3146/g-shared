@@ -248,7 +248,16 @@ GCoin 이 먼저 배포되어 있어야 한다. 에스크로는 결제 토큰 �
 npm run test:deployment:escrow
 ```
 
-가스 가격 0인 로컬 HTTP RPC에 GCoin 을 올리고 에스크로 배포 경로를 그대로 한 바퀴 돌린다. 사전 점검이 세 파라미터를 출력하는지, 잘못된 Chain ID·코드 없는 결제 토큰·잘못된 컨트랙트 주소를 막는지, 재실행 시 중복 배포를 하지 않는지 검사한다. 실제 SSAFY RPC 는 사용하지 않는다. 생성한 chain-31337 기록을 정리하며, 해당 기록이 이미 있으면 덮어쓰지 않고 중단한다.
+가스 가격 0인 로컬 HTTP RPC에 GCoin 을 올리고 에스크로 배포 경로를 그대로 한 바퀴 돌린다. 사전 점검이 세 파라미터를 출력하는지, 배포된 런타임 바이트코드가 현재 빌드와 일치하는지, 그리고 다음을 모두 거부하는지 검사한다.
+
+- 환경변수와 어긋나는 Chain ID
+- 배포 대상 체인이 아닌 경우 (`ESCROW_EXPECT_CHAIN_ID` 없이 31337에서 실행)
+- 코드가 없는 결제 토큰 주소
+- 파라미터 파일과 다른 `acceptTimeout` 또는 `executionTimeout`
+- 코드는 있으나 다른 컨트랙트인 주소
+- 재실행 시 중복 배포
+
+실제 SSAFY RPC 는 사용하지 않는다. 생성한 chain-31337 기록을 정리하며, 해당 기록이 이미 있으면 덮어쓰지 않고 중단한다. 배포 대상 Chain ID 는 31221 로 코드에 고정되어 있고, 이 예행만 `ESCROW_EXPECT_CHAIN_ID=31337` 로 우회한다.
 
 ### 3. 배포 전 점검
 
@@ -257,7 +266,11 @@ npm run check
 npm run preflight:escrow:ssafy
 ```
 
-`SSAFY_RPC_URL` · `SSAFY_CHAIN_ID` · `SSAFY_PRIVATE_KEY` 셋이 필요하고 `ESCROW_CONTRACT_ADDRESS` 는 비워 둔다. 사전 점검은 RPC Chain ID, 결제 토큰 주소에 코드가 있고 심볼이 `GSC`·decimals 가 18 인지, 최신 블록의 base fee, 가스 가격 0으로 배포 가스 추정이 되는지 확인한다. 트랜잭션은 보내지 않는다.
+`SSAFY_RPC_URL` · `SSAFY_CHAIN_ID` · `SSAFY_PRIVATE_KEY` 셋이 필요하고 `ESCROW_CONTRACT_ADDRESS` 는 비워 둔다. 사전 점검은 다음을 확인하며 트랜잭션은 보내지 않는다.
+
+- `SSAFY_CHAIN_ID` 와 RPC 의 Chain ID 가 **모두 31221 인지**. 배포 대상 Chain ID 는 코드에 고정되어 있어, 두 값이 함께 잘못 설정되어도 다른 체인에 배포되지 않는다
+- 결제 토큰 주소에 코드가 있고 이름이 `G Coin`, 심볼이 `GSC`, decimals 가 18, 총발행량이 100만 GSC 인지
+- 최신 블록의 base fee 와 가스 가격 0으로 배포 가스 추정이 되는지
 
 **출력에 실린 `paymentToken` · `acceptTimeout` · `executionTimeout` 세 값을 눈으로 확인한 뒤에 배포한다.** 시한 둘은 immutable 이라 잘못 배포하면 재배포 말고는 고칠 방법이 없다.
 
@@ -277,6 +290,8 @@ npm run verify:escrow:ssafy
 
 개인키 없이 실행할 수 있고 트랜잭션을 보내지 않는다. 주소는 Ignition 기록에서 읽으며, `ESCROW_CONTRACT_ADDRESS` 가 있으면 그 주소를 검사한다.
 
+- Chain ID 가 배포 대상(31221)인지
+- 배포된 런타임 바이트코드가 현재 빌드와 일치하는지. 생성자 인자 셋이 런타임 코드에 새겨지므로, 컴파일 산출물의 `immutableReferences` 가 알려 주는 구간만 양쪽에서 지우고 나머지 전 구간을 대조한다
 - 온체인 `paymentToken()` · `acceptTimeout()` · `executionTimeout()` 이 파라미터 파일과 일치
 - `nextJobId()` 가 1
 
