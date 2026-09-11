@@ -90,9 +90,13 @@ class JobEstimateIntegrationTest {
         workloadId = baseModel.getWorkload().getId();
 
         // 후보가 되려면 ONLINE 이어야 한다 — 등록 직후는 OFFLINE 이라 배정 대상이 아니다.
+        // 후보가 되려면 에스크로 주소 둘(operator·provider 지갑)도 있어야 한다 (규격 §28)
+        user.linkWallet("0x" + "a".repeat(40));
         RegisterWorkerResponse registered = workerService.register(user.getId(),
-                new RegisterWorkerRequest("공급자PC", "Windows 11", "RTX 4090",
-                        24576, "561.09", 1800.0));
+                new RegisterWorkerRequest("0x" + "b".repeat(40), "0.1.0",
+                        new RegisterWorkerRequest.SystemInfo("Windows 11", true),
+                        new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
+                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, "transformer-bench-v1")));
         workerId = registered.workerId();
         Worker worker = workerRepository.findById(workerId).orElseThrow();
         worker.goOnline(LocalDateTime.now());

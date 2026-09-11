@@ -10,15 +10,22 @@ import java.time.LocalDateTime;
  *
  * <p>워커 토큰은 절대 싣지 않는다 — 등록 시 1회만 노출하는 값이고, 조회로 다시 꺼낼 수
  * 있으면 1회 노출이라는 전제가 무너진다.
+ *
+ * <p>deviceName·driverVersion 은 규격 v1 등록에서 채우지 않는 옛 필드다. 화면이 아직 읽고 있어
+ * 모양은 유지하되, 새 등록 행에서는 빈 문자열/null 로 나간다.
  */
 public record WorkerResponse(
         String workerId,
         String deviceName,
         String osVersion,
+        Boolean wslAvailable,
+        String clientVersion,
         String gpuModel,
         Integer vramMb,
         String driverVersion,
         Double benchmarkTokensPerSec,
+        String benchmarkVersion,
+        String operatorAddress,
         WorkerStatus status,
         String currentJobId,
         LocalDateTime lastHeartbeatAt,
@@ -28,13 +35,17 @@ public record WorkerResponse(
     public static WorkerResponse from(Worker worker) {
         return new WorkerResponse(
                 worker.getId(),
-                // 등록 때 필수로 받는 값이지만 옛 행에 빈 값이 있을 수 있어 화면이 깨지지 않게 막는다.
+                // 옛 규격 필드 — 화면이 문자열을 기대하므로 빈 값으로 막는다.
                 worker.getDeviceName() == null ? "" : worker.getDeviceName(),
                 worker.getOsVersion(),
+                worker.getWslAvailable(),
+                worker.getClientVersion(),
                 worker.getGpuModel() == null ? "" : worker.getGpuModel(),
                 worker.getVramMb(),
                 worker.getDriverVersion(),
                 worker.getBenchmarkTokensPerSec(),
+                worker.getBenchmarkVersion(),
+                worker.getOperatorAddress(),
                 worker.getStatus(),
                 // 화면은 식별자를 문자열로 다룬다. 숫자로 내보내면 자릿수가 큰 id 에서 정밀도가 깎인다.
                 worker.getCurrentJobId() == null ? null : String.valueOf(worker.getCurrentJobId()),

@@ -1,15 +1,16 @@
 package com.gshared.back.worker.service;
 
 import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.global.wallet.WalletAddressNormalizer;
 import com.gshared.back.user.domain.User;
 import com.gshared.back.user.exception.UserErrorCode;
 import com.gshared.back.user.repository.UserRepository;
 import com.gshared.back.worker.domain.Worker;
+import com.gshared.back.worker.domain.WorkerStatus;
 import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
-import com.gshared.back.worker.dto.request.UpdateWorkerGpuRequest;
+import com.gshared.back.worker.dto.request.UpdateBenchmarkRequest;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
 import com.gshared.back.worker.dto.response.WorkerResponse;
-import com.gshared.back.worker.domain.WorkerStatus;
 import com.gshared.back.worker.exception.WorkerErrorCode;
 import com.gshared.back.worker.repository.WorkerRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,11 +32,13 @@ public class WorkerService {
 
     private final WorkerRepository workerRepository;
     private final UserRepository userRepository;
+    private final WalletAddressNormalizer addressNormalizer;
 
     /**
-     * 로그인한 공급자가 자기 PC를 등록한다.
+     * 로그인한 공급자가 자기 PC를 등록한다 (규격 §3).
      * - workerId  : 공개 식별자 (WebSocket 메시지에 실림)
-     * - workerToken: 비밀 토큰 (WebSocket 연결 인증용)
+     * - workerToken: 비밀 토큰 (WebSocket·워커 전용 REST 인증용)
+     * User 1 : N Worker — 한 사람이 PC 여러 대를 붙일 수 있다.
      */
     @Transactional
     public RegisterWorkerResponse register(Long ownerId, RegisterWorkerRequest request) {
@@ -44,51 +47,71 @@ public class WorkerService {
 
         String workerId = "worker-" + UUID.randomUUID();
         String rawToken = UUID.randomUUID().toString();
+        String operatorAddress = normalizeOperator(request.operatorAddress());
 
         // DB 에는 해시만 저장 (DB 유출 시 토큰으로 위장 접속 못 하게). 원문은 이 응답에서 딱 한 번 노출.
         Worker worker = Worker.register(
-                workerId, owner, sha256(rawToken),
-                request.deviceName(), request.osVersion(), request.gpuModel(),
-                request.vramMb(), request.driverVersion(), request.benchmarkTokensPerSec()
+                workerId, owner, sha256(rawToken), operatorAddress, request.clientVersion(),
+                request.system().os(), request.system().wslAvailable(),
+                request.gpu().gpuModel(), request.gpu().vramMb(),
+                request.benchmark().benchmarkTokensPerSec(), request.benchmark().benchmarkVersion()
         );
         workerRepository.save(worker);
 
-        return new RegisterWorkerResponse(workerId, rawToken);
+        return new RegisterWorkerResponse(workerId, rawToken, operatorAddress);
     }
 
     /**
      * WebSocket 핸드셰이크: 워커 토큰(원문)으로 workerId 조회. 유효하지 않으면 401.
-     *
-     * <p>아래 {@link #findOwnWorker}(HTTP 창구용)와 조회 방식은 같지만 실패 코드가 다르다.
-     * 핸드셰이크에서는 연결을 거절하는 것이 전부라 401 이 맞고,
-     * HTTP 창구에서는 워커가 그 코드를 보고 재등록 여부를 정하므로 404 여야 한다.
-     * 그래서 하나로 합치지 않고 둘로 둔다.
      */
     public String resolveWorkerIdByToken(String rawToken) {
-        return workerRepository.findByWorkerToken(sha256(rawToken))
-                .orElseThrow(() -> new BusinessException(WorkerErrorCode.INVALID_WORKER_TOKEN))
-                .getId();
+        return authenticateByToken(rawToken).getId();
     }
 
     /**
-     * 워커 재접속 확인: 저장해둔 워커 토큰이 아직 유효한지 묻는 요청. 아무것도 바꾸지 않는다.
-     * 워커는 켜질 때마다 이걸 물어보고, 답에 따라 그대로 접속할지 재등록할지 정한다.
-     *
-     * @return 서버가 인정한 workerId (워커 클라이언트가 자기 값과 다시 대조한다)
+     * 워커 전용 REST(execution-context·result-upload) 인증: 헤더의 워커 토큰이 가리키는 워커.
+     * 토큰이 없거나 어떤 워커도 가리키지 않으면 401 — 규격 §4 대로 워커는 이 코드에 재시도하지 않는다.
      */
-    public String authenticate(String rawToken, String workerId) {
+    public Worker authenticateByToken(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new BusinessException(WorkerErrorCode.INVALID_WORKER_TOKEN);
+        }
+        return workerRepository.findByWorkerToken(sha256(rawToken))
+                .orElseThrow(() -> new BusinessException(WorkerErrorCode.INVALID_WORKER_TOKEN));
+    }
+
+    /**
+     * 워커 재접속 확인 (규격 §4): 저장해둔 workerId·workerToken 이 아직 유효한지. 아무것도 바꾸지 않는다.
+     * 토큰이 무효면 401, 토큰은 맞는데 다른 워커를 주장하면 403.
+     *
+     * @return 서버가 인정한 workerId
+     */
+    public String authenticate(String workerId, String rawToken) {
         return findOwnWorker(rawToken, workerId).getId();
     }
 
     /**
-     * GPU 정보 갱신: 그래픽카드 교체·드라이버 갱신·벤치마크 재측정 결과를 반영한다.
+     * operator 주소 변경 (규격 §5). 주소만 바꿔 저장한다 — 온체인 setOperator 승인은 provider 몫이고,
+     * 승인 여부 확인은 System 이 acceptJob 전에 isOperator 로 한다.
+     *
+     * @return 저장된(정규화된) 주소
+     */
+    @Transactional
+    public String updateOperator(String rawToken, String workerId, String operatorAddress) {
+        String normalized = normalizeOperator(operatorAddress);
+        findOwnWorker(rawToken, workerId).updateOperator(normalized);
+        return normalized;
+    }
+
+    /**
+     * GPU 벤치마크 갱신 (규격 §6): 그래픽카드 교체·벤치마크 재측정 결과를 반영한다.
      * 하드웨어 정보만 바꾸며 ONLINE/RUNNING 같은 실시간 상태는 건드리지 않는다.
      */
     @Transactional
-    public void updateGpu(String rawToken, String workerId, UpdateWorkerGpuRequest request) {
-        findOwnWorker(rawToken, workerId).updateGpu(
+    public void updateBenchmark(String rawToken, String workerId, UpdateBenchmarkRequest request) {
+        findOwnWorker(rawToken, workerId).updateBenchmark(
                 request.gpuModel(), request.vramMb(),
-                request.driverVersion(), request.benchmarkTokensPerSec());
+                request.benchmarkTokensPerSec(), request.benchmarkVersion());
     }
 
     /**
@@ -107,8 +130,7 @@ public class WorkerService {
      * <p>일을 맡고 있는 워커는 지우지 않는다. 지워 버리면 그 Job 은 결과를 받을 상대가
      * 사라진 채 RUNNING 에 남고, 되돌릴 방법이 없다. 취소를 먼저 하도록 409 로 막는다.
      *
-     * <p>지운 뒤 워커 프로그램은 다음 인증에서 WORKER_NOT_FOUND 를 받고 재등록으로 넘어간다 —
-     * 그쪽 흐름이 이미 그렇게 되어 있어, 여기서 따로 알릴 필요가 없다.
+     * <p>지운 뒤 워커 프로그램은 다음 인증에서 401 을 받고 멈춘다 — 사람이 다시 로그인해 등록한다.
      */
     @Transactional
     public void delete(Long ownerId, String workerId) {
@@ -122,24 +144,18 @@ public class WorkerService {
 
     /**
      * 워커 토큰이 가리키는 워커를 찾고, 요청이 주장하는 workerId 와 같은 워커인지 확인한다.
-     *
-     * <p>토큰에 해당하는 워커가 없거나 다른 워커의 토큰이면 WORKER_NOT_FOUND(404) 다 —
-     * 워커 클라이언트는 이 코드를 "내 등록이 사라졌다"로 읽고 재등록으로 넘어간다.
-     * 401 을 주면 재등록 없이 그냥 멈춰버리므로, 여기서는 404 여야 한다.
-     * (남의 워커를 지목한 경우도 존재 여부를 흘리지 않도록 같은 404 로 묶는다)
-     *
-     * <p>반면 헤더 자체가 없으면 인증 시도조차 없었던 것이므로 401 이다.
+     * 토큰 무효 → 401, 다른 워커 주장 → 403 (규격 §4).
      */
     private Worker findOwnWorker(String rawToken, String workerId) {
-        if (rawToken == null || rawToken.isBlank()) {
-            throw new BusinessException(WorkerErrorCode.INVALID_WORKER_TOKEN);
-        }
-        Worker worker = workerRepository.findByWorkerToken(sha256(rawToken))
-                .orElseThrow(() -> new BusinessException(WorkerErrorCode.WORKER_NOT_FOUND));
+        Worker worker = authenticateByToken(rawToken);
         if (!worker.getId().equals(workerId)) {
-            throw new BusinessException(WorkerErrorCode.WORKER_NOT_FOUND);
+            throw new BusinessException(WorkerErrorCode.WORKER_FORBIDDEN);
         }
         return worker;
+    }
+
+    private String normalizeOperator(String operatorAddress) {
+        return addressNormalizer.normalize(operatorAddress, WorkerErrorCode.INVALID_OPERATOR_ADDRESS);
     }
 
     /** 랜덤 UUID 토큰이라 느린 bcrypt 불필요 — 조회 가능한 SHA-256 이면 충분. */
@@ -175,7 +191,7 @@ public class WorkerService {
      * OFFLINE 처리하고 그 id 목록을 반환한다. (호출자가 세션도 정리)
      */
     @Transactional
-    public java.util.List<String> sweepStaleWorkers(LocalDateTime threshold) {
+    public List<String> sweepStaleWorkers(LocalDateTime threshold) {
         return workerRepository.findByStatusNotAndLastHeartbeatAtBefore(WorkerStatus.OFFLINE, threshold)
                 .stream()
                 .peek(Worker::goOffline)

@@ -1,7 +1,7 @@
 package com.gshared.back.job.service;
 
 import com.gshared.back.job.domain.Job;
-import com.gshared.back.job.domain.JobStatus;
+import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.job.repository.JobRepository;
 import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.repository.WorkerRepository;
@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.time.OffsetDateTime;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -43,7 +43,7 @@ public class JobMatcher {
      */
     @Scheduled(fixedDelay = 30_000)
     public void match() {
-        List<Job> waiting = jobRepository.findByStatusOrderByCreatedAtAsc(JobStatus.FUNDED);
+        List<Job> waiting = jobRepository.findFundedWithOwner();
         if (waiting.isEmpty()) {
             return;   // 배정할 주문 없음 → 조용히 종료
         }
@@ -58,6 +58,12 @@ public class JobMatcher {
         java.util.Set<String> takenThisSweep = new java.util.HashSet<>();   // 이번 순찰에서 이미 배정된 워커
 
         for (Job job : waiting) {
+            // JOB_ASSIGN 은 에스크로 대조값(escrowJobId·clientWallet)이 필수다 — 없으면 워커가 acceptJob 사전 검증을
+            // 할 수 없으니 배정하지 않는다. (예치 확인 없이 FUNDED 가 된 개발 데이터가 여기에 걸린다)
+            if (job.getEscrowJobId() == null || job.getOwner().getWalletAddress() == null) {
+                log.warn("[MATCH] jobId={} escrowJobId/의뢰자 지갑 없음 — 배정 보류", job.getId());
+                continue;
+            }
             Worker worker = pickWorker(job, availableById, takenThisSweep);
             if (worker == null) {
                 // 추천 워커가 바쁘거나 오프라인 → 배정 보류, 다음 순찰에 재시도
@@ -73,7 +79,7 @@ public class JobMatcher {
                     continue;
                 }
                 takenThisSweep.add(worker.getId());
-                boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job));
+                boolean sent = messageSender.send(worker.getId(), buildAssignMessage(job, worker));
                 log.info("[MATCH] jobId={} → workerId={} (JOB_ASSIGN 전송={})", job.getId(), worker.getId(), sent);
                 if (!sent) {
                     // 죽은 워커(스위퍼 처리 전)에 배정된 경우 → 즉시 FUNDED 복귀, 다음 순찰에 재매칭
@@ -107,11 +113,11 @@ public class JobMatcher {
     }
 
     /**
-     * JOB_ASSIGN 봉투 생성. payload 는 이형동 명세 기준.
-     * TODO: dockerImageId 는 workloads.image_digest 로 교체 (실제 digest 를 System 담당에게 받은 뒤)
-     *       datasetUrl·resultUploadUrl 은 스토리지 정책 확정 후 추가.
+     * JOB_ASSIGN 봉투 생성 (연동 규격 §10 + Escrow 회신). 식별자·설정에 더해 워커가 acceptJob() 사전 검증에 쓰는
+     * 에스크로 5개(escrowJobId·externalRef·price·clientWallet·providerWallet)를 필수로 싣는다.
+     * 이미지 digest·모델 참조·데이터셋 URL 은 여전히 execution-context(§11)로 조회한다.
      */
-    private WorkerMessage buildAssignMessage(Job job) {
+    private WorkerMessage buildAssignMessage(Job job, Worker worker) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("dockerImageId", job.getWorkloadId());   // workloads PK (V8 — 정수)
         payload.put("modelId", job.getBaseModelId());        // base_models PK
@@ -124,9 +130,16 @@ public class JobMatcher {
         config.put("learningRate", job.getLearningRate());
         config.put("maxLength", job.getMaxLength());
 
+        // 에스크로 대조값 — 온체인 Job 과 비교하는 기준. price 는 uint256 wei 를 문자열로 (규격 §1.5).
+        payload.put("escrowJobId", job.getEscrowJobId());
+        payload.put("externalRef", job.getExternalRef());
+        payload.put("price", TokenUnits.toWei(job.getEstimatedCost()).toString());
+        payload.put("clientWallet", job.getOwner().getWalletAddress());       // 예치한 의뢰자
+        payload.put("providerWallet", worker.getOwner().getWalletAddress()); // 공급자 정산 주소
+
         return WorkerMessage.of(WorkerMessageType.JOB_ASSIGN,
                 String.valueOf(job.getId()),          // 명세상 jobId 는 문자열
-                OffsetDateTime.now().toString(),
+                Instant.now().toString(),
                 payload);
     }
 }

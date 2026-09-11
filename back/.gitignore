@@ -37,3 +37,6 @@ out/
 .vscode/
 
 .env
+
+# 로컬 오브젝트 스토리지 (LocalObjectStorage 가 파일을 두는 곳)
+storage-data/

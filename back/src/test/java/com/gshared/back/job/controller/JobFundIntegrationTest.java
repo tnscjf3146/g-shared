@@ -77,6 +77,9 @@ class JobFundIntegrationTest {
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
     }
 
+    /** 개발용 예치 확인은 온체인 jobId 를 반드시 실어야 한다 — 없으면 JOB_ASSIGN 을 만들 수 없다. */
+    private static final String ESCROW_BODY = "{\"escrowJobId\":\"17\"}";
+
     private String fundUrl(Long jobId) {
         return "/api/jobs/" + jobId + "/fund";
     }
@@ -87,11 +90,38 @@ class JobFundIntegrationTest {
         Job job = saveJob(owner);
 
         mockMvc.perform(post(fundUrl(job.getId()))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isOk());
 
-        assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus())
-                .isEqualTo(JobStatus.FUNDED);
+        Job funded = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(funded.getStatus()).isEqualTo(JobStatus.FUNDED);
+        assertThat(funded.getEscrowJobId()).isEqualTo("17");   // 온체인 jobId 기록
+    }
+
+    @Test
+    @DisplayName("escrowJobId 가 없으면 400 — JOB_ASSIGN 에 실을 온체인 jobId 없이는 FUNDED 로 두지 않는다")
+    void fund_without_escrow_job_id() throws Exception {
+        Job job = saveJob(owner);
+
+        mockMvc.perform(post(fundUrl(job.getId()))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
+    }
+
+    @Test
+    @DisplayName("escrowJobId 가 정수 문자열이 아니면 400 — uint256 은 숫자 문자열로만 받는다")
+    void fund_with_invalid_escrow_job_id() throws Exception {
+        Job job = saveJob(owner);
+
+        mockMvc.perform(post(fundUrl(job.getId()))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"escrowJobId\":\"0xabc\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -100,7 +130,9 @@ class JobFundIntegrationTest {
         Job othersJob = saveJob(saveUser("other"));
 
         mockMvc.perform(post(fundUrl(othersJob.getId()))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isNotFound());
 
         assertThat(jobRepository.findById(othersJob.getId()).orElseThrow().getStatus())
@@ -111,10 +143,12 @@ class JobFundIntegrationTest {
     @DisplayName("이미 FUNDED 인 Job 재호출은 409")
     void fund_twice_returns_409() throws Exception {
         Job job = saveJob(owner);
-        jobRepository.fundIfCreated(job.getId(), owner.getId());   // 1차 전이
+        jobRepository.fundIfCreated(job.getId(), owner.getId(), "16");   // 1차 전이
 
         mockMvc.perform(post(fundUrl(job.getId()))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isConflict());
     }
 
@@ -122,7 +156,9 @@ class JobFundIntegrationTest {
     @DisplayName("존재하지 않는 Job 은 404")
     void fund_missing_job_returns_404() throws Exception {
         mockMvc.perform(post(fundUrl(999_999L))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isNotFound());
     }
 
@@ -131,7 +167,9 @@ class JobFundIntegrationTest {
     void fund_without_token_returns_401() throws Exception {
         Job job = saveJob(owner);
 
-        mockMvc.perform(post(fundUrl(job.getId())))
+        mockMvc.perform(post(fundUrl(job.getId()))
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -139,10 +177,12 @@ class JobFundIntegrationTest {
     @DisplayName("취소된 Job 은 409 — 취소를 되살리지 않는다")
     void fund_cancelled_job_returns_409() throws Exception {
         Job job = saveJob(owner);
-        jobRepository.cancelIfCancellable(job.getId(), owner.getId(), LocalDateTime.now());
+        jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), LocalDateTime.now());
 
         mockMvc.perform(post(fundUrl(job.getId()))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
                 .andExpect(status().isConflict());
 
         assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus())

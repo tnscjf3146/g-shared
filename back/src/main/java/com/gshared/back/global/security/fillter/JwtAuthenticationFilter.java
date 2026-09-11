@@ -34,7 +34,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
      */
     private static final List<String> WORKER_TOKEN_PATHS = List.of(
             "/api/workers/authenticate",
-            "/api/workers/*/gpu");
+            "/api/workers/*/operator",
+            "/api/workers/*/benchmark",
+            "/api/worker/**",
+            "/storage/**");
 
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
