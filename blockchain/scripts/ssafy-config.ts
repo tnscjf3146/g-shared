@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { getAddress, isAddress, zeroAddress } from "viem";
 import { readFile } from "node:fs/promises";
 
@@ -26,6 +27,22 @@ export function readChainConfig() {
     throw new Error("SSAFY_CHAIN_ID must be a positive decimal integer.");
   }
   return { chainId };
+}
+
+/**
+ * 환경 변수가 가리키는 체인이 이 명령의 대상 체인과 같은지 확인한다.
+ *
+ * 기대값은 호출자가 인자로 정한다. 환경 변수를 기대값으로 쓰면 설정이 통째로
+ * 잘못되었을 때 통과하므로, 운영 진입점은 상수를 넘기고 예행 진입점만 로컬 값을 넘긴다.
+ */
+export function requireTargetChain(expectedChainId: number): number {
+  const { chainId } = readChainConfig();
+  assert.equal(
+    chainId,
+    expectedChainId,
+    `SSAFY_CHAIN_ID is ${chainId}, but this command only targets chain ${expectedChainId}`,
+  );
+  return chainId;
 }
 
 export function readSSAFYConfig() {

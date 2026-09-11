@@ -28,21 +28,38 @@ async function run(args, extra={}, success=true) {
     child.on("error",reject);
     child.on("exit",exitCode=>resolveResult({exitCode,output}));
   });
-  if (success) { console.log(result.output); assert.equal(result.exitCode,0); }
-  else { assert.notEqual(result.exitCode,0); console.log("Expected rejection: "+args.join(" ")); }
+  if (success) { console.log(result.output); assert.equal(result.exitCode,0); return result.output; }
+  assert.notEqual(result.exitCode,0);
+  console.log("Expected rejection: "+args.join(" "));
+  return result.output;
+}
+/**
+ * 실패해야 하는 호출을 돌리고, 의도한 사유로 실패했는지까지 확인한다.
+ * 종료 코드만 보면 다른 이유로 실패해도 통과하는 거짓 양성이 생긴다.
+ */
+async function reject(args, extra, pattern) {
+  const output = await run(args, extra, false);
+  assert.match(output, pattern, `Expected rejection reason ${pattern}, but the command failed for another reason:\n${output}`);
+  return output;
 }
 async function rpc(method,params=[]) {
  const r=await fetch(env.SSAFY_RPC_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method,params})});
  const data=await r.json(); if(data.error) throw Error(data.error.message); return data.result;
 }
 try {
- await run(["run","scripts/preflight-ssafy.ts"],{SSAFY_CHAIN_ID:"31338"},false);
- await run(["run","scripts/preflight-ssafy.ts"],{GSC_INITIAL_HOLDER:"0x0000000000000000000000000000000000000000"},false);
- await run(["run","scripts/preflight-ssafy.ts"]);
+ // 운영 진입점은 31221 전용이다. 이 노드는 31337 이므로 어떤 환경 변수를 주어도 통과할 수 없다.
+ await reject(["run","scripts/preflight-ssafy.ts"],{},/only targets chain 31221/);
+ await reject(["run","scripts/preflight-ssafy.ts"],{SSAFY_CHAIN_ID:"31221"},/RPC chain ID does not match the target chain 31221/);
+ await reject(["run","scripts/verify-ssafy.ts"],{SSAFY_PRIVATE_KEY:""},/only targets chain 31221/);
+
+ // 아래부터는 예행 전용 진입점으로 거부 케이스를 확인한다.
+ await reject(["run","scripts/dev/preflight-ssafy-local.ts"],{SSAFY_CHAIN_ID:"31338"},/only targets chain 31337/);
+ await reject(["run","scripts/dev/preflight-ssafy-local.ts"],{GSC_INITIAL_HOLDER:"0x0000000000000000000000000000000000000000"},/GSC_INITIAL_HOLDER must be a valid non-zero/);
+ await run(["run","scripts/dev/preflight-ssafy-local.ts"]);
  assert.equal(await rpc("eth_getTransactionCount",[account.address,"latest"]),"0x0");
  const deploy=["ignition","deploy","ignition/modules/GCoin.ts","--network","ssafy","--parameters","ignition/parameters/ssafy.json"];
  await run(deploy);
- await run(["run","scripts/verify-ssafy.ts"],{SSAFY_PRIVATE_KEY:""});
+ await run(["run","scripts/dev/verify-ssafy-local.ts"],{SSAFY_PRIVATE_KEY:""});
  const nonce=await rpc("eth_getTransactionCount",[account.address,"latest"]);
  assert.equal(nonce,"0x1");
  const exported=JSON.parse(await readFile(resolve(paths[1],"GCoin.json"),"utf8"));
@@ -51,8 +68,8 @@ try {
  assert.equal(await rpc("eth_getBalance",[account.address,"latest"]),"0x0");
  await run(deploy);
  assert.equal(await rpc("eth_getTransactionCount",[account.address,"latest"]),nonce);
- await run(["run","scripts/verify-ssafy.ts"],{GSC_CONTRACT_ADDRESS:account.address,SSAFY_PRIVATE_KEY:""},false);
- console.log("PASS: zero-native-balance deployment, read-only verification, wrong chain/holder/address rejection, idempotent redeploy.");
+ await reject(["run","scripts/dev/verify-ssafy-local.ts"],{GSC_CONTRACT_ADDRESS:account.address,SSAFY_PRIVATE_KEY:""},/Deployed bytecode does not match this GCoin build/);
+ console.log("PASS: production entry points refuse this chain, every rejection was checked for its actual reason.");
 } finally {
  await server.close();
  for(const p of paths) {

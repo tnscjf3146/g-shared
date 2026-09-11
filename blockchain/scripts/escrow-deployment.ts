@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { artifacts, network } from "hardhat";
 import { encodeDeployData, formatEther, getContract, parseUnits } from "viem";
-import { ESCROW_PARAMETER_PATH, publicAddress, readChainConfig, readEscrowParameters, requireDeploymentKey } from "./ssafy-config.js";
+import { ESCROW_PARAMETER_PATH, publicAddress, readEscrowParameters, requireDeploymentKey, requireTargetChain } from "./ssafy-config.js";
 
 /**
  * 에스크로 배포 전 점검과 배포 후 검증의 실제 로직.
@@ -35,17 +35,6 @@ function maskImmutables(bytecode: string, references: ImmutableReferences): stri
     }
   }
   return bytes.toString("hex");
-}
-
-/** 환경 변수가 가리키는 체인이 이 명령의 대상 체인과 같은지 확인한다. */
-function requireTargetChain(expectedChainId: number): number {
-  const { chainId } = readChainConfig();
-  assert.equal(
-    chainId,
-    expectedChainId,
-    `SSAFY_CHAIN_ID is ${chainId}, but this command only targets chain ${expectedChainId}`,
-  );
-  return chainId;
 }
 
 /**
