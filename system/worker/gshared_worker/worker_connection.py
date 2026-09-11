@@ -46,8 +46,10 @@ from .worker_job import (
     JobAssignmentError,
     JobSlot,
     OfferOutcome,
+    SlotState,
     job_accepted_message,
     job_cancelled_message,
+    job_progress_message,
     job_rejected_message,
     read_assignment,
     read_cancellation,
@@ -359,6 +361,60 @@ def answer_decisions(
     for decision in acceptance.take_decisions():
         _settle(decision, socket, slot, say, clock,
                 acceptance.operator_address, acceptance)
+
+
+def send_progress(
+    acceptance: JobAcceptance,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    clock: Callable[[], str] | None = None,
+) -> bool:
+    """Send the newest progress, if there is any and it is still ours.
+
+    **Called from the connection loop and nowhere else.** The container's
+    events arrive on a background thread, which puts the latest one in a box;
+    this is the thread that owns the socket, taking it out. That is the whole
+    arrangement, and the reason a training run cannot interleave a progress
+    frame with a heartbeat.
+
+    **At most one message per turn**, because the box holds one. A container
+    that emitted three hundred steps between two turns of this loop produces
+    one JOB_PROGRESS carrying the third hundredth -- so a fast workload
+    cannot crowd out the heartbeat, and the Backend is told where the run is
+    rather than where it was.
+
+    Returns whether anything went out, which is for the tests; the loop does
+    not care.
+    """
+    progress = acceptance.progress.take()
+    if progress is None:
+        return False
+
+    held = slot.held
+    if held is None or held.job_id != progress.job_id:
+        # A container whose Job has already been given up, or -- worse -- an
+        # update for one Job sent while another is held. Neither is sent: the
+        # Backend would apply it to whatever row the id named.
+        _debug.info("progress: %s is not the Job in hand; dropped",
+                    progress.job_id)
+        return False
+    if slot.state is not SlotState.ASSIGNED:
+        # Still being accepted. Nothing is training yet, and the Backend has
+        # not moved the Job to RUNNING, so it would drop this anyway.
+        _debug.info("progress: %s is not confirmed yet; dropped", progress.job_id)
+        return False
+
+    try:
+        socket.send(job_progress_message(progress, (clock or now_in_iso8601)()))
+    except ConnectionWentAway as gone:
+        # The connection is the connection's problem. A training run is hours
+        # of GPU time and does not end because a frame did not go out -- the
+        # loop will notice the socket and reconnect, and the snapshot is put
+        # back so the reconnected one says where the run actually is.
+        _debug.info("progress: %s not sent (%s)", progress.job_id, gone)
+        acceptance.progress.resend_on_next_take()
+        return False
+    return True
 
 
 def _settle(
@@ -836,6 +892,11 @@ def _connect_until_stopped(
         delays = backoff_delays()
         say("  Connected. This machine is registered with the service.")
         _debug.info("websocket: registered as %s", socket.worker_id)
+        # A training run carried on while the line was down. The Backend's
+        # view of it stopped at whatever last got through, so the newest
+        # snapshot is offered once on the new connection. Only the newest:
+        # the steps in between were superseded while nobody was listening.
+        acceptance.progress.resend_on_next_take()
 
         try:
             outcome, detail = keep_alive(
@@ -843,8 +904,7 @@ def _connect_until_stopped(
                 on_message=on_message or _dispatch_to(
                     socket, slot, say, acceptance),
                 monotonic=monotonic,
-                each_turn=lambda: answer_decisions(
-                    acceptance, socket, slot, say))
+                each_turn=lambda: _every_turn(acceptance, socket, slot, say))
         finally:
             # The one place a socket this function opened is closed.
             socket.close()
@@ -858,6 +918,22 @@ def _connect_until_stopped(
     say("")
     say("Disconnected from the G-shared service.")
     return int(WorkerExitCode.OK)
+
+
+def _every_turn(
+    acceptance: JobAcceptance,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+) -> None:
+    """What the loop does between reads: answer, then report.
+
+    Decisions first. One of them is the JOB_ACCEPTED that moves the Job to
+    RUNNING at the Backend, and progress sent before it would arrive for a Job
+    the Backend still has as ASSIGNED -- which it correctly ignores.
+    """
+    answer_decisions(acceptance, socket, slot, say)
+    send_progress(acceptance, socket, slot)
 
 
 def _dispatch_to(

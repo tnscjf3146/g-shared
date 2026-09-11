@@ -84,9 +84,36 @@ class EventWriter:
         self.emit(TRAINING_STARTED, totalSteps=total_steps, **fields)
 
     def step(self, *, step: int, total_steps: int, epoch: float,
-             loss: float | None = None) -> None:
+             loss: float | None = None,
+             current_epoch: int | None = None,
+             total_epochs: int | None = None,
+             elapsed_sec: float | None = None) -> None:
+        """One step, with whatever progress metadata the Trainer knew.
+
+        ``epoch`` stays the Trainer's fractional position, unchanged. The
+        whole-numbered ``currentEpoch``/``totalEpochs`` are additions for the
+        Worker, which has to report an integer epoch and must not arrive at
+        one by dividing the step count by a guess -- see the note in
+        :class:`qlora_sft.train.ProgressEvents`.
+
+        ``elapsedSec`` is measured here, inside the container, because this is
+        the only clock that knows when training actually began. The Worker's
+        own view starts when it first *sees* a line, which is later by
+        however long the pipe and the reader took.
+
+        Each of the three is omitted when it is not known. An absent field
+        tells a reader nothing was measured; a null one would look like a
+        measurement that came out empty.
+        """
+        extra: dict[str, Any] = {}
+        if current_epoch is not None:
+            extra["currentEpoch"] = int(current_epoch)
+        if total_epochs is not None:
+            extra["totalEpochs"] = int(total_epochs)
+        if elapsed_sec is not None:
+            extra["elapsedSec"] = float(elapsed_sec)
         self.emit(STEP, step=step, totalSteps=total_steps, epoch=epoch,
-                  loss=loss)
+                  loss=loss, **extra)
 
     def training_completed(self, *, runtime_sec: float, **fields: Any) -> None:
         self.emit(TRAINING_COMPLETED, runtimeSec=runtime_sec, **fields)

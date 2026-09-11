@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -61,6 +62,13 @@ TMP_TMPFS_SIZE = "256m"
 
 #: What the runtime prints its events behind. One line each.
 EVENT_MARKER = "GSHARED_EVENT="
+
+#: The event names the runtime image publishes. Its contract, not ours --
+#: ``system/runtime/qlora-sft/qlora_sft/events.py`` is where they are defined.
+TRAINING_STARTED = "training_started"
+STEP = "step"
+TRAINING_COMPLETED = "training_completed"
+FAILED = "failed"
 
 #: stdout is not unbounded. A container that printed a gigabyte of warnings
 #: would otherwise be a container that exhausted this process's memory.
@@ -143,20 +151,64 @@ class RuntimeEvent:
 
     @property
     def step(self) -> int | None:
-        value = self.payload.get("step")
-        return int(value) if isinstance(value, int) else None
+        return self._whole("step")
 
     @property
     def total_steps(self) -> int | None:
-        value = self.payload.get("totalSteps")
-        return int(value) if isinstance(value, int) else None
+        return self._whole("totalSteps")
+
+    @property
+    def current_epoch(self) -> int | None:
+        """Which epoch, as a whole number, **if the container said so**.
+
+        Absent for a run the Trainer could not give an epoch total for. It is
+        left absent rather than worked out from the step count: how many steps
+        an epoch holds depends on gradient accumulation and on how the last
+        batch fell, and a Worker that divides by its own guess reports a
+        confident wrong number.
+        """
+        return self._whole("currentEpoch")
+
+    @property
+    def total_epochs(self) -> int | None:
+        return self._whole("totalEpochs")
+
+    @property
+    def elapsed_sec(self) -> float | None:
+        """How long the container says it has been training.
+
+        Its clock, not ours. The Worker's own view of elapsed time starts when
+        it first reads a line, which is after the image was pulled, the model
+        loaded and the first batch run.
+        """
+        value = self.payload.get("elapsedSec")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        seconds = float(value)
+        if not math.isfinite(seconds) or seconds < 0:
+            return None
+        return seconds
+
+    def _whole(self, name: str) -> int | None:
+        """A JSON integer, or nothing.
+
+        ``True`` is rejected explicitly. In Python it is an ``int`` and it
+        equals 1, so ``{"step": true}`` would otherwise be read as step one
+        and published as real progress.
+        """
+        value = self.payload.get(name)
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
 
     @property
     def progress_percent(self) -> float | None:
-        """``currentStep / totalSteps x 100`` -- what task 8 will report.
+        """``currentStep / totalSteps x 100``.
 
         Computed here because both halves are in the event and neither is
-        useful alone. Nothing sends it anywhere yet.
+        useful alone. This module still sends it nowhere --
+        :mod:`gshared_worker.runtime_progress` is what turns it into something
+        the connection loop can publish.
         """
         step, total = self.step, self.total_steps
         if step is None or not total:
@@ -202,21 +254,40 @@ def parse_events(stdout: str) -> list[RuntimeEvent]:
     """
     events: list[RuntimeEvent] = []
     for line in (stdout or "").splitlines():
-        position = line.find(EVENT_MARKER)
-        if position < 0:
-            continue
-        try:
-            payload = json.loads(line[position + len(EVENT_MARKER):])
-        except ValueError:
-            _debug.info("runtime: an event line was not JSON")
-            continue
-        if not isinstance(payload, dict):
-            continue
-        name = payload.get("event")
-        if not isinstance(name, str) or not name:
-            continue
-        events.append(RuntimeEvent(name, payload))
+        event = parse_event_line(line)
+        if event is not None:
+            events.append(event)
     return events
+
+
+def parse_event_line(line: str) -> RuntimeEvent | None:
+    """One line of the container's stdout, or None if it was not an event.
+
+    **The one place a line becomes an event.** Reading the whole of stdout
+    after the container exits and reading it a line at a time while it runs
+    are two callers of this function, so the same text cannot mean one thing
+    live and another in the record -- which it would, sooner or later, if
+    each had grown its own copy of the rules.
+
+    A malformed line is skipped rather than raised on. The container's stdout
+    is shared with PyTorch, bitsandbytes and CUDA, all of which write whatever
+    they like; a training run that finished must not be reported as failed
+    because a warning happened to start with the marker.
+    """
+    position = line.find(EVENT_MARKER)
+    if position < 0:
+        return None
+    try:
+        payload = json.loads(line[position + len(EVENT_MARKER):])
+    except ValueError:
+        _debug.info("runtime: an event line was not JSON")
+        return None
+    if not isinstance(payload, dict):
+        return None
+    name = payload.get("event")
+    if not isinstance(name, str) or not name:
+        return None
+    return RuntimeEvent(name, payload)
 
 
 def training_arguments(training: Any) -> list[str]:
@@ -321,21 +392,33 @@ async def run_training(
     *,
     host_path_of: Callable[[Path], Any] | None = None,
     timeout: float = TRAINING_TIMEOUT_SECONDS,
+    on_event: Callable[[RuntimeEvent], None] | None = None,
 ) -> RuntimeOutcome:
-    """Start the container, wait for it, and say what happened.
+    """Start the container, watch it, and say what happened.
 
     Success is an exit code of zero **and** an output directory with something
     in it. The container validates its own output and exits 15 when it is
     wrong, so this is the outer of two checks rather than the only one.
+
+    ``on_event`` is called **while the container is still running**, once per
+    event line, on whatever thread is running this coroutine. It is how
+    progress leaves this module; it is not how progress leaves the Worker.
+    Nothing here touches a socket -- see
+    :mod:`gshared_worker.runtime_progress`.
+
+    A runner without ``run_streaming`` still works: the events are then read
+    from the finished output, exactly as before this was written. That path
+    is the fallback, not the design -- the whole point is that a step event
+    reaches the caller minutes before the container exits.
     """
     command = run_command(image_reference, workspace, model_path, training,
                           host_path_of=host_path_of)
     _debug.info("runtime: starting %s", container_name(workspace.job_id))
 
+    events: list[RuntimeEvent] = []
     try:
-        finished = await runner.run(
-            command, timeout=timeout,
-            max_output_bytes=MAX_CAPTURED_OUTPUT_BYTES)
+        finished = await _run_container(
+            runner, command, timeout, events, on_event)
     except Exception as error:
         return RuntimeOutcome(
             RuntimeState.FAILED, RuntimeFailure.DOCKER_UNAVAILABLE,
@@ -347,7 +430,9 @@ async def run_training(
             RuntimeState.FAILED, RuntimeFailure.TIMED_OUT,
             "the training container did not finish in time")
 
-    events = parse_events(finished.stdout or "")
+    if not events:
+        # Either the fallback path, or a container that said nothing at all.
+        events = parse_events(finished.stdout or "")
     exit_code = int(finished.exit_code)
 
     if exit_code != 0:
@@ -369,6 +454,40 @@ async def run_training(
     return RuntimeOutcome(
         RuntimeState.FINISHED, None, "training finished", exit_code,
         workspace.output_dir, events)
+
+
+async def _run_container(
+    runner: Any,
+    command: list[str],
+    timeout: float,
+    events: list[RuntimeEvent],
+    on_event: Callable[[RuntimeEvent], None] | None,
+) -> Any:
+    """Run it, collecting events live when the runner can do that.
+
+    Only stdout is parsed. stderr is drained -- it has to be, or the container
+    blocks on a full pipe -- but nothing in it is read as an event and none of
+    it is forwarded anywhere. It is where a stack trace with a path in it
+    would appear.
+    """
+    streaming = getattr(runner, "run_streaming", None)
+    if streaming is None:
+        return await runner.run(
+            command, timeout=timeout,
+            max_output_bytes=MAX_CAPTURED_OUTPUT_BYTES)
+
+    def saw(line: str) -> None:
+        event = parse_event_line(line)
+        if event is None:
+            return
+        events.append(event)
+        if on_event is not None:
+            on_event(event)
+
+    return await streaming(
+        command, timeout=timeout,
+        max_output_bytes=MAX_CAPTURED_OUTPUT_BYTES,
+        on_stdout_line=saw)
 
 
 def _has_output(output_dir: Path) -> bool:

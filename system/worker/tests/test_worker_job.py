@@ -451,13 +451,31 @@ class TestWhatThisBuildDoesNotDo(unittest.TestCase):
             self.assertNotIn(absent, self.source().lower())
 
     def test_the_later_messages_are_not_here(self):
-        # JOB_CANCEL and JOB_CANCELLED are here now: the escrow cleanup path
-        # needs them to give a refused job back on chain. The rest belong to
-        # stages that have not been written.
-        for absent in ("JOB_PROGRESS", "JOB_RESULT", "JOB_FAILED",
-                       "progressPercent", "resultHash"):
+        # This list shortens as stages land, and only then. JOB_CANCEL and
+        # JOB_CANCELLED arrived with the escrow cleanup path; JOB_PROGRESS
+        # arrived with task 8 and is checked below instead. What is left
+        # belongs to stages that have not been written, and the point of the
+        # test is that none of it creeps in early.
+        for absent in ("JOB_RESULT", "JOB_FAILED", "resultHash",
+                       "objectKey", "submitTxHash", "actualRuntimeSec"):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, self.source())
+
+    def test_progress_is_built_here_but_nothing_is_measured_here(self):
+        """JOB_PROGRESS is an envelope. The numbers in it are somebody else's.
+
+        This module turns a value into the shape the Backend reads. Deciding
+        what the value is -- validating it, ordering it, timing it -- is
+        :mod:`gshared_worker.runtime_progress`, and a percentage worked out
+        here would be a second place that could be wrong.
+        """
+        source = self.source()
+
+        self.assertIn("job_progress_message", source)
+        for absent in ("time.monotonic", "datetime", "GSHARED_EVENT",
+                       "parse_event", "/ total", "* 100"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, source)
 
     def test_cancellation_is_read_but_nothing_is_executed_for_it(self):
         # This module turns a JOB_CANCEL into a value. Deciding what to do
