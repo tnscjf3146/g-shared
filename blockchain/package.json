@@ -22,7 +22,11 @@
     "preflight:ssafy": "hardhat run scripts/preflight-ssafy.ts",
     "deploy:ssafy": "npm run preflight:ssafy && hardhat ignition deploy ignition/modules/GCoin.ts --network ssafy --parameters ignition/parameters/ssafy.json && npm run verify:ssafy",
     "verify:ssafy": "hardhat run scripts/verify-ssafy.ts",
-    "test:deployment": "node scripts/test-ssafy-deployment.mjs"
+    "preflight:escrow:ssafy": "hardhat run scripts/preflight-escrow.ts",
+    "deploy:escrow:ssafy": "npm run preflight:escrow:ssafy && hardhat ignition deploy ignition/modules/GPUJobEscrow.ts --network ssafy --parameters ignition/parameters/ssafy-escrow.json && npm run verify:escrow:ssafy",
+    "verify:escrow:ssafy": "hardhat run scripts/verify-escrow.ts",
+    "test:deployment": "node scripts/test-ssafy-deployment.mjs",
+    "test:deployment:escrow": "node scripts/test-escrow-deployment.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "3.1.8",
