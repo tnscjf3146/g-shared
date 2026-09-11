@@ -11,9 +11,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriUtils;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -61,8 +63,14 @@ public class StorageController {
                 .body(new FileSystemResource(file));
     }
 
+    /**
+     * 요청 URI 에서 objectKey 를 잘라낸다. getRequestURI() 는 인코딩된 원문이라 퍼센트 인코딩을 풀어 준다 —
+     * 클라이언트가 {@code jobs%2F1%2Fresult.tar} 로 보내도 서명한 키 {@code jobs/1/result.tar} 와 같은 값이 되게.
+     * 풀린 결과에 {@code ..} 같은 것이 섞이면 이후 키 형식 검사가 거른다.
+     * ({@link java.net.URLDecoder} 는 {@code +} 를 공백으로 바꿔 경로에 맞지 않으므로 쓰지 않는다)
+     */
     private static String objectKey(HttpServletRequest request) {
-        String path = request.getRequestURI();
+        String path = UriUtils.decode(request.getRequestURI(), StandardCharsets.UTF_8);
         return path.startsWith(PREFIX) ? path.substring(PREFIX.length()) : "";
     }
 }

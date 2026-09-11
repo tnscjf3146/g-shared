@@ -317,6 +317,26 @@ class WorkerJobIntegrationTest {
     // ── /storage/** 서명 검증 ────────────────────────────────────
 
     @Test
+    @DisplayName("퍼센트 인코딩된 경로도 서명한 키와 같은 오브젝트로 풀린다 — 인코딩 차이로 서명이 어긋나지 않는다")
+    void storageDecodesEncodedObjectKey() throws Exception {
+        String objectKey = "jobs/" + job.getId() + "/result-v1.tar";
+        storage.write(objectKey, new java.io.ByteArrayInputStream("bytes".getBytes(StandardCharsets.UTF_8)));
+        URI signed = URI.create(storage.presignDownload(objectKey, java.time.Duration.ofMinutes(10)).url());
+
+        // 같은 키의 하이픈을 인코딩해 요청해도 서명 검증과 파일 조회가 같은 키로 이뤄진다
+        // (인코딩된 슬래시·마침표는 Spring Security 의 StrictHttpFirewall 이 그 전에 400 으로 막는다)
+        String encodedPath = "/storage/jobs/" + job.getId() + "/result%2Dv1.tar";
+        // 문자열로 넘기면 MockMvc 가 % 를 다시 인코딩하므로 URI 객체로 원문 그대로 보낸다
+        mockMvc.perform(get(URI.create(encodedPath + "?" + signed.getRawQuery())))
+                .andExpect(status().isOk())
+                .andExpect(content().bytes("bytes".getBytes(StandardCharsets.UTF_8)));
+
+        // 상위 경로 이동(..)을 인코딩해 숨겨도 400 — 방화벽이 막고, 뚫려도 키 형식 검사가 거른다
+        mockMvc.perform(get(URI.create("/storage/jobs/%2E%2E/secret?" + signed.getRawQuery())))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     @DisplayName("서명이 틀리거나 만료된 URL 은 403 — 서명 없이는 아무 키에도 쓰지 못한다")
     void storageRejectsBadSignature() throws Exception {
         mockMvc.perform(put("/storage/jobs/1/result.tar?method=PUT&expires=9999999999&sig=deadbeef")
