@@ -185,7 +185,7 @@
 
 /* ------------------------------------------------------------------
  * 랜딩 고정 네비 — 유리(glass) 레이어
- *   테마는 body[data-nav-theme] (landingScene 이 씀): light = 밝은 Hero 위(기본), dark = 검정 섹션·Footer 위
+ *   테마는 body[data-nav-theme] (landingScene 이 씀): light = 밝은 배경용(현재 랜딩엔 없음, 기본), dark = 검정 섹션·Footer 위
  *   표시는 body[data-nav]: hidden 이면 위로 슬라이드아웃
  *   유리 = 옅은 틴트 + 배경 블러 + 하단 헤어라인 + 상단 안쪽 하이라이트. 색은 배경에 맞춰 명시적으로 두 벌
  * ------------------------------------------------------------------ */
@@ -273,7 +273,7 @@
       background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
     }
   }
-  /* 맨 위로 — 푸터 위(우측, px-16 정렬) 고정. 연출이 끝나 네비가 돌아온 어두운 구간에서만 떠오르고, Hero·스토리 중엔 숨김 */
+  /* 맨 위로 — 푸터 위(우측, px-16 정렬) 고정. 연출이 끝난 구간(body[data-at-end], landingScene 이 씀)에서만 떠오르고, 첫 화면·스토리 중엔 숨김 */
   .back-to-top {
     position: fixed;
     right: 4rem;
@@ -286,7 +286,7 @@
       opacity 300ms var(--ease-out-expo),
       transform 300ms var(--ease-out-expo);
   }
-  body[data-nav="shown"][data-nav-theme="dark"] .back-to-top {
+  body[data-at-end="1"] .back-to-top {
     opacity: 1;
     transform: none;
     pointer-events: auto;
