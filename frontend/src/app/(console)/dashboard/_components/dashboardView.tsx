@@ -170,9 +170,10 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
                   <DashboardWorkerCard key={w.workerId} worker={w} index={i + 1} now={now} onUnlink={onUnlink} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
                 ))}
               </ul>
-              <Link href="/workers/new" className="card-quiet flex items-center justify-between gap-4 text-[17px] font-semibold text-dark transition-colors hover:bg-black/5">
+              {/* 공급 페이지의 주 CTA — primary 그린(화면당 하나) */}
+              <Link href="/workers/new" className="btn btn-lg btn-primary w-full justify-between">
                 내 GPU 등록하기
-                <span aria-hidden className="text-text-muted">→</span>
+                <span aria-hidden>→</span>
               </Link>
             </>
           )}

@@ -18,8 +18,12 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
     setMounted(true)
   }
   const panelId = `job-detail-${job.jobId}`
+  // 끝난 상태 구분: 실패 = 빨간 틴트 배경, 완료·취소됨 = 어두운 회색 배경(가라앉은 느낌)
+  const failed = job.status === 'FAILED'
+  const done = job.status === 'COMPLETED' || job.status === 'CANCELLED'
+  const rowBg = failed ? 'var(--color-danger-tint)' : done ? 'color-mix(in srgb, var(--color-hairline-strong) 45%, var(--color-surface-2))' : undefined
   return (
-    <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={style}>
+    <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={{ ...style, ...(rowBg && { background: rowBg }) }}>
       {/* 줄 어디를 눌러도 토글. 키보드 접근은 왼쪽 > 버튼(aria-expanded)이 담당. 상세·취소는 전파를 막아 토글되지 않게 */}
       <div onClick={toggle} className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-6 select-none md:grid-cols-[minmax(0,3fr)_1.4fr_2.2fr_auto]">
         <div className="flex min-w-0 items-center gap-2">
@@ -42,7 +46,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
             <span className="tabular-nums">{index}.</span> {workloadName}
           </h3>
         </div>
-        <div className="hidden text-[17px] font-medium text-dark md:block">{STATUS_META[job.status].label}</div>
+        <div className={`hidden text-[17px] font-medium md:block ${failed ? 'text-danger' : 'text-dark'}`}>{STATUS_META[job.status].label}</div>
         <div className="hidden md:block">
           <div className="text-[14px] text-text-muted">생성</div>
           <div className="text-[17px] font-medium tabular-nums text-dark">{formatDateTime(job.createdAt)}</div>
@@ -53,7 +57,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
             상세
           </Link>
           {CANCELLABLE_STATUSES.has(job.status) && (
-            <Button variant="secondary" size="sm" onClick={() => onCancel(job.jobId)}>
+            <Button variant="secondary" size="sm" className="text-danger" onClick={() => onCancel(job.jobId)}>
               취소
             </Button>
           )}
