@@ -32,7 +32,7 @@ from a measured one.
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from .backend_client import BackendClient
 from .benchmark import BenchmarkReport, GpuBenchmark
@@ -44,7 +44,10 @@ from .logging_setup import LOGGER_NAME
 from .machine_facts import MachineFacts, describe_machine
 from .worker_auth import WorkerAuthResult, WorkerAuthService, WorkerAuthState, WorkerRegistry
 from .worker_credentials import load_credentials, store_credentials
+from . import __version__
+from .benchmark_program import BENCHMARK_VERSION
 from .worker_registry import HttpWorkerRegistry, WorkerRegistrationRequest
+from .worker_wallet import WalletError, prepare_wallet
 
 _debug = logging.getLogger(LOGGER_NAME)
 
@@ -95,6 +98,7 @@ def authenticate_worker(
     ask_to_sign_in: Callable[[], str | None] | None = None,
     describe: DescribeMachine | None = None,
     benchmark: Benchmark | None = None,
+    make_wallet: Callable[..., Any] | None = None,
 ) -> int:
     """Establish who this machine belongs to, or say what is in the way."""
     say("")
@@ -112,7 +116,8 @@ def authenticate_worker(
             # Said before a window is opened: asking somebody for a password
             # that could not be used is worse than not asking.
             return int(WorkerExitCode.EXPECTED_FAILURE)
-        result = _enrol(service, settings, say, ask_to_sign_in, facts, benchmark)
+        result = _enrol(service, settings, say, ask_to_sign_in, facts,
+                        benchmark, make_wallet)
 
     return _report(say, result)
 
@@ -176,6 +181,7 @@ def _enrol(
     ask_to_sign_in: Callable[[], str | None] | None,
     facts: MachineFacts,
     benchmark: Benchmark | None,
+    make_wallet: Callable[..., Any] | None = None,
 ) -> WorkerAuthResult:
     """Sign a person in, measure the GPU, and attach the machine to them."""
     say("  This machine is not registered yet. Sign in to attach it to your account.")
@@ -197,8 +203,25 @@ def _enrol(
             WorkerAuthState.NEEDS_ENROLLMENT,
             "This GPU could not be measured, so this machine is still unregistered.",
         )
+    # The signing key comes before registration, because the address it
+    # derives is a required registration field now. A Worker registered
+    # without one cannot be approved on chain, so it would be handed work it
+    # could never accept.
+    try:
+        wallet = (make_wallet or prepare_wallet)(say)
+    except WalletError as refused:
+        # A key file that is there and cannot be read is never replaced. It
+        # holds an on-chain identity, and writing over it would lose whatever
+        # that identity still owes or is owed.
+        del access_token
+        return WorkerAuthResult(
+            WorkerAuthState.CREDENTIAL_ERROR,
+            f"This machine's signing key could not be prepared: {refused}")
     registration = WorkerRegistrationRequest.describing(
-        facts, measured.result.tokens_per_sec)
+        facts, measured.result.tokens_per_sec,
+        operator_address=wallet.address,
+        client_version=__version__,
+        benchmark_version=BENCHMARK_VERSION)
 
     say("")
     say("  Registering this machine...")

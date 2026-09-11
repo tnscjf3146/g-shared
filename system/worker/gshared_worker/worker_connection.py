@@ -36,14 +36,21 @@ from .config import WorkerSettings
 from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
 from .worker_credentials import WorkerCredentials, load_credentials
+from .escrow import AcceptOutcome, AcceptResult, JobState
+from .job_acceptance import Decision, JobAcceptance, Work
 from .worker_job import (
+    ACCEPT_VALIDATION_FAILED,
     JOB_ASSIGN,
+    JOB_CANCEL,
     AssignedJob,
     JobAssignmentError,
     JobSlot,
     OfferOutcome,
     job_accepted_message,
+    job_cancelled_message,
+    job_rejected_message,
     read_assignment,
+    read_cancellation,
 )
 from .worker_socket import (
     ConnectionWentAway,
@@ -205,17 +212,20 @@ def take_the_job(
     socket: RegisteredSocket,
     slot: JobSlot,
     say: Callable[..., None],
+    acceptance: JobAcceptance,
     *,
     clock: Callable[[], str] | None = None,
 ) -> None:
-    """A JOB_ASSIGN: check it, hold it, and say yes -- **in that order.**
+    """A JOB_ASSIGN: check it, reserve it, and start deciding on it.
 
-    Nothing is confirmed before it has been understood. Sending JOB_ACCEPTED
-    first and validating after would have the Backend move a Job to RUNNING on
-    a machine that had already decided it could not run it.
+    **This function no longer replies.** Saying yes now waits on an escrow
+    acceptance that can take a minute, and the reply is sent by
+    :func:`answer_decisions` when that comes back. Everything before that stays
+    in order: a message is understood before it is reserved, and reserved
+    before anything is signed for it.
 
-    Nothing is started either. Accepting is agreeing to do the work; doing it
-    is the GPU runtime stage and is not in this build.
+    Returning quickly is the point. This runs on the only thread reading the
+    socket and sending heartbeats.
     """
     try:
         job = read_assignment(message)
@@ -241,23 +251,337 @@ def take_the_job(
             " is still held. It was not accepted.")
         return
 
-    _debug.info("job: %s %s", job.job_id, outcome.value.lower())
+    if outcome is OfferOutcome.STILL_ACCEPTING:
+        # The same Job, offered again while we are still deciding on it. The
+        # decision under way will answer it; starting another would be a second
+        # acceptJob transaction for one Job.
+        _debug.info("job: %s offered again while still deciding", job.job_id)
+        return
+
+    if outcome is OfferOutcome.ALREADY_HELD:
+        # Settled already. Worth replying again -- nothing acknowledges a
+        # JOB_ACCEPTED, so the first may have gone down with a connection, and
+        # the Backend's acceptJob is a conditional UPDATE that does nothing the
+        # second time.
+        _say_yes(socket, job, AcceptResult(AcceptOutcome.ACCEPTED, "already held"),
+                 acceptance.operator_address, clock)
+        return
+
+    say(f"  Job {job.job_id} offered. Verifying it before accepting...")
+    if not acceptance.start(job):
+        # Should not happen -- the slot was IDLE -- but a reservation with
+        # nobody deciding on it would sit for ever. Given back rather than held.
+        _debug.info("job: %s could not be started, releasing", job.job_id)
+        slot.release()
+
+
+def cancel_the_job(
+    message: dict[str, Any],
+    slot: JobSlot,
+    say: Callable[..., None],
+    acceptance: JobAcceptance,
+) -> None:
+    """A JOB_CANCEL. Only one reason is acted on, and only on chain.
+
+    ``ACCEPT_VALIDATION_FAILED`` means the Backend refused our JOB_ACCEPTED.
+    At that moment the escrow job is ASSIGNED to this machine and nothing is
+    going to run it, so the deposit is locked until the execution timeout
+    unless somebody gives it back. That is what this does.
+
+    **Every other reason is left alone.** A user cancellation is task 10's, and
+    the difference matters because the path below ends in a transaction that
+    refunds a client. Acting on a reason this build does not understand would
+    be giving work away on a guess.
+
+    Like a JOB_ASSIGN, this returns immediately: the chain work happens on the
+    background thread so the heartbeat keeps its beat.
+    """
     try:
-        socket.send(job_accepted_message(job.job_id, (clock or now_in_iso8601)()))
+        request = read_cancellation(message)
+    except JobAssignmentError as refused:
+        _debug.info("job: refused a cancellation -- %s", refused)
+        say(f"  A cancellation arrived that could not be read: {refused}")
+        return
+
+    if not request.is_accept_validation_failure:
+        # Noted, not acted on, and **not** treated as an error -- the Backend
+        # is entitled to send this and task 10 will answer it.
+        _debug.info("job: cancellation for %s with reason %s is not handled "
+                    "by this build", request.job_id, request.reason)
+        say(f"  Job {request.job_id} was cancelled ({request.reason}). This "
+            "version does not act on that yet.")
+        return
+
+    held = slot.held
+    if held is None:
+        # Nothing to give back. Reaching for the chain here would mean acting
+        # on a job this machine has no record of ever holding.
+        _debug.info("job: cancellation for %s but no job is held", request.job_id)
+        say(f"  Job {request.job_id} was cancelled, but this machine is not "
+            "holding it.")
+        return
+
+    if held.job_id != request.job_id:
+        _debug.info("job: cancellation for %s while holding %s -- ignored",
+                    request.job_id, held.job_id)
+        say(f"  A cancellation arrived for {request.job_id}, but this machine "
+            f"is holding {held.job_id}. Nothing was changed.")
+        return
+
+    say(f"  Job {request.job_id} was refused by the service. Releasing it on "
+        "chain...")
+    if not acceptance.start_cleanup(held):
+        # Busy, or no escrow configured. Either way the slot is kept: giving it
+        # up while the chain may still have this job assigned here would lose
+        # track of a job this machine owes.
+        _debug.info("job: cleanup for %s could not be started", request.job_id)
+        say("  It could not be released right now. It is being kept so it is "
+            "not lost.")
+
+
+def answer_decisions(
+    acceptance: JobAcceptance,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    *,
+    clock: Callable[[], str] | None = None,
+) -> None:
+    """Send JOB_ACCEPTED for anything that was accepted since the last look.
+
+    Called from the read loop, so the socket still has exactly one writer.
+
+    **Only an acceptance sends anything.** The Backend moves a Job to RUNNING
+    the moment it hears JOB_ACCEPTED, so telling it before the chain has this
+    machine as the provider would put a Job in RUNNING that this machine has
+    no on-chain claim to.
+    """
+    for decision in acceptance.take_decisions():
+        _settle(decision, socket, slot, say, clock,
+                acceptance.operator_address, acceptance)
+
+
+def _settle(
+    decision: Decision,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    clock: Callable[[], str] | None,
+    operator_address: str = "",
+    acceptance: Any = None,
+) -> None:
+    job, result = decision.job, decision.result
+    _debug.info("job: %s -- %s %s (%s)", job.job_id, decision.work.value,
+                result.outcome.name, result.detail)
+
+    if decision.is_cleanup:
+        _settle_cleanup(decision, socket, slot, say, clock)
+        return
+
+    if decision.work is Work.RUN:
+        _settle_runtime(decision, slot, say)
+        return
+
+    if result.accepted:
+        slot.confirm()
+        say(f"  Job {job.job_id} accepted.")
+        _say_yes(socket, job, result, operator_address, clock)
+        # Only now: the Backend moves the Job to RUNNING on hearing that
+        # message, and the execution context is not readable before it does.
+        _start_runtime(acceptance, job, say)
+        return
+
+    if result.outcome is AcceptOutcome.REFUSED:
+        # A settled no. The Backend is told why -- a code it can act on --
+        # and the slot is given back so the next offer can be taken.
+        #
+        # Releasing is safe here and only here: REFUSED means the chain gave a
+        # definite answer, either before anything was signed or after a
+        # transaction that demonstrably did not take the job. UNCERTAIN below
+        # is the case where something of ours may still land.
+        say(f"  Job {job.job_id} was not accepted: {result.detail}")
+        _say_no(socket, job.job_id,
+                result.code.value if result.code else "TRANSACTION_FAILED",
+                result.detail, clock)
+        slot.release()
+        return
+
+    # UNCERTAIN. A transaction of ours may still be in flight, and taking
+    # another Job now would leave this machine owing two. The reservation is
+    # kept until somebody looks -- deliberately, and said out loud. No
+    # JOB_REJECTED either: saying no to a Job we may yet hold on chain would be
+    # worse than saying nothing.
+    say(f"  Job {job.job_id} could not be confirmed: {result.detail}")
+    say("  It is being held rather than given up, in case it still completes.")
+
+
+def _start_runtime(acceptance: Any, job: AssignedJob,
+                   say: Callable[..., None]) -> None:
+    """Hand the Job to the background pipeline, if there is one.
+
+    A Worker with no runtime configured simply holds the Job, which is what
+    every build before task 7 did. Saying so out loud matters: silence here
+    would look exactly like a training run that had started.
+    """
+    if acceptance is None or not acceptance.start_runtime(job):
+        say("  The job execution stage is not running on this machine yet.")
+        return
+    say(f"  Job {job.job_id} is being prepared for training...")
+
+
+def _settle_runtime(
+    decision: Decision,
+    slot: JobSlot,
+    say: Callable[..., None],
+) -> None:
+    """What the training container did.
+
+    **Nothing is sent to the Backend here.** JOB_RESULT and JOB_FAILED are
+    task 9's, and the Job stays held either way -- its output is what task 9
+    will upload, and giving the slot back now would let a second Job overwrite
+    the workspace before anybody had read it.
+    """
+    outcome = decision.runtime
+    job = decision.job
+    if outcome is None:
+        return
+
+    if outcome.succeeded:
+        say(f"  Job {job.job_id} finished training.")
+        say(f"  The result is in {outcome.output_dir}.")
+        say("  Sending it to the service is the next stage and is not built yet.")
+        return
+
+    reason = outcome.failure.value if outcome.failure else "UNKNOWN"
+    say(f"  Job {job.job_id} did not finish: {outcome.detail} ({reason})")
+    say("  Reporting this to the service is the next stage and is not built yet.")
+
+
+def _settle_cleanup(
+    decision: Decision,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    clock: Callable[[], str] | None,
+) -> None:
+    """What to do once the chain has answered an ``abortJob``.
+
+    Three outcomes and three different answers, and the differences are the
+    whole point:
+
+    * **CANCELLED** -- the deposit is back with the client. Tell the Backend
+      and let the slot go.
+    * **UNCERTAIN** -- a transaction of ours may still land. **Keep the slot**
+      and say nothing: releasing now could leave this machine holding an
+      on-chain job it has forgotten about, and claiming a cancellation that
+      has not happened is worse than staying quiet.
+    * **REFUSED** -- the chain disagrees with the Backend. What to do next
+      depends on *how*, which is why the state comes back with the result.
+    """
+    job, result = decision.job, decision.result
+
+    if result.accepted:
+        say(f"  Job {job.job_id} was released on chain. The deposit goes back "
+            "to the client.")
+        _say_cancelled(socket, job, result, clock)
+        slot.release()
+        return
+
+    if result.outcome is AcceptOutcome.UNCERTAIN:
+        say(f"  Job {job.job_id} could not be confirmed as released: "
+            f"{result.detail}")
+        say("  It is being held rather than given up, in case the transaction "
+            "still lands.")
+        return
+
+    if result.state is JobState.COMPLETED:
+        # The Backend says cancel; the chain says this job was finished and
+        # paid. Both cannot be true. Nothing is sent and nothing is aborted --
+        # a COMPLETED job has already settled, and this machine is not the
+        # place to decide which side is wrong.
+        _debug.info("job: %s is COMPLETED on chain but the service cancelled it",
+                    job.job_id)
+        say(f"  Job {job.job_id} is already completed on chain, but the "
+            "service asked to cancel it. Nothing was changed on either side.")
+        say("  This needs a person to look at it.")
+        return
+
+    if result.state in (JobState.FUNDED, JobState.NONE):
+        # Never ours on chain, so there is nothing to give back and nothing to
+        # report. The reservation is let go because holding it would block
+        # real work over a job this machine never had.
+        say(f"  Job {job.job_id} was never accepted on chain, so there is "
+            "nothing to release.")
+        slot.release()
+        return
+
+    # Assigned to a different operator, or a transaction that reverted. The
+    # slot is kept: this machine cannot act on the job and cannot prove it is
+    # free of it either.
+    say(f"  Job {job.job_id} could not be released: {result.detail}")
+    say("  It is being held rather than given up.")
+
+
+def _say_cancelled(
+    socket: RegisteredSocket,
+    job: AssignedJob,
+    result: AcceptResult,
+    clock: Callable[[], str] | None,
+) -> None:
+    try:
+        socket.send(job_cancelled_message(
+            job.job_id, (clock or now_in_iso8601)(),
+            reason=ACCEPT_VALIDATION_FAILED,
+            abort_tx_hash=result.transaction_hash))
+    except ConnectionWentAway:
+        _debug.info("job: %s released but the reply did not get out", job.job_id)
+
+
+def _say_yes(
+    socket: RegisteredSocket,
+    job: AssignedJob,
+    result: AcceptResult,
+    operator_address: str,
+    clock: Callable[[], str] | None,
+) -> None:
+    """Tell the Backend this machine took the job, and how it can check.
+
+    Sent only after the chain has been read back and says this operator holds
+    an ASSIGNED job -- see :func:`_settle`. The payload names the on-chain job,
+    the key that signed and the transaction, so the Backend can verify rather
+    than trust.
+    """
+    try:
+        socket.send(job_accepted_message(
+            job.job_id, (clock or now_in_iso8601)(),
+            escrow_job_id=job.escrow.escrow_job_id,
+            operator_address=operator_address,
+            transaction_hash=result.transaction_hash))
     except ConnectionWentAway:
         # The read loop is about to find the same thing and say so. The Job
         # stays held: the Backend still has it assigned to this machine, and
         # the reply goes again if it offers it after the reconnect.
         _debug.info("job: %s accepted but the reply did not get out", job.job_id)
-        return
 
-    if outcome is OfferOutcome.ALREADY_HELD:
-        # Worth repeating. Nothing acknowledges a JOB_ACCEPTED, so the first
-        # one may have gone down with a connection, and acceptJob is a
-        # conditional UPDATE that does nothing the second time.
-        _debug.info("job: %s was already held -- said yes again", job.job_id)
-        return
-    say(f"  Job {job.job_id} accepted. Waiting for the job execution stage.")
+
+def _say_no(
+    socket: RegisteredSocket,
+    job_id: str,
+    code: str,
+    detail: str,
+    clock: Callable[[], str] | None,
+) -> None:
+    """Tell the Backend this machine will not take the job, and why.
+
+    Worth sending even though nothing acknowledges it. Silence costs the client
+    the whole accept timeout with their deposit locked, and costs the Backend
+    the chance to offer the job to somebody else while it is still fundable.
+    """
+    try:
+        socket.send(job_rejected_message(
+            job_id, (clock or now_in_iso8601)(), code=code, message=detail))
+    except ConnectionWentAway:
+        _debug.info("job: %s refused but the reply did not get out", job_id)
 
 
 def keep_alive(
@@ -269,6 +593,7 @@ def keep_alive(
     clock: Callable[[], str] | None = None,
     on_message: OnMessage | None = None,
     monotonic: Callable[[], float] | None = None,
+    each_turn: Callable[[], None] | None = None,
 ) -> tuple[ConnectionOutcome, str]:
     """Read this connection until it fails or somebody says stop, beating on time.
 
@@ -295,6 +620,12 @@ def keep_alive(
     while True:
         if stop.is_set():
             return ConnectionOutcome.STOPPED, "asked to stop"
+
+        # Whatever the background acceptance has finished deciding. Done here,
+        # between reads, so the socket keeps exactly one writer -- and done
+        # every turn, so a decision waits at most one read slice.
+        if each_turn is not None:
+            each_turn()
 
         now = tick()
         if ack_due_at is not None and now >= ack_due_at:
@@ -432,6 +763,7 @@ def stay_connected(
     on_message: OnMessage | None = None,
     monotonic: Callable[[], float] | None = None,
     slot: JobSlot | None = None,
+    acceptance: JobAcceptance | None = None,
 ) -> int:
     """Hold a registered connection open for as long as the Worker is running.
 
@@ -455,7 +787,35 @@ def stay_connected(
     # still has it assigned here, and forgetting would mean accepting it twice
     # after the reconnect.
     slot = slot if slot is not None else JobSlot()
+    # One decider for the whole run, like the slot. A Job being decided on
+    # does not stop being decided on because a socket closed, and a second
+    # decider would be a second acceptJob for the same Job.
+    owned_acceptance = acceptance is None
+    acceptance = acceptance if acceptance is not None else JobAcceptance()
 
+    try:
+        return _connect_until_stopped(
+            settings, credentials, say, stop, open_socket, interval, ack_timeout,
+            on_message, monotonic, slot, acceptance, delays)
+    finally:
+        if owned_acceptance:
+            acceptance.close()
+
+
+def _connect_until_stopped(
+    settings: WorkerSettings,
+    credentials: WorkerCredentials,
+    say: Callable[..., None],
+    stop: StopSignal,
+    open_socket: Any,
+    interval: float,
+    ack_timeout: float,
+    on_message: OnMessage | None,
+    monotonic: Callable[[], float] | None,
+    slot: JobSlot,
+    acceptance: JobAcceptance,
+    delays: Any,
+) -> int:
     while not stop.is_set():
         result, socket = open_registered_socket(
             settings, credentials, open_socket=open_socket)
@@ -480,8 +840,11 @@ def stay_connected(
         try:
             outcome, detail = keep_alive(
                 socket, stop, interval=interval, ack_timeout=ack_timeout,
-                on_message=on_message or _dispatch_to(socket, slot, say),
-                monotonic=monotonic)
+                on_message=on_message or _dispatch_to(
+                    socket, slot, say, acceptance),
+                monotonic=monotonic,
+                each_turn=lambda: answer_decisions(
+                    acceptance, socket, slot, say))
         finally:
             # The one place a socket this function opened is closed.
             socket.close()
@@ -498,7 +861,10 @@ def stay_connected(
 
 
 def _dispatch_to(
-    socket: RegisteredSocket, slot: JobSlot, say: Callable[..., None]
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    acceptance: JobAcceptance,
 ) -> OnMessage:
     """What to do with a message that did not answer a heartbeat.
 
@@ -510,7 +876,10 @@ def _dispatch_to(
     """
     def dispatch(message: dict[str, Any]) -> None:
         if message["type"] == JOB_ASSIGN:
-            take_the_job(message, socket, slot, say)
+            take_the_job(message, socket, slot, say, acceptance)
+            return
+        if message["type"] == JOB_CANCEL:
+            cancel_the_job(message, slot, say, acceptance)
             return
         _note_unhandled(message)
 
