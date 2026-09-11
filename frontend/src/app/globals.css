@@ -292,26 +292,21 @@
       background: color-mix(in srgb, var(--color-surface-2) 6%, transparent);
     }
   }
-  /* 맨 위로 — 푸터 위(우측, px-16 정렬) 고정. 연출이 끝난 구간(body[data-at-end], landingScene 이 씀)에서만 떠오르고, 첫 화면·스토리 중엔 숨김 */
+  /* 맨 위로 — 푸터 위(우측, px-16 정렬) 고정. 표시 여부(스크롤 시작 시)는 backToTop.tsx 가 opacity 로 제어 */
   .back-to-top {
     position: fixed;
     right: 4rem;
-    bottom: calc(5rem + 1.5rem); /* 푸터 높이 80 + 24 */
+    bottom: calc(5rem + 1rem); /* 푸터(80) 바로 위 16px — 푸터 글자를 가리지 않게 */
     z-index: 40;
-    opacity: 0;
-    transform: translateY(8px);
-    pointer-events: none;
-    transition:
-      opacity 300ms var(--ease-out-expo),
-      transform 300ms var(--ease-out-expo);
-  }
-  body[data-at-end="1"] .back-to-top {
-    opacity: 1;
-    transform: none;
-    pointer-events: auto;
   }
   body[data-nav="hidden"] .nav-glass {
     transform: translateY(-100%);
+  }
+  /* 진입 직후(landingScene 이 data-nav 를 정하기 전) — 전환 없이 즉시 숨김.
+     안 그러면 로드 순간 네비가 보였다가 위로 슬라이드되며 사라지는 모션이 보인다 */
+  body:not([data-nav]) .nav-glass {
+    transform: translateY(-100%);
+    transition: none;
   }
 }
 
