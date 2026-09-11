@@ -1,9 +1,9 @@
 {
   "contractName": "GPUJobEscrow",
-  "sourceCommit": "38b0cfa",
+  "sourceCommit": "87055d6",
   "solcVersion": "0.8.28",
   "evmVersion": "paris",
-  "generatedAt": "2026-09-10T07:01:39.113Z",
+  "generatedAt": "2026-09-11T01:46:26.917Z",
   "deployed": false,
   "note": "아직 배포하지 않았습니다. 배포 후 주소는 deployments/ 에 따로 기록합니다.",
   "stateEnum": {
@@ -74,11 +74,6 @@
         }
       ],
       "name": "SafeERC20FailedOperation",
-      "type": "error"
-    },
-    {
-      "inputs": [],
-      "name": "SsafyDeploymentBlocked",
       "type": "error"
     },
     {

@@ -1,6 +1,6 @@
 # GShared Blockchain — G Coin
 
-현재 구현 범위는 G Coin ERC-20 토큰, GPU 작업 에스크로(`GPUJobEscrow`), 단위·e2e 테스트, 로컬 개발 체인과 공급자·키퍼 참고 구현, 로컬 및 SSAFY Ignition 배포 도구다. 2026-09-07 GCoin 을 SSAFY 체인에 배포하고 온체인 검증과 MetaMask 지갑 간 GSC 전송을 확인했다. 에스크로는 로컬에서 105 passing(Solidity 88, Node.js 17)으로 검증했고 SSAFY 체인에는 아직 배포하지 않았다(생성자 체인 가드). 연동 규격은 `docs/03-에스크로-연동-규격.md` 와 `abi/GPUJobEscrow.json` 이 정본이다.
+현재 구현 범위는 G Coin ERC-20 토큰, GPU 작업 에스크로(`GPUJobEscrow`), 단위·e2e 테스트, 로컬 개발 체인과 공급자·키퍼 참고 구현, 로컬 및 SSAFY Ignition 배포 도구다. 2026-09-07 GCoin 을 SSAFY 체인에 배포하고 온체인 검증과 MetaMask 지갑 간 GSC 전송을 확인했다. 에스크로는 로컬에서 103 passing(Solidity 86, Node.js 17)으로 검증했고 SSAFY 체인 배포는 `S15P21E204-155` 에서 진행한다. 연동 규격은 `docs/03-에스크로-연동-규격.md` 와 `abi/GPUJobEscrow.json` 이 정본이다.
 
 ## 실제 배포 기록 (2026-09-07)
 
@@ -84,7 +84,7 @@ npm run deploy:local
 
 ## 로컬 개발 체인 — 연동 개발용
 
-워커와 백엔드가 온체인 연동을 개발할 때 붙을 곳이다. 에스크로는 SSAFY 체인에 배포되어 있지 않고 체인 가드가 배포를 막고 있어, 로컬에 같은 구성을 세운다.
+워커와 백엔드가 온체인 연동을 개발할 때 붙을 곳이다. 에스크로를 SSAFY 체인에 배포하기 전까지는 로컬에 같은 구성을 세운다.
 
 **SSAFY 체인 대신 로컬을 쓰는 결정적인 이유는 시각을 조작할 수 있다는 점이다.** `abortJob` 과 시한 만료 경로를 시험하려면 시계를 앞으로 돌려야 하는데 SSAFY 체인에서는 못 한다. 여기서는 시한을 초 단위로 짧게 잡아 몇 분 안에 전 경로를 확인한다.
 
@@ -228,9 +228,66 @@ npm run verify:ssafy
 로컬 테스트 통과만으로 실제 SSAFY RPC·MetaMask 호환성이 확인되지는 않는다. 위 네트워크 배포와 수동 전송을 수행한 뒤 완료로 기록한다.
 
 
+## 에스크로 SSAFY 체인 배포
+
+GCoin 이 먼저 배포되어 있어야 한다. 에스크로는 결제 토큰 주소를 생성자 인자로 받고, **`acceptTimeout` 과 `executionTimeout` 은 배포한 뒤에 고칠 수 없다(immutable).**
+
+### 1. 배포 파라미터 확인
+
+`ignition/parameters/ssafy-escrow.json` 에 적힌 값이 그대로 배포된다.
+
+| 파라미터 | 값 | 뜻 |
+| --- | --- | --- |
+| `paymentToken` | `0xaCe3c977A539C16668528619F9417589f12C7B22` | SSAFY 체인에 배포된 GCoin 주소 |
+| `acceptTimeout` | `600` | 예치 후 수락까지 10분 |
+| `executionTimeout` | `86400` | 수락 후 제출까지 24시간 |
+
+### 2. 로컬 예행
+
+```shell
+npm run test:deployment:escrow
+```
+
+가스 가격 0인 로컬 HTTP RPC에 GCoin 을 올리고 에스크로 배포 경로를 그대로 한 바퀴 돌린다. 사전 점검이 세 파라미터를 출력하는지, 잘못된 Chain ID·코드 없는 결제 토큰·잘못된 컨트랙트 주소를 막는지, 재실행 시 중복 배포를 하지 않는지 검사한다. 실제 SSAFY RPC 는 사용하지 않는다. 생성한 chain-31337 기록을 정리하며, 해당 기록이 이미 있으면 덮어쓰지 않고 중단한다.
+
+### 3. 배포 전 점검
+
+```powershell
+npm run check
+npm run preflight:escrow:ssafy
+```
+
+`SSAFY_RPC_URL` · `SSAFY_CHAIN_ID` · `SSAFY_PRIVATE_KEY` 셋이 필요하고 `ESCROW_CONTRACT_ADDRESS` 는 비워 둔다. 사전 점검은 RPC Chain ID, 결제 토큰 주소에 코드가 있고 심볼이 `GSC`·decimals 가 18 인지, 최신 블록의 base fee, 가스 가격 0으로 배포 가스 추정이 되는지 확인한다. 트랜잭션은 보내지 않는다.
+
+**출력에 실린 `paymentToken` · `acceptTimeout` · `executionTimeout` 세 값을 눈으로 확인한 뒤에 배포한다.** 시한 둘은 immutable 이라 잘못 배포하면 재배포 말고는 고칠 방법이 없다.
+
+### 4. 실제 배포
+
+```powershell
+npm run deploy:escrow:ssafy
+```
+
+사전 점검 → Ignition 배포 → 배포 후 검증 순서로 실행한다. 배포 기록은 `ignition/deployments/chain-<Chain ID>/` 에 GCoin 기록과 함께 쌓인다.
+
+### 5. 검증 및 팀 전달
+
+```powershell
+npm run verify:escrow:ssafy
+```
+
+개인키 없이 실행할 수 있고 트랜잭션을 보내지 않는다. 주소는 Ignition 기록에서 읽으며, `ESCROW_CONTRACT_ADDRESS` 가 있으면 그 주소를 검사한다.
+
+- 온체인 `paymentToken()` · `acceptTimeout()` · `executionTimeout()` 이 파라미터 파일과 일치
+- `nextJobId()` 가 1
+
+성공하면 `deployments/ssafy-<Chain ID>/GPUJobEscrow.json` 에 공개 주소, Chain ID, 배포 파라미터, ABI 를 내보낸다. 배포 후 두 배포 기록을 검토해 Git 에 함께 남기고, 주소와 ABI 를 프론트·백엔드·워커에 전달한다. 규격 14장에도 주소를 적는다. 기록에 개인키를 넣지 않는다.
+
+**재배포하면 `nextJobId` 가 1 로 돌아간다.** 그래서 백엔드는 작업마다 에스크로 주소를 함께 저장한다.
+
+
 ## 다음 단계
 
-- 에스크로 SSAFY 체인 배포. 체인 가드 해제 승인 뒤 진행한다 (`S15P21E204-155`)
+- 에스크로 SSAFY 체인 배포와 배포 후 검증 (`S15P21E204-155`)
 - 워커의 operator 키 생성·DPAPI 보관·`acceptJob` 서명. System 담당 (규격 2장)
 - 백엔드의 `jobs`·`workers` 온체인 컬럼과 `JOB_ASSIGN` 온체인 필드 (`S15P21E204-167`, 규격 6·9장)
 - 이의 제기·판정과 공급자 담보는 후속 과제 (`S15P21E204-157`, `-158`)
