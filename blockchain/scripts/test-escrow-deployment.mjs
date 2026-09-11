@@ -45,6 +45,15 @@ async function run(args, extra={}, success=true) {
   console.log("Expected rejection: "+args.join(" "));
   return result.output;
 }
+/**
+ * 실패해야 하는 호출을 돌리고, 의도한 사유로 실패했는지까지 확인한다.
+ * 종료 코드만 보면 다른 이유로 실패해도 통과하는 거짓 양성이 생긴다.
+ */
+async function reject(args, extra, pattern) {
+  const output = await run(args, extra, false);
+  assert.match(output, pattern, `Expected rejection reason ${pattern}, but the command failed for another reason:\n${output}`);
+  return output;
+}
 async function rpc(method,params=[]) {
  const r=await fetch(env.SSAFY_RPC_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method,params})});
  const data=await r.json(); if(data.error) throw Error(data.error.message); return data.result;
@@ -60,16 +69,16 @@ try {
  await writeParams(token);
 
  // 운영 진입점은 31221 전용이다. 이 노드는 31337 이므로 어떤 환경 변수를 주어도 통과할 수 없다.
- await run(["run","scripts/preflight-escrow.ts"],{},false);
- await run(["run","scripts/preflight-escrow.ts"],{ESCROW_EXPECT_CHAIN_ID:"31337"},false);  // 옛 우회 변수는 더 이상 없다
- await run(["run","scripts/preflight-escrow.ts"],{SSAFY_CHAIN_ID:"31221"},false);          // 변수를 속여도 RPC 가 다르면 막힌다
- await run(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""},false);
+ await reject(["run","scripts/preflight-escrow.ts"],{},/only targets chain 31221/);
+ await reject(["run","scripts/preflight-escrow.ts"],{ESCROW_EXPECT_CHAIN_ID:"31337"},/only targets chain 31221/);  // 옛 우회 변수는 더 이상 없다
+ await reject(["run","scripts/preflight-escrow.ts"],{SSAFY_CHAIN_ID:"31221"},/RPC chain ID does not match the target chain 31221/);  // 변수를 속여도 RPC 가 다르면 막힌다
+ await reject(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""},/only targets chain 31221/);
 
  // 아래부터는 예행 전용 진입점으로 거부 케이스를 확인한다.
- await run(["run","scripts/dev/preflight-escrow-local.ts"],{SSAFY_CHAIN_ID:"31338"},false);
- await run(["run","scripts/dev/preflight-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:account.address},false);
+ await reject(["run","scripts/dev/preflight-escrow-local.ts"],{SSAFY_CHAIN_ID:"31338"},/only targets chain 31337/);
+ await reject(["run","scripts/dev/preflight-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:account.address},/Clear ESCROW_CONTRACT_ADDRESS/);
  await writeParams(account.address);                       // 코드가 없는 EOA 주소
- await run(["run","scripts/dev/preflight-escrow-local.ts"],{},false);
+ await reject(["run","scripts/dev/preflight-escrow-local.ts"],{},/No contract code at paymentToken/);
  await writeParams(token);
 
  const preflight = await run(["run","scripts/dev/preflight-escrow-local.ts"]);
@@ -96,16 +105,16 @@ try {
  // 배포된 값과 파라미터 파일이 어긋나면 검증이 잡아내야 한다. 시한은 immutable 이라
  // 여기서 놓치면 재배포 말고는 고칠 방법이 없다.
  await writeParams(token, ACCEPT_TIMEOUT + 1);
- await run(["run","scripts/dev/verify-escrow-local.ts"],{SSAFY_PRIVATE_KEY:""},false);
+ await reject(["run","scripts/dev/verify-escrow-local.ts"],{SSAFY_PRIVATE_KEY:""},/On-chain acceptTimeout differs from the parameter file/);
  await writeParams(token, ACCEPT_TIMEOUT, EXECUTION_TIMEOUT + 1);
- await run(["run","scripts/verify-escrow.ts"],{SSAFY_PRIVATE_KEY:""},false);
+ await reject(["run","scripts/dev/verify-escrow-local.ts"],{SSAFY_PRIVATE_KEY:""},/On-chain executionTimeout differs from the parameter file/);
  await writeParams(token);
 
  // 코드는 있지만 다른 컨트랙트인 주소. 런타임 바이트코드 대조로 걸러야 한다.
- await run(["run","scripts/dev/verify-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:token,SSAFY_PRIVATE_KEY:""},false);
- await run(["run","scripts/dev/verify-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:account.address,SSAFY_PRIVATE_KEY:""},false);
+ await reject(["run","scripts/dev/verify-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:token,SSAFY_PRIVATE_KEY:""},/Deployed runtime bytecode does not match/);
+ await reject(["run","scripts/dev/verify-escrow-local.ts"],{ESCROW_CONTRACT_ADDRESS:account.address,SSAFY_PRIVATE_KEY:""},/No contract code at/);
  await run(["run","scripts/dev/verify-escrow-local.ts"],{SSAFY_PRIVATE_KEY:""});   // 원복 뒤 다시 통과
- console.log("PASS: production entry points refuse this chain, zero-native-balance deployment, three printed parameters, read-only verification, runtime bytecode match, wrong chain/token/address/timeout rejection, idempotent redeploy.");
+ console.log("PASS: every rejection was checked for its actual reason, not just a non-zero exit code.");
 } finally {
  await server.close();
  for(const p of paths) {

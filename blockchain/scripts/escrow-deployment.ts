@@ -29,6 +29,7 @@ function maskImmutables(bytecode: string, references: ImmutableReferences): stri
   const bytes = Buffer.from(bytecode.replace(/^0x/, ""), "hex");
   for (const slots of Object.values(references)) {
     for (const { start, length } of slots) {
+      // 길이를 미리 대조하므로 여기에 도달하는 코드는 오프셋이 범위 안에 있다.
       assert.ok(start + length <= bytes.length, "immutable reference is out of range");
       bytes.fill(0, start, start + length);
     }
@@ -147,6 +148,13 @@ export async function runEscrowVerify(expectedChainId: number): Promise<void> {
     // 자리만 양쪽에서 지우고 나머지 전 구간을 대조해, 길이만 같은 다른 코드를 걸러낸다.
     const references = (artifact as unknown as { immutableReferences?: ImmutableReferences }).immutableReferences ?? {};
     assert.ok(Object.keys(references).length > 0, "Artifact has no immutableReferences; rebuild with `npm run build`");
+    // 길이부터 대조한다. 더 짧은 코드에 이 빌드의 immutable 오프셋을 적용하면 범위를 벗어나,
+    // 바이트코드가 다르다는 사실 대신 내부 오류가 드러난다.
+    assert.equal(
+      code.length,
+      artifact.deployedBytecode.length,
+      "Deployed runtime bytecode does not match this GPUJobEscrow build: length differs",
+    );
     assert.equal(
       maskImmutables(code, references),
       maskImmutables(artifact.deployedBytecode, references),
