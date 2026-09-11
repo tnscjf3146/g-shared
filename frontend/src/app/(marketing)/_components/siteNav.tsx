@@ -17,7 +17,7 @@ export function SiteNav() {
     <header className="nav-glass fixed inset-x-0 top-0 z-50">
       <div className="relative mx-auto flex h-[72px] max-w-[1440px] items-center justify-between px-16">
         <Link href="/" aria-label="G-shared 홈">
-          <Image src="/logo-wordmark.png" alt="G-shared" width={116} height={20} priority unoptimized className="h-[20px] w-auto" />
+          <Image src="/logo-wordmark.png" alt="G-shared" width={116} height={20} priority unoptimized className="nav-logo h-[20px] w-auto" />
         </Link>
         {/* 메뉴는 로고·우측 아이콘 폭과 무관하게 화면 정중앙에 고정 */}
         <nav className="absolute left-1/2 flex -translate-x-1/2 items-center gap-8">

@@ -215,6 +215,10 @@
       0 2px 4px rgba(0, 0, 0, 0.4),
       inset 0 1px 0 color-mix(in srgb, var(--color-surface-2) 10%, transparent);
   }
+  /* 어두운 배경 위에선 로고 워드마크(짙은 PNG)를 흰색으로 반전 */
+  body[data-nav-theme="dark"] .nav-logo {
+    filter: brightness(0) invert(1);
+  }
   /* 네비 버튼(로그인·로그아웃 공용) — 회색 헤어라인 버튼. 색은 전부 globals 회색 토큰, 어두운 테마에선 surface-2 기준으로 반전. 8px 모서리, 높이 36 */
   .nav-btn {
     display: inline-flex;
