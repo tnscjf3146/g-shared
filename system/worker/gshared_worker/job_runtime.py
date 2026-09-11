@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -234,6 +235,20 @@ class RuntimeOutcome:
     #: Filled in by whoever ran an abortJob after a failure, so task 9 can
     #: report both facts in one JOB_FAILED.
     abort_tx_hash: str | None = None
+    #: How long the training container ran, in seconds, measured with a
+    #: monotonic clock. **The authoritative ``actualRuntimeSec``.**
+    #:
+    #: ``None`` when no container ever started -- a context that did not
+    #: match, a dataset that would not download. Those failures took time too,
+    #: but none of it was runtime, and a zero here would be a measurement that
+    #: was never made. The Backend's column is nullable; it stays null.
+    #:
+    #: Deliberately **not** the container's own ``runtimeSec``. That one
+    #: starts when the Trainer does, so it leaves out loading the model, which
+    #: on a cold machine is most of a short job. The Scheduler is predicting
+    #: how long a supplier's GPU will be busy, and the supplier's GPU is busy
+    #: for all of it.
+    actual_runtime_sec: float | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -393,6 +408,7 @@ async def run_training(
     host_path_of: Callable[[Path], Any] | None = None,
     timeout: float = TRAINING_TIMEOUT_SECONDS,
     on_event: Callable[[RuntimeEvent], None] | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> RuntimeOutcome:
     """Start the container, watch it, and say what happened.
 
@@ -416,6 +432,13 @@ async def run_training(
     _debug.info("runtime: starting %s", container_name(workspace.job_id))
 
     events: list[RuntimeEvent] = []
+    tick = monotonic or time.monotonic
+    # The clock starts here and stops when the process is gone: container
+    # start, the model load inside it, the training, its own output check,
+    # and termination. Everything before this line -- the context, the
+    # weights, the dataset, the pull -- already happened, and everything
+    # after it, the packaging and the upload and the chain, has not.
+    started_at = tick()
     try:
         finished = await _run_container(
             runner, command, timeout, events, on_event)
@@ -423,12 +446,16 @@ async def run_training(
         return RuntimeOutcome(
             RuntimeState.FAILED, RuntimeFailure.DOCKER_UNAVAILABLE,
             f"the training container could not be started "
-            f"({type(error).__name__})")
+            f"({type(error).__name__})",
+            actual_runtime_sec=_elapsed(tick, started_at))
+
+    ran_for = _elapsed(tick, started_at)
 
     if finished is None:
         return RuntimeOutcome(
             RuntimeState.FAILED, RuntimeFailure.TIMED_OUT,
-            "the training container did not finish in time")
+            "the training container did not finish in time",
+            actual_runtime_sec=ran_for)
 
     if not events:
         # Either the fallback path, or a container that said nothing at all.
@@ -441,7 +468,7 @@ async def run_training(
         return RuntimeOutcome(
             RuntimeState.FAILED, failure,
             _said_why(events, failure), exit_code,
-            workspace.output_dir, events)
+            workspace.output_dir, events, actual_runtime_sec=ran_for)
 
     if not _has_output(workspace.output_dir):
         # Exit 0 with nothing written. The container checks this itself, so
@@ -449,11 +476,12 @@ async def run_training(
         return RuntimeOutcome(
             RuntimeState.FAILED, RuntimeFailure.OUTPUT_VALIDATION_FAILED,
             "the container finished successfully but wrote no adapter",
-            exit_code, workspace.output_dir, events)
+            exit_code, workspace.output_dir, events,
+            actual_runtime_sec=ran_for)
 
     return RuntimeOutcome(
         RuntimeState.FINISHED, None, "training finished", exit_code,
-        workspace.output_dir, events)
+        workspace.output_dir, events, actual_runtime_sec=ran_for)
 
 
 async def _run_container(
@@ -488,6 +516,16 @@ async def _run_container(
         command, timeout=timeout,
         max_output_bytes=MAX_CAPTURED_OUTPUT_BYTES,
         on_stdout_line=saw)
+
+
+def _elapsed(tick: Callable[[], float], started_at: float) -> float:
+    """Whole and fractional seconds, never negative.
+
+    ``time.monotonic`` cannot go backwards, so the floor is for the injected
+    clocks in tests -- and for the one number that must never reach the
+    Backend as a negative duration.
+    """
+    return max(0.0, round(tick() - started_at, 3))
 
 
 def _has_output(output_dir: Path) -> bool:

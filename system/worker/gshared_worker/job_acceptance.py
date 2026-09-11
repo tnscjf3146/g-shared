@@ -34,7 +34,8 @@ from typing import Any, Callable
 
 from .escrow import AcceptOutcome, AcceptResult
 from .job_rejection import RejectCode
-from .runtime_progress import ProgressChannel, ProgressTracker
+from .job_settlement import Unsettled
+from .runtime_progress import ProgressChannel, ProgressTracker, TerminalChannel
 from .logging_setup import LOGGER_NAME
 from .worker_job import AssignedJob
 
@@ -63,6 +64,10 @@ class Work(Enum):
     CLEANUP = "CLEANUP"
     #: Prepare the inputs and run the training container. Minutes to hours.
     RUN = "RUN"
+    #: Package, upload, and record the outcome on chain. Seconds to minutes,
+    #: and every part of it can block -- which is why it is not done on the
+    #: connection loop.
+    SETTLE = "SETTLE"
 
 
 @dataclass(frozen=True)
@@ -153,7 +158,8 @@ class JobAcceptance:
     def __init__(self, decide: DecideOnJob | None = None,
                  operator_address: str = "",
                  clean_up: DecideOnJob | None = None,
-                 run_job: Any = None) -> None:
+                 run_job: Any = None,
+                 settle_job: Any = None) -> None:
         self._decide = decide or refuse_without_escrow
         #: Gives a job back on chain. ``None`` when no escrow is configured,
         #: in which case nothing was ever accepted and there is nothing to
@@ -163,6 +169,11 @@ class JobAcceptance:
         #: runtime configured, in which case an accepted Job simply waits --
         #: which is what every build before task 7 did.
         self._run_job = run_job
+        #: Turns a finished container into a terminal answer: package, upload,
+        #: submitResult or abortJob. ``None`` when this Worker has no escrow
+        #: or no Backend to settle against, in which case a finished Job is
+        #: held and the supplier is told so rather than it being dropped.
+        self._settle_job = settle_job
         #: This machine's on-chain signing address. Public, and carried in
         #: JOB_ACCEPTED so the Backend can check the claim against the chain.
         #: Empty when no escrow is configured, in which case nothing is ever
@@ -176,6 +187,10 @@ class JobAcceptance:
         #: one is the only one worth having. Putting them in one queue would
         #: mean either keeping every step or risking the outcome.
         self.progress = ProgressChannel()
+        #: Where a settled Job's terminal answer waits for the connection
+        #: loop. **Not** the progress channel: that one coalesces and drops,
+        #: and a lost JOB_RESULT is a Job the Backend holds RUNNING for ever.
+        self.terminal = TerminalChannel()
         #: Whether the pipeline wants to be told where to publish progress.
         #: Decided once, by looking, so a runtime that predates this -- or a
         #: test double that returns a fixed outcome -- is called the way it
@@ -261,6 +276,68 @@ class JobAcceptance:
             name="gshared-runtime", daemon=True)
         self._thread.start()
         return True
+
+    def start_settlement(self, job: AssignedJob, outcome: Any) -> bool:
+        """Settle a finished Job in the background. False when busy or unable.
+
+        Separate from :meth:`start_runtime` because the container has already
+        stopped: the GPU is free, but the Job is not finished until its result
+        is stored, recorded on chain and reported. The slot stays held for all
+        of it.
+
+        Refused while a terminal answer is still unsent. That is the guard
+        against settling the same Job twice -- a second run would be a second
+        ``submitResult`` or a second ``abortJob``.
+        """
+        if self._settle_job is None:
+            _debug.info("acceptance: no settlement configured for %s",
+                        job.job_id)
+            return False
+        if not self.terminal.is_empty:
+            _debug.info("acceptance: %s already has a terminal answer",
+                        self.terminal.job_id)
+            return False
+        with self._lock:
+            if self._deciding is not None:
+                return False
+            self._deciding = job.job_id
+        self._thread = threading.Thread(
+            target=self._settle, args=(job, outcome),
+            name="gshared-settlement", daemon=True)
+        self._thread.start()
+        return True
+
+    def _settle(self, job: AssignedJob, outcome: Any) -> None:
+        """Run the terminal flow and put its two answers where they belong.
+
+        The terminal object goes into its own lossless channel; a line for the
+        supplier goes on the ordinary decisions queue. They are separate on
+        purpose -- the line may be missed, the answer may not.
+
+        An :class:`~gshared_worker.job_settlement.Unsettled` is **not** put on
+        the terminal channel. It is the case where the chain and this Worker
+        disagree, and neither JOB_RESULT nor JOB_FAILED is true; the Job stays
+        held and a person has to look.
+        """
+        from .escrow import AcceptOutcome, AcceptResult
+
+        settled: Any = None
+        try:
+            settled = self._settle_job(job, outcome)
+        except Exception:
+            _debug.exception("acceptance: settling %s failed", job.job_id)
+        finally:
+            with self._lock:
+                self._deciding = None
+
+        answered = settled is not None and not isinstance(settled, Unsettled)
+        if answered:
+            self.terminal.put(settled)
+
+        result = AcceptResult(
+            AcceptOutcome.ACCEPTED if answered else AcceptOutcome.REFUSED,
+            _settlement_detail(settled))
+        self._decisions.put(Decision(job, result, Work.SETTLE, settled))
 
     def _run(self, job: AssignedJob, work: Work = Work.ACCEPT) -> None:
         if work is Work.RUN:
@@ -363,3 +440,14 @@ def _accepts_progress(run_job: Any) -> bool:
     except (TypeError, ValueError):
         # Something whose signature cannot be read. Call it the old way.
         return False
+
+
+def _settlement_detail(settled: Any) -> str:
+    """One line about how a settlement ended, for the supplier's window."""
+    if settled is None:
+        return "the job could not be settled"
+    for name in ("detail", "message", "object_key"):
+        value = getattr(settled, name, None)
+        if isinstance(value, str) and value:
+            return value
+    return "the job was settled"

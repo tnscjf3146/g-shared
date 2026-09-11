@@ -37,6 +37,7 @@ from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
 from .worker_credentials import WorkerCredentials, load_credentials
 from .escrow import AcceptOutcome, AcceptResult, JobState
+from .job_settlement import JobResultReady, Unsettled
 from .job_acceptance import Decision, JobAcceptance, Work
 from .worker_job import (
     ACCEPT_VALIDATION_FAILED,
@@ -49,8 +50,10 @@ from .worker_job import (
     SlotState,
     job_accepted_message,
     job_cancelled_message,
+    job_failed_message,
     job_progress_message,
     job_rejected_message,
+    job_result_message,
     read_assignment,
     read_cancellation,
 )
@@ -417,6 +420,70 @@ def send_progress(
     return True
 
 
+def send_terminal(
+    acceptance: JobAcceptance,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None] | None = None,
+    clock: Callable[[], str] | None = None,
+) -> bool:
+    """Send the Job's one terminal message, and only then let the Job go.
+
+    **The last step of a Job, and the only place JOB_RESULT or JOB_FAILED
+    leaves this Worker.** By the time an answer is waiting here the result is
+    in the Backend's storage with a hash it computed itself, and the escrow
+    has either paid out or refunded -- the message says so, it does not decide
+    it.
+
+    Nothing is dropped. Unlike progress, the answer stays in its channel until
+    a send has actually returned; a connection that failed mid-way leaves it
+    there for the next one. The Job's slot is released in the same breath as
+    the successful send, so a Worker that is still trying to report is still
+    holding the Job it is reporting on.
+    """
+    terminal = acceptance.terminal.take()
+    if terminal is None:
+        return False
+
+    held = slot.held
+    if held is None or held.job_id != terminal.job_id:
+        # The Job was let go some other way. Dropping the answer here is
+        # right: the slot is the Worker's claim on the Job, and without it
+        # this is a message about somebody else's work.
+        _debug.info("terminal: %s is no longer held; dropped", terminal.job_id)
+        acceptance.terminal.done(terminal)
+        return False
+
+    message = (job_result_message(terminal, (clock or now_in_iso8601)())
+               if isinstance(terminal, JobResultReady)
+               else job_failed_message(terminal, (clock or now_in_iso8601)()))
+    try:
+        socket.send(message)
+    except ConnectionWentAway as gone:
+        # Kept. The Backend has not been told, and the reconnect will try
+        # again -- which is why this is a channel and not a fire-and-forget.
+        _debug.info("terminal: %s not sent (%s)", terminal.job_id, gone)
+        return False
+
+    acceptance.terminal.done(terminal)
+    _say_settled(terminal, say)
+    # Only now. The GPU has been free since the container stopped, but the
+    # Job was not finished until the service had been told.
+    slot.release()
+    _debug.info("terminal: %s reported as %s",
+                terminal.job_id, message["type"])
+    return True
+
+
+def _say_settled(terminal: Any, say: Callable[..., None] | None) -> None:
+    if say is None:
+        return
+    if isinstance(terminal, JobResultReady):
+        say(f"  Job {terminal.job_id} is complete and the result has been sent.")
+        return
+    say(f"  Job {terminal.job_id} ended: {terminal.code}.")
+
+
 def _settle(
     decision: Decision,
     socket: RegisteredSocket,
@@ -435,7 +502,11 @@ def _settle(
         return
 
     if decision.work is Work.RUN:
-        _settle_runtime(decision, slot, say)
+        _settle_runtime(decision, slot, say, acceptance)
+        return
+
+    if decision.work is Work.SETTLE:
+        _settle_settlement(decision, slot, say)
         return
 
     if result.accepted:
@@ -489,13 +560,18 @@ def _settle_runtime(
     decision: Decision,
     slot: JobSlot,
     say: Callable[..., None],
+    acceptance: Any = None,
 ) -> None:
-    """What the training container did.
+    """What the training container did, and what happens about it next.
 
-    **Nothing is sent to the Backend here.** JOB_RESULT and JOB_FAILED are
-    task 9's, and the Job stays held either way -- its output is what task 9
-    will upload, and giving the slot back now would let a second Job overwrite
-    the workspace before anybody had read it.
+    **Still nothing is sent from here.** The container stopping is not the end
+    of the Job: the result has to be stored, the escrow has to be settled, and
+    only then is there something true to tell the Backend. All of that blocks,
+    so it goes to the background and the answer comes back through
+    :func:`send_terminal`.
+
+    The slot is **not** released. It is this Worker's claim on the Job, and it
+    is held until the service has been told what happened to it.
     """
     outcome = decision.runtime
     job = decision.job
@@ -504,13 +580,39 @@ def _settle_runtime(
 
     if outcome.succeeded:
         say(f"  Job {job.job_id} finished training.")
-        say(f"  The result is in {outcome.output_dir}.")
-        say("  Sending it to the service is the next stage and is not built yet.")
-        return
+    else:
+        reason = outcome.failure.value if outcome.failure else "UNKNOWN"
+        say(f"  Job {job.job_id} did not finish: {outcome.detail} ({reason})")
 
-    reason = outcome.failure.value if outcome.failure else "UNKNOWN"
-    say(f"  Job {job.job_id} did not finish: {outcome.detail} ({reason})")
-    say("  Reporting this to the service is the next stage and is not built yet.")
+    if acceptance is None or not acceptance.start_settlement(job, outcome):
+        # A Worker with no settlement configured holds the Job and says so.
+        # Silence here would look exactly like a result that had been sent.
+        say("  Sending the outcome to the service is not running on this "
+            "machine yet.")
+        return
+    say("  Storing the result and settling the escrow...")
+
+
+def _settle_settlement(
+    decision: Decision,
+    slot: JobSlot,
+    say: Callable[..., None],
+) -> None:
+    """The settlement finished. The message itself goes out elsewhere.
+
+    A settled Job's answer is already in the terminal channel by the time this
+    runs; this only accounts for the case where there is no answer, which is a
+    disagreement between the chain and this Worker that nobody should paper
+    over by sending one of the two terminal messages anyway.
+    """
+    settled = decision.runtime
+    job = decision.job
+    if settled is not None and not isinstance(settled, Unsettled):
+        return
+    detail = getattr(settled, "detail", "") or "the outcome could not be settled"
+    say(f"  Job {job.job_id} could not be settled: {detail}")
+    say("  It is being held rather than reported, because the chain and this "
+        "machine do not agree.")
 
 
 def _settle_cleanup(
@@ -931,9 +1033,14 @@ def _every_turn(
     Decisions first. One of them is the JOB_ACCEPTED that moves the Job to
     RUNNING at the Backend, and progress sent before it would arrive for a Job
     the Backend still has as ASSIGNED -- which it correctly ignores.
+
+    The terminal answer last, and for the same reason in reverse: it is the
+    message that ends the Job, and anything still to say about the Job should
+    already have been said.
     """
     answer_decisions(acceptance, socket, slot, say)
     send_progress(acceptance, socket, slot)
+    send_terminal(acceptance, socket, slot, say)
 
 
 def _dispatch_to(

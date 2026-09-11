@@ -847,12 +847,32 @@ class TestNothingLeaksTheKey(unittest.TestCase):
         # A library's exception message can carry what it was given.
         self.assertIn("type(error).__name__", self.source())
 
-    def test_it_never_submits_a_result(self):
-        # ``resultHash`` is a field of the job struct and reading it is part of
-        # reading the job. What must be absent is the function that writes one.
-        for absent in ("submitResult", "submit_result", "sha256", "hashlib"):
+    def test_it_submits_a_result_but_never_computes_one(self):
+        """``submitResult`` lives here now. Hashing still does not.
+
+        This module writes a hash to the chain; deciding what that hash is
+        belongs to :mod:`gshared_worker.result_artifact`, which takes it from
+        the exact bytes that were uploaded. A digest computed here would be a
+        second answer to the one question where two answers is the failure.
+        """
+        source = self.source()
+
+        self.assertIn("submitResult", source)
+        for absent in ("hashlib", "sha256(", "open(", "read(", "Path("):
             with self.subTest(absent=absent):
-                self.assertNotIn(absent, self.source())
+                self.assertNotIn(absent, source)
+
+    def test_the_hash_it_is_given_is_checked_before_it_is_sent(self):
+        # bytes32 is thirty-two bytes. A short hash would be left-padded by
+        # the encoder into a number that is not the file's digest, written to
+        # a contract that cannot be corrected.
+        from gshared_worker.escrow import _result_hash
+
+        self.assertEqual(_result_hash("AB" * 32), "0x" + "ab" * 32)
+        for wrong in ("0xdeadbeef", "", "0x" + "zz" * 32, "ab" * 31):
+            with self.subTest(wrong=wrong):
+                with self.assertRaises(ValueError):
+                    _result_hash(wrong)
 
     def test_it_never_reaches_a_container(self):
         for absent in ("docker", "subprocess", "Popen", "environment"):

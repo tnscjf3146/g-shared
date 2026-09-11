@@ -450,16 +450,36 @@ class TestWhatThisBuildDoesNotDo(unittest.TestCase):
         for absent in ("urllib", "requests", "httpx", "download"):
             self.assertNotIn(absent, self.source().lower())
 
-    def test_the_later_messages_are_not_here(self):
-        # This list shortens as stages land, and only then. JOB_CANCEL and
-        # JOB_CANCELLED arrived with the escrow cleanup path; JOB_PROGRESS
-        # arrived with task 8 and is checked below instead. What is left
-        # belongs to stages that have not been written, and the point of the
-        # test is that none of it creeps in early.
-        for absent in ("JOB_RESULT", "JOB_FAILED", "resultHash",
-                       "objectKey", "submitTxHash", "actualRuntimeSec"):
+    def test_no_message_type_that_has_not_landed_is_here(self):
+        """Shortens as stages land, and only then.
+
+        JOB_CANCEL and JOB_CANCELLED arrived with the escrow cleanup path,
+        JOB_PROGRESS with task 8, JOB_RESULT and JOB_FAILED with task 9 --
+        each checked on its own below. What is left is the protocol this
+        Worker still does not speak, and the point of the test is that none
+        of it creeps in ahead of the work.
+        """
+        for absent in ("JOB_LOG", "JOB_METRICS", "JOB_HEARTBEAT"):
             with self.subTest(absent=absent):
                 self.assertNotIn(absent, self.source())
+
+    def test_the_terminal_messages_are_envelopes_and_nothing_more(self):
+        """JOB_RESULT and JOB_FAILED are built here. Nothing is decided here.
+
+        The hash, the object key, the transaction and the duration are all
+        measured somewhere else and arrive as a value. A module that could
+        hash a file or read a clock would be a second place those numbers
+        could come from.
+        """
+        source = self.source()
+
+        self.assertIn("job_result_message", source)
+        self.assertIn("job_failed_message", source)
+        for absent in ("hashlib", "sha256", "tarfile", "urllib",
+                       "time.monotonic", "submitResult", "abortJob",
+                       "result-upload"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, source)
 
     def test_progress_is_built_here_but_nothing_is_measured_here(self):
         """JOB_PROGRESS is an envelope. The numbers in it are somebody else's.

@@ -35,6 +35,8 @@ JOB_REJECTED = "JOB_REJECTED"
 JOB_CANCEL = "JOB_CANCEL"
 JOB_CANCELLED = "JOB_CANCELLED"
 JOB_PROGRESS = "JOB_PROGRESS"
+JOB_RESULT = "JOB_RESULT"
+JOB_FAILED = "JOB_FAILED"
 
 
 class JobAssignmentError(ValueError):
@@ -517,6 +519,83 @@ def job_progress_message(progress: Any, timestamp: str) -> dict[str, Any]:
     return {
         "type": JOB_PROGRESS,
         "jobId": progress.job_id,
+        "timestamp": timestamp,
+        "payload": payload,
+    }
+
+
+def job_result_message(result: Any, timestamp: str) -> dict[str, Any]:
+    """The JOB_RESULT envelope, in the shape ``handleJobResult`` reads.
+
+    Read from ``WorkerWebSocketHandler.handleJobResult`` and
+    ``JobService.completeJob``, which is stricter than it looks. Before it
+    moves anything it runs ``resultMismatch`` against what the upload step
+    recorded, and refuses -- flagging the Job for reconciliation rather than
+    completing it -- unless **all three** hold:
+
+    * ``result-upload/complete`` has been done for this Job at all;
+    * ``objectKey`` equals the one it verified;
+    * ``resultHash`` equals ``"0x" + resultSha256``, compared case-insensitively.
+
+    So this message is not a claim the Backend takes on trust; it is the
+    Worker agreeing with something the Backend already measured. All three
+    values therefore come from earlier steps rather than being rebuilt here.
+
+    ``actualRuntimeSec`` is ``doubleOrNull`` into a ``DOUBLE`` column (V7
+    widened it from INT) -- a real number, unlike JOB_PROGRESS's integer
+    ``elapsedSec``. The two are different measurements and they are stored
+    differently.
+
+    ``submitTxHash`` is omitted when no transaction was sent, which happens
+    when the chain already held this exact result and the settlement
+    reconciled it. The column is ``CHAR(66)``; a made-up hash would fit the
+    shape and be wrong for ever.
+    """
+    payload: dict[str, Any] = {
+        "objectKey": result.object_key,
+        "resultHash": result.result_hash,
+    }
+    if result.submit_tx_hash:
+        payload["submitTxHash"] = result.submit_tx_hash
+    if result.actual_runtime_sec is not None:
+        payload["actualRuntimeSec"] = float(result.actual_runtime_sec)
+    return {
+        "type": JOB_RESULT,
+        "jobId": result.job_id,
+        "timestamp": timestamp,
+        "payload": payload,
+    }
+
+
+def job_failed_message(failure: Any, timestamp: str) -> dict[str, Any]:
+    """The JOB_FAILED envelope, in the shape ``handleJobFailed`` reads.
+
+    ``failJob`` stores ``code`` and ``message`` joined as ``"CODE: message"``
+    in ``failReason`` and truncates at 2000 characters. There is no allowlist
+    of codes, so the codes are the Worker's own and are kept stable:
+    :class:`~gshared_worker.job_runtime.RuntimeFailure` for anything the
+    container decided, and the settlement's own names for the steps after it.
+
+    ``message`` is a short sentence for whoever reads the Job later. It is
+    never raw stderr -- that can carry a path, a signed URL or a line of
+    somebody's dataset.
+
+    Like JOB_RESULT this only goes out once the chain agrees: the deposit has
+    been returned and ``jobs()`` reads back CANCELLED. A JOB_FAILED sent while
+    the escrow still held the money would put the Backend's record and the
+    money in two different states.
+    """
+    payload: dict[str, Any] = {
+        "code": failure.code,
+        "message": failure.message,
+    }
+    if failure.abort_tx_hash:
+        payload["abortTxHash"] = failure.abort_tx_hash
+    if failure.actual_runtime_sec is not None:
+        payload["actualRuntimeSec"] = float(failure.actual_runtime_sec)
+    return {
+        "type": JOB_FAILED,
+        "jobId": failure.job_id,
         "timestamp": timestamp,
         "payload": payload,
     }
