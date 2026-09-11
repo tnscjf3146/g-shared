@@ -38,6 +38,8 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.training.provenance import Provenance
+
 #: 파일 이름에 synthetic이 들어간다. 나중에 이 디렉터리를 뒤지는 사람이 파일명만
 #: 보고도 실측 데이터가 아니라는 것을 알아야 한다.
 BOOTSTRAP_FILE_NAME = "runtime_bootstrap_synthetic.jsonl"
@@ -59,8 +61,8 @@ class _Gpu:
 
     name: str
     vram_mb: int
-    #: 측정될 법한 tokens/sec의 범위. RTX 4070 Laptop만 실제 측정값(36,521.7)에
-    #: 맞춰 두었고 나머지는 그럴듯한 폭을 준 것이다.
+    #: 측정될 법한 tokens/sec의 범위. RTX 4070 Laptop만 실제 측정값에 맞춰 두었고
+    #: 나머지는 그럴듯한 폭을 준 것이다.
     benchmark_low: float
     benchmark_high: float
 
@@ -68,7 +70,10 @@ class _Gpu:
 _GPUS: tuple[_Gpu, ...] = (
     _Gpu("NVIDIA GeForce RTX 3060", 12288, 15_500, 18_500),
     _Gpu("NVIDIA GeForce RTX 4060", 8188, 19_000, 23_000),
-    _Gpu("NVIDIA GeForce RTX 4070 Laptop GPU", 8188, 35_200, 37_400),
+    # 2026-09-11에 이 기계에서 Worker의 gshared-benchmark-v1을 실제로 돌린 결과에
+    # 맞췄다. 세 번의 run이 29,957.2 / 28,369.3 / 29,048.5 tokens/sec 이었다.
+    # 이전 값(35,200~37,400)은 어디서 왔는지 확인되지 않았고, 실측과 25% 어긋난다.
+    _Gpu("NVIDIA GeForce RTX 4070 Laptop GPU", 8188, 28_300, 30_000),
     _Gpu("NVIDIA GeForce RTX 4080", 16376, 52_000, 58_000),
     _Gpu("NVIDIA GeForce RTX 4090", 24564, 68_000, 76_000),
 )
@@ -135,8 +140,22 @@ def _effective_rate(
 
 
 def _startup_overhead(params: int, rng: random.Random) -> float:
-    """컨테이너 기동과 가중치 로딩. 큰 모델일수록 오래 걸린다."""
-    return 45.0 + (params / 1_000_000_000) * 12.0 + rng.uniform(-8.0, 8.0)
+    """가중치 적재와 어댑터 검증. 큰 모델일수록 오래 걸린다.
+
+    **실측으로 고쳤다.** 이전 값은 ``45 + 12/B`` 초였는데 근거가 없었고, System
+    1번에서 실제로 잰 값과 10배 어긋났다. 측정 두 건:
+
+    * Qwen3-0.6B : 33.441 - 28.485 = **4.956초**
+    * Qwen3-1.7B : 11.070 -  2.584 = **8.486초**
+
+    두 점을 잇는 직선이 ``3.0 + 3.2/B`` 다. 점이 둘뿐이라 큰 모델 쪽은 여전히
+    외삽이지만, 근거 없는 45초보다는 잰 값에서 뻗은 선이 낫다.
+
+    이것이 틀렸을 때 어디가 아픈지는 분명하다. 짧은 작업일수록 전체에서 차지하는
+    비중이 커서, 45초를 쓰면 30초짜리 Demo Job을 몇 배로 과대예측한다 -- 실제로
+    그렇게 나왔고, 그래서 고쳤다.
+    """
+    return 3.0 + (params / 1_000_000_000) * 3.2 + rng.uniform(-1.0, 1.5)
 
 
 def build_rows(count: int = 1200, seed: int = DEFAULT_SEED) -> list[dict[str, object]]:
@@ -149,7 +168,13 @@ def build_rows(count: int = 1200, seed: int = DEFAULT_SEED) -> list[dict[str, ob
         model = rng.choice(_MODELS)
         benchmark = rng.uniform(gpu.benchmark_low, gpu.benchmark_high)
 
-        sample_count = rng.randint(500, 60_000)
+        # 균등이 아니라 log 균등이다. 균등하게 뽑으면 중앙값이 3만 건이 되어
+        # 데이터가 전부 몇 시간짜리 작업으로 차고, 실제 G-shared의 Quick Demo
+        # (240건, 33초)는 학습 분포 밖으로 밀려난다. 실측 두 건 중 하나가 정확히
+        # 그 경우였고 5~10배 과대예측됐다. 아래 범위는 시연용 수백 건부터 대형
+        # 작업 수만 건까지를 고르게 덮는다.
+        sample_count = int(round(math.exp(rng.uniform(
+            math.log(100), math.log(60_000)))))
         avg_seq_length = rng.uniform(80.0, 900.0)
         max_seq_length = int(avg_seq_length * rng.uniform(1.5, 4.0)) + 1
         max_length = rng.choice((256, 512, 1024, 2048))
@@ -187,6 +212,10 @@ def build_rows(count: int = 1200, seed: int = DEFAULT_SEED) -> list[dict[str, ob
             "model_id": model.model_id,
             "docker_image_id": DOCKER_IMAGE_ID,
             "actual_runtime_sec": round(runtime, 3),
+            # 이 파일이 만드는 모든 행은 합성이다. 파일 이름과 모듈 docstring에도
+            # 적혀 있지만, 행이 다른 파일로 복사되면 그 둘 다 따라가지 않는다.
+            # 행 자체가 스스로 말하게 한다.
+            "provenance": Provenance.BOOTSTRAP.value,
         })
 
     return rows

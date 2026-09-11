@@ -1,0 +1,41 @@
+# Everything the runtime image installs on top of the base, pinned exactly.
+#
+# The four packages that matter are transformers, peft, bitsandbytes and
+# accelerate. The rest are what pip pulled in behind them on 2026-09-10, and
+# they are listed for one reason: a Dockerfile that pins only its direct
+# dependencies still produces a different image every week, because the
+# transitive ones move underneath it. The whole set is what was actually
+# tested against Qwen3 on an RTX 4070, so the whole set is what is pinned.
+#
+# torch is NOT here. It comes from the base image (2.12.1+cu126) and pinning
+# it again would let pip decide to replace a CUDA build that is known to work
+# on this hardware.
+#
+# Regenerate with `pip freeze` inside the base image and re-run the GPU smoke
+# tests in README.md before changing any line of this file.
+
+# --- what the runtime actually uses -----------------------------------
+transformers==5.17.0
+peft==0.20.0
+bitsandbytes==0.50.2
+accelerate==1.15.0
+
+# --- pulled in by those four ------------------------------------------
+annotated-doc==0.0.5
+anyio==4.15.1
+click==8.5.0
+h11==0.16.0
+hf-xet==1.6.0
+httpcore==1.0.9
+httpx==0.28.1
+huggingface_hub==1.30.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+regex==2026.9.10
+rich==15.0.0
+safetensors==0.8.0
+shellingham==1.5.4
+tokenizers==0.23.2
+tqdm==4.70.0
+typer==0.27.2
+typing_extensions==4.16.0

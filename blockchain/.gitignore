@@ -9,3 +9,6 @@ dist/
 *.log
 ignition/deployments/chain-31337/
 ignition/parameters/ssafy.json
+
+# 로컬 개발 체인은 띄울 때마다 주소가 바뀐다. 기록을 커밋하지 않는다.
+deployments/localhost/

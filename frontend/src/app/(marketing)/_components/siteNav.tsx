@@ -2,7 +2,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { NavAuth } from '@/features/auth/components/navAuth'
 
-// 랜딩 상단 네비 — Hero 와 분리된 고정 유리 레이어. 스타일은 globals.css 의 .nav-glass (밝은/어두운 배경 두 벌, 숨김 슬라이드).
+// 랜딩 상단 네비 — 고정 유리 레이어(Hero 가 빠진 뒤 랜딩은 dark 테마만 쓴다). 스타일은 globals.css 의 .nav-glass (밝은/어두운 배경 두 벌, 숨김 슬라이드).
 // 어느 배경 위인지(body[data-nav-theme])와 표시 여부(body[data-nav])는 landingScene 이 정한다. 글자·테두리는 currentColor 를 따라 테마에 맞춰 바뀐다
 // 배치: 로고 왼쪽 · 메뉴 가운데(absolute 로 화면 정중앙 고정) · 마이페이지 아이콘 오른쪽 (프론트 네브바.png 레퍼런스)
 // 대상 페이지·섹션이 아직 없어 전부 홈으로 보낸다. 생기면 href 만 바꾼다

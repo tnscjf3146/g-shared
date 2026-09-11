@@ -322,6 +322,8 @@ API의 모든 JSON 키는 **camelCase**입니다 — `features` 안도 마찬가
 **계약에는 있지만 feature가 아닌 것**: `dockerImageId`(승인 이미지가 하나뿐이라 모든 행에서 같은 값) · `datasetSizeBytes`(디스크 크기이지 GPU 계산량이 아님) · `totalTokens`(`effectiveTokens`와 거의 같은 정보) · `learningRate`(step 수도 step당 계산량도 바꾸지 않음) · `minVramMb`(실행 가능 여부를 가르는 제약이지 실행 시간의 원인이 아님) · `workerId`(식별자).
 
 > ⚠️ **현재 모델은 synthetic bootstrap 데이터로 학습됐습니다.** 실제 Job 실행 기록이 아직 없기 때문입니다. **순위 계산은 정확하지만 그 순위가 현실을 맞히는지는 검증되지 않았습니다.** `actualRuntimeSec`가 쌓이면 데이터만 교체해 재학습합니다.
+>
+> 이 상태는 artifact metadata에서 직접 읽을 수 있습니다 — `productionReady: false`와 그 이유가 담긴 `limitations` 배열입니다. 재학습할 때마다 다시 계산되므로, 문서가 아니라 그쪽을 믿으세요. 학습 데이터 출처·baseline 비교·실측 대조는 [Runtime Prediction Model](runtime-prediction-model.md)에 있습니다.
 
 ---
 

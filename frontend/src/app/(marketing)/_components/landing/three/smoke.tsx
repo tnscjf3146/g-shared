@@ -102,8 +102,13 @@ export function Smoke() {
     return { puffs, geo, mat }
   }, [])
 
+  const lastRef = useRef(-1) // 마지막으로 계산한 P.smoke — 안 바뀌면 640개 재계산·업로드를 건너뛴다(2026-09-11, 조립 컷 프레임 확보)
   useFrame(({ size, viewport, camera }) => {
     const s = P.smoke
+    // 연기가 시작 전(0)이거나 다 사라진 뒤(1: 모든 퍼프 t0+life ≤ 1)면 그리지 않는다 — 투명도 0인 점도 fbm 셰이더 비용은 그대로였고, 카메라가 가까운 조립 컷에서 점이 커져 특히 무거웠다
+    if (ref.current) ref.current.visible = s > 0 && s < 1
+    if (s === lastRef.current) return
+    lastRef.current = s
     const pos = geo.attributes.position.array as Float32Array
     const sz = geo.attributes.aSize.array as Float32Array
     const al = geo.attributes.aAlpha.array as Float32Array
@@ -128,7 +133,6 @@ export function Smoke() {
     // 월드 직경 → 픽셀: h/2 / (z·tan(fov/2))  (z 나누기는 셰이더에서)
     const fov = 'fov' in camera ? (camera.fov as number) : 32
     mat.uniforms.uScale.value = (size.height * viewport.dpr * 0.5) / Math.tan((fov * Math.PI) / 360)
-    if (ref.current) ref.current.visible = s > 0
   })
 
   return <points ref={ref} geometry={geo} material={mat} frustumCulled={false} />

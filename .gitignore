@@ -7,3 +7,7 @@
 
 # 오브젝트 스토리지 볼륨 (docker-compose backend → /app/storage)
 /storage/
+
+# Spec Kit 도구 (산출물인 blockchain/specs 는 커밋한다)
+blockchain/.specify/
+blockchain/.claude/

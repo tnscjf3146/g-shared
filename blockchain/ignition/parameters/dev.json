@@ -1,0 +1,6 @@
+{
+  "GPUJobEscrowModule": {
+    "acceptTimeout": 60,
+    "executionTimeout": 300
+  }
+}
