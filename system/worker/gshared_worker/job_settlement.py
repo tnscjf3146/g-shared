@@ -147,17 +147,28 @@ class Settlement:
         self._opener = opener
 
     # -- the entry point ----------------------------------------------
-    def settle(self, job: Any, outcome: RuntimeOutcome) -> Any:
+    def settle(self, job: Any, outcome: RuntimeOutcome,
+               terminal: Any = None) -> Any:
         """One Job, one answer: ready, failed, or unsettled.
+
+        ``terminal`` is the Job's arbitration point. It is consulted twice:
+        as an advisory check between phases, so a cancelled Job stops
+        packaging and uploading rather than finishing work nobody wants, and
+        as the **claim** immediately before a chain transaction, which is
+        what actually decides who ends the Job.
 
         Never raises. This runs on a background thread whose only job is to
         produce a terminal answer; an exception escaping here would leave the
         Job with none and the slot held until the process ended.
         """
         try:
+            if _cancelled(terminal):
+                # Asked to stop before any of this began. The cancellation
+                # owns the ending; settling would be a second one.
+                return _stood_down(job.job_id, "before packaging")
             if outcome.state is RuntimeState.FINISHED:
-                return self._settle_success(job, outcome)
-            return self._settle_failure(job, outcome)
+                return self._settle_success(job, outcome, terminal)
+            return self._settle_failure(job, outcome, terminal)
         except Exception as error:
             _debug.exception("settlement: %s could not be settled", job.job_id)
             return Unsettled(
@@ -165,7 +176,8 @@ class Settlement:
                 f"the settlement failed ({type(error).__name__})")
 
     # -- success ------------------------------------------------------
-    def _settle_success(self, job: Any, outcome: RuntimeOutcome) -> Any:
+    def _settle_success(self, job: Any, outcome: RuntimeOutcome,
+                        terminal: Any = None) -> Any:
         """Package, upload, record on chain, and only then say so."""
         try:
             packaged = pack_result(
@@ -176,6 +188,11 @@ class Settlement:
             return self._fail_on_chain(
                 job, outcome,
                 RuntimeFailure.OUTPUT_VALIDATION_FAILED.value, str(refused))
+
+        if _cancelled(terminal):
+            # The archive exists on disk and nothing has left the machine.
+            # Stopping here is free; stopping after the upload is not.
+            return _stood_down(job.job_id, "before uploading")
 
         try:
             stored = upload_result(
@@ -189,6 +206,18 @@ class Settlement:
             _debug.info("settlement: %s could not be stored", job.job_id)
             return self._fail_on_chain(
                 job, outcome, STORAGE_FAILURE, refused.detail)
+
+        # The final gate, and the only place the claim is taken. Everything
+        # above this line is reversible -- an archive on disk, an object in
+        # storage nobody has been told to pay for. Below it is a transaction
+        # the chain will not let happen twice.
+        #
+        # A cancellation that arrives after this loses and reads the chain
+        # instead; one that arrives before it wins and this stops here.
+        if terminal is not None and not _claim_result(terminal):
+            _debug.info("settlement: %s is owned by the cancellation",
+                        job.job_id)
+            return _stood_down(job.job_id, "before submitResult")
 
         # Only now. The Backend has stat'd the object and computed this hash
         # from the bytes it is holding.
@@ -239,13 +268,15 @@ class Settlement:
         return Unsettled(job.job_id, RECONCILIATION_REQUIRED, recorded.detail)
 
     # -- failure ------------------------------------------------------
-    def _settle_failure(self, job: Any, outcome: RuntimeOutcome) -> Any:
+    def _settle_failure(self, job: Any, outcome: RuntimeOutcome,
+                        terminal: Any = None) -> Any:
         failure = outcome.failure or RuntimeFailure.UNKNOWN_RUNTIME_EXIT
         return self._fail_on_chain(
-            job, outcome, failure.value, outcome.detail or failure.value)
+            job, outcome, failure.value, outcome.detail or failure.value,
+            terminal)
 
     def _fail_on_chain(self, job: Any, outcome: RuntimeOutcome,
-                       code: str, message: str) -> Any:
+                       code: str, message: str, terminal: Any = None) -> Any:
         """Give the deposit back, then report the failure.
 
         ``abort_escrow_job`` does the state check itself and sends nothing
@@ -254,6 +285,13 @@ class Settlement:
         COMPLETED one is refused, and another operator's job is refused. So
         there is no blind abort here and no duplicate one.
         """
+        # The failure path's own gate. Same rule, same reason: the abort is
+        # a transaction, so whoever is about to send one says so first.
+        if terminal is not None and not _claim_failure(terminal):
+            _debug.info("settlement: %s is owned by the cancellation",
+                        job.job_id)
+            return _stood_down(job.job_id, "before abortJob")
+
         given_back = abort_escrow_job(
             self._chain, self._escrow,
             escrow_job_id=job.escrow.escrow_job_id,
@@ -304,3 +342,32 @@ def _sanitise(message: str) -> str:
     if not text:
         return "the job did not finish"
     return text[:MAX_MESSAGE]
+
+
+def _cancelled(terminal: Any) -> bool:
+    """Whether a cancellation has been asked for. Advisory, not authority."""
+    return terminal is not None and terminal.cancel_requested
+
+
+def _claim_result(terminal: Any) -> bool:
+    from .job_cancellation import TerminalClaim
+
+    return terminal.claim_for(TerminalClaim.RESULT)
+
+
+def _claim_failure(terminal: Any) -> bool:
+    from .job_cancellation import TerminalClaim
+
+    return terminal.claim_for(TerminalClaim.FAILURE)
+
+
+#: Not a failure and not a result. The settlement stepped aside because the
+#: Job is being cancelled, and the cancellation will produce the one answer.
+STOOD_DOWN = "CANCELLED_BY_REQUEST"
+
+
+def _stood_down(job_id: str, where: str) -> Any:
+    _debug.info("settlement: %s stood down %s", job_id, where)
+    return Unsettled(job_id, STOOD_DOWN,
+                     f"the job is being cancelled; the settlement stopped "
+                     f"{where}")

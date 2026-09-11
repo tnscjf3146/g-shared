@@ -34,6 +34,7 @@ from typing import Any, Callable
 
 from .escrow import AcceptOutcome, AcceptResult
 from .job_rejection import RejectCode
+from .job_cancellation import JobTerminal
 from .job_settlement import Unsettled
 from .runtime_progress import ProgressChannel, ProgressTracker, TerminalChannel
 from .logging_setup import LOGGER_NAME
@@ -68,6 +69,9 @@ class Work(Enum):
     #: and every part of it can block -- which is why it is not done on the
     #: connection loop.
     SETTLE = "SETTLE"
+    #: Stop the container and give the deposit back, because the customer
+    #: asked. Blocks on Docker and on the chain, so it goes here too.
+    CANCEL = "CANCEL"
 
 
 @dataclass(frozen=True)
@@ -159,7 +163,8 @@ class JobAcceptance:
                  operator_address: str = "",
                  clean_up: DecideOnJob | None = None,
                  run_job: Any = None,
-                 settle_job: Any = None) -> None:
+                 settle_job: Any = None,
+                 cancel_job: Any = None) -> None:
         self._decide = decide or refuse_without_escrow
         #: Gives a job back on chain. ``None`` when no escrow is configured,
         #: in which case nothing was ever accepted and there is nothing to
@@ -174,6 +179,15 @@ class JobAcceptance:
         #: or no Backend to settle against, in which case a finished Job is
         #: held and the supplier is told so rather than it being dropped.
         self._settle_job = settle_job
+        #: Stops the container and gives the deposit back. ``None`` when this
+        #: Worker has no runtime or no escrow, in which case a JOB_CANCEL is
+        #: noted and the supplier told, rather than silently ignored.
+        self._cancel_job = cancel_job
+        #: The arbitration point for the Job in hand -- who owns its ending.
+        #: One per Job, made when the runtime starts and kept until the
+        #: terminal message has gone out. ``None`` between Jobs.
+        self._terminal: JobTerminal | None = None
+        self._runs = 0
         #: This machine's on-chain signing address. Public, and carried in
         #: JOB_ACCEPTED so the Backend can check the claim against the chain.
         #: Empty when no escrow is configured, in which case nothing is ever
@@ -195,7 +209,15 @@ class JobAcceptance:
         #: Decided once, by looking, so a runtime that predates this -- or a
         #: test double that returns a fixed outcome -- is called the way it
         #: expects rather than with an argument it would reject.
-        self._run_job_takes_progress = _accepts_progress(run_job)
+        self._run_job_takes_progress = _accepts(run_job, "progress")
+        self._run_job_takes_terminal = _accepts(run_job, "terminal")
+        self._settle_takes_terminal = _accepts_third(settle_job)
+        #: What the container did, kept so a cancellation can report how long
+        #: it ran. Reset when a new Job starts running.
+        self._last_outcome: Any = None
+        #: Set when the runtime thread has produced an outcome.
+        self._runtime_done = threading.Event()
+        self._cancel_thread: threading.Thread | None = None
         self._thread: threading.Thread | None = None
         self._deciding: str | None = None
         self._lock = threading.Lock()
@@ -271,11 +293,98 @@ class JobAcceptance:
             if self._deciding is not None:
                 return False
             self._deciding = job.job_id
+            self._runs += 1
+            self._last_outcome = None
+            self._runtime_done = threading.Event()
+            # One per run, and the generation goes on the container's labels
+            # so a cancellation can prove which container is this one.
+            self._terminal = JobTerminal(job.job_id, self._runs)
         self._thread = threading.Thread(
             target=self._run, args=(job, Work.RUN),
             name="gshared-runtime", daemon=True)
         self._thread.start()
         return True
+
+    @property
+    def terminal_for(self) -> JobTerminal | None:
+        """The arbitration point for the Job in hand, if one is running."""
+        with self._lock:
+            return self._terminal
+
+    def start_cancellation(self, job: AssignedJob, reason: str) -> bool:
+        """Stop this Job in the background. False when it cannot be started.
+
+        Idempotent by construction: :meth:`JobTerminal.request_cancel` is
+        what records the intent, and it answers True only once, so a repeated
+        JOB_CANCEL -- which the Backend sends again after a reconnection --
+        does not start a second ``docker stop`` or a second ``abortJob``.
+        """
+        if self._cancel_job is None:
+            _debug.info("acceptance: no cancellation configured for %s",
+                        job.job_id)
+            return False
+        with self._lock:
+            terminal = self._terminal
+            if terminal is None:
+                # Nothing has started running. There is no container to stop
+                # and no generation to name; a cancellation here would have
+                # nothing to arbitrate over.
+                _debug.info("acceptance: %s has no runtime to cancel",
+                            job.job_id)
+                return False
+            if terminal.job_id != job.job_id:
+                _debug.info("acceptance: cancellation for %s while holding %s",
+                            job.job_id, terminal.job_id)
+                return False
+
+        if not terminal.request_cancel(reason):
+            # Already asked. The workflow that is running owns it.
+            return True
+
+        # Whatever percentage is in the box describes a Job that is being
+        # stopped. Sending it -- or replaying it after a reconnection -- would
+        # show the customer their cancelled Job still making progress.
+        self.progress.clear()
+
+        # The intent is recorded whether or not a thread can start now, so
+        # the pipeline and the settlement stop at their next checkpoint even
+        # if the chain work has to wait for the runtime thread to finish.
+        self._start_cancel_thread(job, terminal)
+        return True
+
+    def _start_cancel_thread(self, job: AssignedJob,
+                             terminal: JobTerminal) -> None:
+        thread = threading.Thread(
+            target=self._cancel, args=(job, terminal),
+            name="gshared-cancellation", daemon=True)
+        self._cancel_thread = thread
+        thread.start()
+
+    def _cancel(self, job: AssignedJob, terminal: JobTerminal) -> None:
+        """Run the cancellation and put its answer where the loop will find it.
+
+        On its own thread, **not** the one-at-a-time ``_deciding`` slot: the
+        runtime is very likely still occupying that, and the whole point is
+        to stop it.
+        """
+        from .escrow import AcceptOutcome, AcceptResult
+
+        cancelled: Any = None
+        try:
+            cancelled = self._cancel_job(job, terminal, self._last_outcome)
+        except Exception:
+            _debug.exception("acceptance: cancelling %s failed", job.job_id)
+        finally:
+            terminal.token.set()
+
+        answered = cancelled is not None and not isinstance(cancelled, Unsettled)
+        if answered:
+            self.terminal.put(cancelled)
+
+        result = AcceptResult(
+            AcceptOutcome.ACCEPTED if answered else AcceptOutcome.REFUSED,
+            _settlement_detail(cancelled))
+        self._decisions.put(Decision(job, result, Work.CANCEL, cancelled))
 
     def start_settlement(self, job: AssignedJob, outcome: Any) -> bool:
         """Settle a finished Job in the background. False when busy or unable.
@@ -323,7 +432,9 @@ class JobAcceptance:
 
         settled: Any = None
         try:
-            settled = self._settle_job(job, outcome)
+            settled = (self._settle_job(job, outcome, self.terminal_for)
+                       if self._settle_takes_terminal
+                       else self._settle_job(job, outcome))
         except Exception:
             _debug.exception("acceptance: settling %s failed", job.job_id)
         finally:
@@ -373,8 +484,11 @@ class JobAcceptance:
 
         tracker = ProgressTracker(
             job.job_id, self.progress.next_generation(), self.progress)
+        terminal = self.terminal_for
         try:
-            outcome = (self._run_job(job, progress=tracker)
+            outcome = (self._run_job(job, progress=tracker, terminal=terminal)
+                       if self._run_job_takes_terminal
+                       else self._run_job(job, progress=tracker)
                        if self._run_job_takes_progress
                        else self._run_job(job))
         except Exception as error:
@@ -388,7 +502,11 @@ class JobAcceptance:
             # first update cannot be overtaken by this one's last.
             tracker.close()
             with self._lock:
+                # Kept for the cancellation thread, which may be waiting to
+                # learn how long the container ran before it was stopped.
+                self._last_outcome = outcome
                 self._deciding = None
+            self._runtime_done.set()
 
         # The AcceptResult here is a carrier, not a claim about the chain: the
         # Job stays accepted whether the training succeeded or not.
@@ -425,21 +543,39 @@ class JobAcceptance:
                 _debug.info("acceptance: still deciding at shutdown, leaving it")
 
 
-def _accepts_progress(run_job: Any) -> bool:
-    """Whether this pipeline takes a ``progress`` argument.
+def _accepts(what: Any, name: str) -> bool:
+    """Whether a callable takes an argument by this name.
 
     Asked once, at construction. The alternative -- call it with the argument
     and fall back when it raises ``TypeError`` -- would also swallow a
-    ``TypeError`` raised *inside* a pipeline that does accept it, and report
-    a training failure as a signature mismatch.
+    ``TypeError`` raised *inside* something that does accept it, and report a
+    training failure as a signature mismatch.
     """
-    if run_job is None:
+    if what is None:
         return False
     try:
-        return "progress" in inspect.signature(run_job).parameters
+        return name in inspect.signature(what).parameters
     except (TypeError, ValueError):
         # Something whose signature cannot be read. Call it the old way.
         return False
+
+
+def _accepts_third(settle_job: Any) -> bool:
+    """Whether the settlement takes the arbitration point as a third argument.
+
+    Positional rather than by name, because that is how ``Settlement.settle``
+    declares it and how the existing fakes in the tests are written.
+    """
+    if settle_job is None:
+        return False
+    try:
+        parameters = inspect.signature(settle_job).parameters
+    except (TypeError, ValueError):
+        return False
+    if "terminal" in parameters:
+        return True
+    return len([p for p in parameters.values()
+                if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]) >= 3
 
 
 def _settlement_detail(settled: Any) -> str:
@@ -451,3 +587,15 @@ def _settlement_detail(settled: Any) -> str:
         if isinstance(value, str) and value:
             return value
     return "the job was settled"
+
+
+def runtime_waiter(acceptance: "JobAcceptance"):
+    """A callable the cancellation blocks on until the container's outcome is in.
+
+    Bounded. A runtime thread that never answers must not hold a cancellation
+    for ever -- the chain read that follows is the real check either way.
+    """
+    def wait(seconds: float) -> bool:
+        return acceptance._runtime_done.wait(timeout=seconds)
+
+    return wait

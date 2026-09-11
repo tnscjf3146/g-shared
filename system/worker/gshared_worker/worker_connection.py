@@ -37,12 +37,14 @@ from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
 from .worker_credentials import WorkerCredentials, load_credentials
 from .escrow import AcceptOutcome, AcceptResult, JobState
+from .job_cancellation import JobCancelledReady
 from .job_settlement import JobResultReady, Unsettled
 from .job_acceptance import Decision, JobAcceptance, Work
 from .worker_job import (
     ACCEPT_VALIDATION_FAILED,
     JOB_ASSIGN,
     JOB_CANCEL,
+    USER_REQUEST,
     AssignedJob,
     JobAssignmentError,
     JobSlot,
@@ -50,6 +52,7 @@ from .worker_job import (
     SlotState,
     job_accepted_message,
     job_cancelled_message,
+    job_cancelled_terminal_message,
     job_failed_message,
     job_progress_message,
     job_rejected_message,
@@ -308,13 +311,19 @@ def cancel_the_job(
         say(f"  A cancellation arrived that could not be read: {refused}")
         return
 
+    if request.reason == USER_REQUEST:
+        _cancel_for_the_customer(request, slot, say, acceptance)
+        return
+
     if not request.is_accept_validation_failure:
-        # Noted, not acted on, and **not** treated as an error -- the Backend
-        # is entitled to send this and task 10 will answer it.
+        # A reason this build does not know. **Not defaulted to a user
+        # cancellation**: the path below ends in a transaction that refunds a
+        # client, and acting on a word we do not recognise would be giving
+        # work away on a guess.
         _debug.info("job: cancellation for %s with reason %s is not handled "
                     "by this build", request.job_id, request.reason)
         say(f"  Job {request.job_id} was cancelled ({request.reason}). This "
-            "version does not act on that yet.")
+            "version does not act on that reason.")
         return
 
     held = slot.held
@@ -342,6 +351,52 @@ def cancel_the_job(
         _debug.info("job: cleanup for %s could not be started", request.job_id)
         say("  It could not be released right now. It is being kept so it is "
             "not lost.")
+
+
+def _cancel_for_the_customer(
+    request: Any,
+    slot: JobSlot,
+    say: Callable[..., None],
+    acceptance: JobAcceptance,
+) -> None:
+    """A user asked for their Job to stop. Stop it -- if it is ours.
+
+    Returns immediately. Stopping a container, waiting for it to die and
+    giving a deposit back on chain are all slow, and this is the thread that
+    owes the Backend a heartbeat every thirty seconds.
+
+    The Job's slot is **not** released here, nor when the container stops, nor
+    when the transaction lands. It is released when the Backend has been told
+    -- see :func:`send_terminal` -- because until then this machine is still
+    the one that owes an answer for the Job.
+    """
+    held = slot.held
+    if held is None:
+        # Nothing in hand. Whatever this is about, it is not a Job this
+        # machine is running, and reaching for Docker or the chain would be
+        # acting on somebody else's.
+        _debug.info("cancel: %s arrived but no job is held", request.job_id)
+        say(f"  Job {request.job_id} was cancelled, but this machine is not "
+            "holding it.")
+        return
+
+    if held.job_id != request.job_id:
+        _debug.info("cancel: %s arrived while holding %s -- ignored",
+                    request.job_id, held.job_id)
+        say(f"  A cancellation arrived for {request.job_id}, but this machine "
+            f"is holding {held.job_id}. Nothing was changed.")
+        return
+
+    if not acceptance.start_cancellation(held, request.reason):
+        # No runtime has started, or none is configured. The Job is kept:
+        # giving the slot up while the chain may still have it assigned here
+        # would lose track of something this machine owes.
+        _debug.info("cancel: %s could not be started", request.job_id)
+        say(f"  Job {request.job_id} was cancelled, but this machine has "
+            "nothing running for it yet. It is being kept.")
+        return
+
+    say(f"  Job {request.job_id} was cancelled by the customer. Stopping it...")
 
 
 def answer_decisions(
@@ -389,6 +444,13 @@ def send_progress(
     Returns whether anything went out, which is for the tests; the loop does
     not care.
     """
+    stopping = acceptance.terminal_for
+    if stopping is not None and stopping.cancel_requested:
+        # The Job is being stopped. Anything still in the box is from before
+        # that and says the run is going fine.
+        acceptance.progress.clear()
+        return False
+
     progress = acceptance.progress.take()
     if progress is None:
         return False
@@ -454,9 +516,13 @@ def send_terminal(
         acceptance.terminal.done(terminal)
         return False
 
-    message = (job_result_message(terminal, (clock or now_in_iso8601)())
-               if isinstance(terminal, JobResultReady)
-               else job_failed_message(terminal, (clock or now_in_iso8601)()))
+    stamp = (clock or now_in_iso8601)()
+    if isinstance(terminal, JobResultReady):
+        message = job_result_message(terminal, stamp)
+    elif isinstance(terminal, JobCancelledReady):
+        message = job_cancelled_terminal_message(terminal, stamp)
+    else:
+        message = job_failed_message(terminal, stamp)
     try:
         socket.send(message)
     except ConnectionWentAway as gone:
@@ -480,6 +546,9 @@ def _say_settled(terminal: Any, say: Callable[..., None] | None) -> None:
         return
     if isinstance(terminal, JobResultReady):
         say(f"  Job {terminal.job_id} is complete and the result has been sent.")
+        return
+    if isinstance(terminal, JobCancelledReady):
+        say(f"  Job {terminal.job_id} was cancelled and the deposit returned.")
         return
     say(f"  Job {terminal.job_id} ended: {terminal.code}.")
 
@@ -507,6 +576,10 @@ def _settle(
 
     if decision.work is Work.SETTLE:
         _settle_settlement(decision, slot, say)
+        return
+
+    if decision.work is Work.CANCEL:
+        _settle_cancellation(decision, slot, say)
         return
 
     if result.accepted:
@@ -591,6 +664,46 @@ def _settle_runtime(
             "machine yet.")
         return
     say("  Storing the result and settling the escrow...")
+
+
+def _settle_cancellation(
+    decision: Decision,
+    slot: JobSlot,
+    say: Callable[..., None],
+) -> None:
+    """A cancellation finished. The message itself goes out elsewhere.
+
+    When it produced an answer, that answer is already in the terminal
+    channel. What is handled here is the case where it did not: the chain and
+    this Worker disagree, and neither JOB_CANCELLED nor anything else is true
+    enough to send.
+    """
+    from .job_cancellation import ALREADY_ENDED, BACKEND_CANCEL_COMPLETION_RACE
+
+    cancelled = decision.runtime
+    job = decision.job
+    if cancelled is not None and not isinstance(cancelled, Unsettled):
+        return
+
+    if getattr(cancelled, "reason", "") == ALREADY_ENDED:
+        # It finished some other way first and that answer is already on its
+        # way. Nothing is wrong and nothing more is sent.
+        _debug.info("cancel: %s had already ended", job.job_id)
+        return
+
+    detail = getattr(cancelled, "detail", "") or "the cancellation did not finish"
+    if getattr(cancelled, "reason", "") == BACKEND_CANCEL_COMPLETION_RACE:
+        # The escrow completed before the cancellation reached it. The Job is
+        # finished and paid on chain; the service has it as cancelling and
+        # will not accept the JOB_RESULT that is true. Neither message is
+        # sent, and a person has to reconcile the two.
+        say(f"  Job {job.job_id} finished on chain just as it was cancelled.")
+        say("  The service and the chain disagree, so nothing was reported "
+            "for it. It is being kept.")
+        return
+
+    say(f"  Job {job.job_id} could not be cancelled cleanly: {detail}")
+    say("  It is being held rather than reported.")
 
 
 def _settle_settlement(

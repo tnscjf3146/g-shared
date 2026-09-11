@@ -524,6 +524,42 @@ def job_progress_message(progress: Any, timestamp: str) -> dict[str, Any]:
     }
 
 
+def job_cancelled_terminal_message(cancelled: Any, timestamp: str) -> dict[str, Any]:
+    """The JOB_CANCELLED envelope for a **user** cancellation.
+
+    Separate from :func:`job_cancelled_message`, which the escrow cleanup
+    path has used since task 6.5 and which carries only a reason and an
+    abort hash. This one also reports how long the container ran before it
+    was stopped, because a user cancellation can interrupt real GPU time and
+    ``confirmCancelledIfCancelling`` records it.
+
+    Read from ``WorkerWebSocketHandler.handleJobCancelled`` and that query:
+
+    * the transition is ``CANCELLING -> CANCELLED``, for this worker's Job
+      only. A JOB_CANCELLED for anything else is dropped with a warning,
+      which is the Backend's decision and not one the Worker predicts;
+    * ``abortTxHash`` is ``textOrNull`` into ``CHAR(66)`` -- omitted when no
+      transaction was sent, because the chain was already cancelled. A
+      made-up hash would fit the column and be wrong for ever;
+    * ``actualRuntimeSec`` is ``doubleOrNull`` into ``DOUBLE``, like
+      JOB_RESULT's and unlike JOB_PROGRESS's integer ``elapsedSec``;
+    * ``reason`` is read only for the log line -- ``confirmCancelled`` does
+      not take it -- but it is in the spec and it is what tells an operator
+      afterwards which of the two cancellations this was.
+    """
+    payload: dict[str, Any] = {"reason": cancelled.reason}
+    if cancelled.abort_tx_hash:
+        payload["abortTxHash"] = cancelled.abort_tx_hash
+    if cancelled.actual_runtime_sec is not None:
+        payload["actualRuntimeSec"] = float(cancelled.actual_runtime_sec)
+    return {
+        "type": JOB_CANCELLED,
+        "jobId": cancelled.job_id,
+        "timestamp": timestamp,
+        "payload": payload,
+    }
+
+
 def job_result_message(result: Any, timestamp: str) -> dict[str, Any]:
     """The JOB_RESULT envelope, in the shape ``handleJobResult`` reads.
 

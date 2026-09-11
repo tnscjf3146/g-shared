@@ -97,12 +97,17 @@ class Recorder:
 
     def __init__(self, result=CANCELLED, busy=False):
         self.asked: list = []
+        self.cancelled: list = []
         self._result = result
         self._busy = busy
         self.operator_address = OPERATOR
 
     def start_cleanup(self, job):
         self.asked.append(job.job_id)
+        return not self._busy
+
+    def start_cancellation(self, job, reason):
+        self.cancelled.append((job.job_id, reason))
         return not self._busy
 
     def start(self, job):
@@ -135,18 +140,32 @@ class TestOnlyOneReasonIsActedOn(unittest.TestCase):
 
         self.assertEqual(acceptance.asked, ["123"])
 
-    def test_user_request_does_not(self):
-        # Task 10's job. Aborting here would refund a client because somebody
-        # pressed cancel, which is a decision nobody has made yet.
-        acceptance, lines = self.ask(cancellation(reason=USER_REQUEST))
+    def test_user_request_starts_a_cancellation_instead(self):
+        """The two reasons go to two different places, and always did.
 
-        self.assertEqual(acceptance.asked, [])
-        self.assertTrue(any("does not act on that yet" in line for line in lines))
+        ``ACCEPT_VALIDATION_FAILED`` is the Backend refusing our JOB_ACCEPTED,
+        and the cleanup path gives a job back that was never going to run.
+        ``USER_REQUEST`` is a customer stopping work that may well be in
+        progress: a container to stop, a runtime to wait for, and only then a
+        refund. They share the abort primitive and nothing else.
+        """
+        acceptance, _ = self.ask(cancellation(reason=USER_REQUEST))
 
-    def test_an_unknown_reason_does_not(self):
+        self.assertEqual(acceptance.cancelled, [("123", USER_REQUEST)])
+        self.assertEqual(acceptance.asked, [], "it went to the cleanup path")
+
+    def test_the_cleanup_path_does_not_start_a_cancellation(self):
+        acceptance, _ = self.ask(cancellation())
+
+        self.assertEqual(acceptance.cancelled, [])
+
+    def test_an_unknown_reason_does_neither(self):
+        # Both paths end in a transaction that refunds a client. A word this
+        # build does not recognise is not a reason to send one.
         acceptance, _ = self.ask(cancellation(reason="SOMETHING_NEW"))
 
         self.assertEqual(acceptance.asked, [])
+        self.assertEqual(acceptance.cancelled, [])
 
     def test_a_missing_reason_is_not_defaulted_to_the_one_we_handle(self):
         # The dangerous default. It would make every cancellation -- including
@@ -156,6 +175,8 @@ class TestOnlyOneReasonIsActedOn(unittest.TestCase):
         acceptance, _ = self.ask(message)
 
         self.assertEqual(acceptance.asked, [])
+        self.assertEqual(acceptance.cancelled, [],
+                         "a missing reason was read as a user cancellation")
 
     def test_a_cancellation_with_no_payload_is_refused(self):
         message = {"type": "JOB_CANCEL", "jobId": "123", "timestamp": "t"}
