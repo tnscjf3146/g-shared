@@ -30,3 +30,5 @@ logging:
     rollingpolicy:
       max-file-size: 50MB
       max-history: 14
+storage:
+  root: /app/storage     # compose 볼륨(./storage) — 컨테이너를 지워도 결과물이 남는다
