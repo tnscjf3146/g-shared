@@ -6,8 +6,22 @@ import { P } from '../progress'
 
 /** 인트로 챕터 시작 시각(ms) */
 const I = { top: 0, toFront: 1400, dark: 1650, hero: 2000, reveal: 3400, end: 5000 } // 빔이 팬들을 훑음 → 빔 꺼지고 잠깐 암전(그 사이 정면으로 틸트다운) → 빔 켜지며 로고 훑기 → 리빌
+/** 스크롤 챕터 트리거(landingScene 챕터 스텝 + 오른쪽 챕터 사이드바 공용): 스크롤이 at(ms) 를 넘으면 타임라인을 to(ms) 까지 제 속도로 재생.
+ *  실제 재생 시간은 거리×STEP_RATE 를 STEP_MIN~STEP_MAX 로 묶되 duration 이 있으면 그 값(landingScene). label 은 사이드바 표기 */
+export const CHAPTERS: { label: string; at: number; to: number; duration?: number; ease?: string }[] = []
+/** 사이드바 항목 7개 = 카드(index 0, 인트로 직후 조립 상태) + CHAPTERS 6개 */
+export const CHAPTER_LABELS: string[] = []
 /** 스크롤 챕터 시작 시각(ms) */
-export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 6000, hsOffEnd: 7000, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
+export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 5500, hsOffEnd: 6100, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
+CHAPTERS.push(
+  { label: '팬 분리', at: T.fans, to: T.fansEnd }, // 3 팬·연기·쉬라우드
+  { label: '오빗', at: T.orbit, to: T.orbitEnd }, // 4 카메라
+  { label: '히트싱크 분리', at: T.hsLift, to: T.hsOffEnd, duration: 1000, ease: 'linear' }, // 5+6 들림 → 이탈을 한 챕터로(2026-09-11 합침, 사이 공백 제거). 1초: 들림 ~0.45초 뒤 이탈 ~0.55초(in(3) 가속) — 이탈을 더 빠르게 한 최종값. 커서는 선형 — 이탈 트윈의 가속(in(3))이 그대로 보이게
+  { label: '탑뷰', at: T.top, to: T.topEnd }, // 7
+  { label: '구조도', at: T.stack, to: T.stackEnd }, // 8
+  { label: '조립', at: T.assemble, to: T.end }, // 9 조립 + 로고 스윕
+)
+CHAPTER_LABELS.push('카드', ...CHAPTERS.map((c) => c.label))
 
 const CAM_INTRO_TOP = { yaw: Math.PI / 2, tilt: 0.315, dist: 3.3, lookY: -0.12 } // lookY 를 낮춰(타깃을 카드 아래로) 카드가 화면 위쪽에 오게 // 인트로 첫 컷: +X 끝 위 낮은 각(18°)에서 카드 길이 방향으로 내려다봄 — 가까운 팬이 크게, 나머지가 멀어지는 구도(Blender 레퍼런스)
 const CAM_HERO = { yaw: Math.PI / 2, tilt: 0, dist: 2.35, lookY: 0.0225, shift: -0.05 } // 끝 캡 정면, G 원이 화면 정중앙
@@ -35,6 +49,7 @@ export function hero(intro: Timeline) {
 
 /** 2 REVEAL — 빔 아웃, 위 조명 인, 줌 아웃하며 캡이 우측 하단을 향하는 입체 뷰로. */
 export function reveal(intro: Timeline) {
+  intro.add(P, { stars: [0, 1], duration: 1, ease: 'linear' }, I.reveal) // 별은 스위치처럼 — 조명이 올라오는 순간 함께 켜져 팝인이 묻힌다
   intro.add(P, { beam: [1, 0], duration: 500, ease: 'out(2)' }, I.reveal)
   intro.add(P, { env: [0, 1], duration: 1400, ease: 'out(2)' }, I.reveal)
   intro.add(P, { yaw: [CAM_HERO.yaw, CAM0.yaw], tilt: [CAM_HERO.tilt, CAM0.tilt], dist: [CAM_HERO.dist, CAM0.dist], lookY: [CAM_HERO.lookY, 0], shift: [CAM_HERO.shift, 0], duration: I.end - I.reveal, ease: 'inOut(3)' }, I.reveal)
@@ -90,7 +105,7 @@ export function hsLift(scroll: Timeline) {
 
 /** 6 HS OFF — 들린 히트싱크와 플레이트류가 함께 위로 상승해 화면 밖으로 나간 뒤 숨겨진다. */
 export function hsOff(scroll: Timeline) {
-  scroll.add(P, { hsOff: [0, 1], duration: T.hsOffEnd - T.hsOff, ease: 'in(1.2)' }, T.hsOff)
+  scroll.add(P, { hsOff: [0, 1], duration: T.hsOffEnd - T.hsOff, ease: 'in(3)' }, T.hsOff) // 천천히 떠오르다 급가속해 화면 밖으로(2026-09-11, in(1.2)→in(3))
 }
 
 /** 7 TOP VIEW — 남은 카드(PCB·백플레이트·브라켓)를 위(Blender +Z)에서, 시선을 −Y(PCIe 엣지) 쪽으로 조금 기울여 내려본다.
