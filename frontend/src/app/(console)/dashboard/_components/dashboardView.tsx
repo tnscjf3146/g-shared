@@ -7,11 +7,11 @@ import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
 import { jobMessageFor } from '@/features/jobs/errors'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
-import { deleteWorker, getMyWorkers } from '@/features/workers/api'
+import { deleteWorker, getMyWorkers, getNetworkStats } from '@/features/workers/api'
 import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
 import { workerMessageFor } from '@/features/workers/errors'
 import { formatVram } from '@/features/workers/format'
-import type { Worker } from '@/features/workers/types'
+import type { NetworkStats, Worker } from '@/features/workers/types'
 import { DashboardJobRow } from './dashboardJobRow'
 import { DashboardWorkerCard } from './dashboardWorkerCard'
 import { JobsOverview } from './jobsOverview'
@@ -31,6 +31,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [jobs, setJobs] = useState<Loaded<JobSummary[]>>({ status: 'loading' })
   const [workers, setWorkers] = useState<Loaded<Worker[]>>({ status: 'loading' })
   const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [network, setNetwork] = useState<NetworkStats | null>(null) // 실패해도 카드만 '—' — 치명적이지 않다
   const [now, setNow] = useState(() => Date.now())
   const [notice, setNotice] = useState<string | null>(null)
   const [jobPage, setJobPage] = useState(0)
@@ -58,6 +59,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
     return () => clearInterval(poll)
   }, [load])
   useEffect(() => {
+    getNetworkStats()
+      .then(setNetwork)
+      .catch(() => {})
     getCatalog()
       .then(setCatalog)
       .catch(() => {})
@@ -122,7 +126,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
       {/* 작업 탭: 히어로·도넛·최근 활동·노드 지도·KPI 카드(대시보드.png 구조) → 목록. CTA 는 히어로 배너에, 지표는 JobsOverview 의 KPI 카드가 담당 */}
       {tab === 'jobs' ? (
-        <JobsOverview jobList={jobList} loading={jobs.status === 'loading' || workers.status === 'loading'} nameOf={nameOf} onlineWorkers={online} totalWorkers={workerList.length} />
+        <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} />
       ) : (
         <StatTiles items={stats} loading={workers.status === 'loading'} />
       )}
