@@ -124,6 +124,45 @@ class WslCommandRunner:
             result.stderr.replace("\x00", ""),
         )
 
+    async def run_streaming(
+        self,
+        args: list[str],
+        *,
+        timeout: float,
+        max_output_bytes: int,
+        on_stdout_line=None,
+        on_stderr_line=None,
+    ) -> CommandResult:
+        """The streaming form, through the same distribution prefix.
+
+        The inner runner may not have one -- a test double standing in for a
+        subprocess usually does not -- in which case this falls back to
+        :meth:`run` and reports the lines once the command has finished.
+        That is not streaming and does not pretend to be: it exists so a
+        caller written against the streaming API still works with a runner
+        that only knows how to wait.
+        """
+        streaming = getattr(self._runner, "run_streaming", None)
+        if streaming is None:
+            result = await self.run(
+                args, timeout=timeout, max_output_bytes=max_output_bytes)
+            _replay(result.stdout, on_stdout_line)
+            _replay(result.stderr, on_stderr_line)
+            return result
+
+        result = await streaming(
+            self.prefix + args,
+            timeout=timeout,
+            max_output_bytes=max_output_bytes,
+            on_stdout_line=_without_nulls(on_stdout_line),
+            on_stderr_line=_without_nulls(on_stderr_line),
+        )
+        return CommandResult(
+            result.exit_code,
+            result.stdout.replace("\x00", ""),
+            result.stderr.replace("\x00", ""),
+        )
+
 
 class WslDistroProbe:
     """Reads what WSL knows about our distribution, and only ours."""
@@ -618,3 +657,17 @@ def _all_lines(text: str) -> str:
 def _last_line(text: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return lines[-1] if lines else ""
+
+
+def _without_nulls(on_line):
+    """The same reader, given wsl.exe's own UTF-16 messages in readable form."""
+    if on_line is None:
+        return None
+    return lambda line: on_line(line.replace("\x00", ""))
+
+
+def _replay(text: str, on_line) -> None:
+    if on_line is None:
+        return
+    for line in (text or "").splitlines():
+        on_line(line)

@@ -25,6 +25,7 @@ by accident.
 from __future__ import annotations
 
 import logging
+import inspect
 import queue
 import threading
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ from typing import Any, Callable
 
 from .escrow import AcceptOutcome, AcceptResult
 from .job_rejection import RejectCode
+from .runtime_progress import ProgressChannel, ProgressTracker
 from .logging_setup import LOGGER_NAME
 from .worker_job import AssignedJob
 
@@ -167,6 +169,18 @@ class JobAcceptance:
         #: accepted and it is never sent.
         self.operator_address = operator_address
         self._decisions: "queue.Queue[Decision]" = queue.Queue()
+        #: Where a running container's progress appears, for the connection
+        #: loop to pick up. **A separate channel from the decisions queue,
+        #: and deliberately so.** A decision is the answer to a Job and is
+        #: never dropped; progress is a running commentary and the newest
+        #: one is the only one worth having. Putting them in one queue would
+        #: mean either keeping every step or risking the outcome.
+        self.progress = ProgressChannel()
+        #: Whether the pipeline wants to be told where to publish progress.
+        #: Decided once, by looking, so a runtime that predates this -- or a
+        #: test double that returns a fixed outcome -- is called the way it
+        #: expects rather than with an argument it would reject.
+        self._run_job_takes_progress = _accepts_progress(run_job)
         self._thread: threading.Thread | None = None
         self._deciding: str | None = None
         self._lock = threading.Lock()
@@ -280,14 +294,22 @@ class JobAcceptance:
         from .escrow import AcceptOutcome, AcceptResult
         from .job_runtime import RuntimeFailure, RuntimeOutcome, RuntimeState
 
+        tracker = ProgressTracker(
+            job.job_id, self.progress.next_generation(), self.progress)
         try:
-            outcome = self._run_job(job)
+            outcome = (self._run_job(job, progress=tracker)
+                       if self._run_job_takes_progress
+                       else self._run_job(job))
         except Exception as error:
             _debug.exception("acceptance: the runtime failed for %s", job.job_id)
             outcome = RuntimeOutcome(
                 RuntimeState.FAILED, RuntimeFailure.DOCKER_UNAVAILABLE,
                 f"the runtime failed ({type(error).__name__})")
         finally:
+            # Whatever is still in the container's pipe describes a run that
+            # is over. Closed before the slot is freed, so the next Job's
+            # first update cannot be overtaken by this one's last.
+            tracker.close()
             with self._lock:
                 self._deciding = None
 
@@ -324,3 +346,20 @@ class JobAcceptance:
             thread.join(timeout=JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
                 _debug.info("acceptance: still deciding at shutdown, leaving it")
+
+
+def _accepts_progress(run_job: Any) -> bool:
+    """Whether this pipeline takes a ``progress`` argument.
+
+    Asked once, at construction. The alternative -- call it with the argument
+    and fall back when it raises ``TypeError`` -- would also swallow a
+    ``TypeError`` raised *inside* a pipeline that does accept it, and report
+    a training failure as a signature mismatch.
+    """
+    if run_job is None:
+        return False
+    try:
+        return "progress" in inspect.signature(run_job).parameters
+    except (TypeError, ValueError):
+        # Something whose signature cannot be read. Call it the old way.
+        return False

@@ -16,12 +16,18 @@ until everything it needs is on disk and verified.
     docker run          ->  hardened, GPU, no network
     outcome             ->  returned, not sent
 
-**Nothing here talks to the Backend except to read the context.** No
-JOB_PROGRESS, no JOB_RESULT, no JOB_FAILED. The pipeline returns a
-:class:`~gshared_worker.job_runtime.RuntimeOutcome` and stops. Task 8 will
-turn its events into progress and task 9 will turn the outcome into a terminal
-message; both are easier to write against a value than against a function that
-has already sent something.
+**Nothing here talks to the Backend except to read the context.** It sends no
+JOB_PROGRESS, no JOB_RESULT and no JOB_FAILED, and it holds no socket. The
+pipeline returns a :class:`~gshared_worker.job_runtime.RuntimeOutcome` and
+stops.
+
+Progress leaves by a different door. A caller may pass a
+:class:`~gshared_worker.runtime_progress.ProgressTracker`, which is given the
+container's events while it runs and puts the newest one in a box the
+connection loop reads. The pipeline still sends nothing: publishing a value
+and writing to a socket are two different acts, and only one of them can
+happen on this thread. Task 9 will turn the returned outcome into a terminal
+message the same way.
 
 **It runs on a background thread**, because a training run is minutes to hours
 and the WebSocket loop has a heartbeat to keep. That is the same arrangement
@@ -105,10 +111,16 @@ class RuntimePipeline:
         self._host_path_of = host_path_of
         self._cache = ModelCache(settings.cache_root)
 
-    def run(self, job: Any) -> RuntimeOutcome:
-        """The whole pipeline for one Job, synchronously. Call off the loop."""
+    def run(self, job: Any, *, progress: Any = None) -> RuntimeOutcome:
+        """The whole pipeline for one Job, synchronously. Call off the loop.
+
+        ``progress`` is a :class:`~gshared_worker.runtime_progress.\
+ProgressTracker` when somebody is watching. It is handed the container's
+        events as they are written and publishes what is worth publishing;
+        this function neither reads it back nor sends anything itself.
+        """
         try:
-            return asyncio.run(self._run(job))
+            return asyncio.run(self._run(job, progress))
         except Exception as error:
             # The background thread must always produce an outcome. An
             # exception that escaped would otherwise leave the Job with no
@@ -118,7 +130,7 @@ class RuntimePipeline:
                 RuntimeState.FAILED, RuntimeFailure.DOCKER_UNAVAILABLE,
                 f"the runtime pipeline failed ({type(error).__name__})")
 
-    async def _run(self, job: Any) -> RuntimeOutcome:
+    async def _run(self, job: Any, progress: Any = None) -> RuntimeOutcome:
         # -- what to run ------------------------------------------------
         try:
             body = fetch_execution_context(
@@ -173,7 +185,8 @@ class RuntimePipeline:
         _debug.info("runtime: %s ready, starting training", job.job_id)
         return await run_training(
             self._runner, image.reference, workspace, model.path,
-            context.training, host_path_of=self._host_path_of)
+            context.training, host_path_of=self._host_path_of,
+            on_event=progress.observe if progress is not None else None)
 
     async def _pull(self, image: Any) -> RuntimeOutcome | None:
         """Fetch by digest and confirm what landed. None means it is ready.

@@ -365,6 +365,9 @@ class ProgressEvents:
         self._events = events
         self._total = total_steps
         self._reported_through = 0
+        #: Monotonic, never the wall clock: a training run measured with
+        #: ``time.time()`` changes length when the host adjusts its clock.
+        self._started = time.monotonic()
 
     def __getattr__(self, name):
         # Every hook the Trainer calls that this class does not implement.
@@ -372,18 +375,24 @@ class ProgressEvents:
             return lambda *args, **kwargs: None
         raise AttributeError(name)
 
+    def on_train_begin(self, args, state, control, **kwargs):
+        # The clock the elapsed time is measured from. Set again here because
+        # this object is built a moment before ``trainer.train()`` and the
+        # setup in between -- dataloaders, the optimiser -- is not training.
+        self._started = time.monotonic()
+
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs and "loss" in logs:
-            self._emit(state, float(logs["loss"]))
+            self._emit(args, state, float(logs["loss"]))
 
     def on_step_end(self, args, state, control, **kwargs):
         # Only when logging will not cover this step. The hooks run in the
         # order on_step_end, on_log -- so emitting here unconditionally would
         # publish a null-loss event and then a second one for the same step.
         if getattr(args, "logging_steps", 0) != 1:
-            self._emit(state, None)
+            self._emit(args, state, None)
 
-    def _emit(self, state, loss) -> None:
+    def _emit(self, args, state, loss) -> None:
         step = int(state.global_step)
         if step <= self._reported_through:
             return
@@ -391,9 +400,43 @@ class ProgressEvents:
         # what the reader was told before the run. They agree, and the
         # Trainer's is the one that cannot drift.
         total = int(state.max_steps or self._total)
+        whole, of_many = _epoch_numbers(args, state)
         self._events.step(step=step, total_steps=total,
-                          epoch=float(state.epoch or 0.0), loss=loss)
+                          epoch=float(state.epoch or 0.0), loss=loss,
+                          current_epoch=whole, total_epochs=of_many,
+                          elapsed_sec=round(time.monotonic() - self._started, 3))
         self._reported_through = step
+
+
+def _epoch_numbers(args, state) -> tuple[int | None, int | None]:
+    """Which epoch this is, out of how many, from the Trainer's own state.
+
+    ``state.epoch`` is fractional -- 0.0 through ``num_train_epochs`` -- and
+    the Backend's column is an integer, so one has to become the other
+    somewhere. It is done here, with the Trainer's number in hand, rather
+    than on the Worker, which would have to divide the step count by a guess
+    at how many steps an epoch holds. That guess is wrong whenever gradient
+    accumulation or a short final batch changes the count, and it is wrong
+    silently.
+
+    The count is 1-based: during the first pass over the data this reports
+    epoch 1, not 0. At the very end ``state.epoch`` reaches the total exactly,
+    which would name an epoch that does not exist, so the last one is held.
+
+    Returns ``(None, None)`` when the Trainer did not say -- ``max_steps``
+    runs have no meaningful epoch total, and a fabricated one is worse than
+    an absent one.
+    """
+    total = getattr(args, "num_train_epochs", None)
+    if not isinstance(total, (int, float)) or isinstance(total, bool):
+        return None, None
+    total = int(total)
+    if total <= 0:
+        return None, None
+    position = float(state.epoch or 0.0)
+    if position < 0:
+        return None, None
+    return min(int(position) + 1, total), total
 
 
 def _save(model, output_dir) -> None:

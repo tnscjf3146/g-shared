@@ -34,6 +34,7 @@ JOB_ACCEPTED = "JOB_ACCEPTED"
 JOB_REJECTED = "JOB_REJECTED"
 JOB_CANCEL = "JOB_CANCEL"
 JOB_CANCELLED = "JOB_CANCELLED"
+JOB_PROGRESS = "JOB_PROGRESS"
 
 
 class JobAssignmentError(ValueError):
@@ -472,6 +473,50 @@ def job_accepted_message(
     return {
         "type": JOB_ACCEPTED,
         "jobId": job_id,
+        "timestamp": timestamp,
+        "payload": payload,
+    }
+
+
+def job_progress_message(progress: Any, timestamp: str) -> dict[str, Any]:
+    """The JOB_PROGRESS envelope, in the shape ``handleJobProgress`` reads.
+
+    Read from ``WorkerWebSocketHandler.handleJobProgress`` and the query it
+    calls, ``JobRepository.updateProgressIfRunning``:
+
+    * ``progressPercent`` is taken with ``doubleOrNull`` into a ``DOUBLE``
+      column, so it stays a real number -- 43.75, not 43;
+    * **every other field is ``intOrNull``** into an ``INT`` column, and that
+      includes ``elapsedSec``. The circulating example shows ``123.4``; the
+      code does not, and the code is what stores the row. A float there would
+      be silently truncated by ``asInt()``, which is the kind of mismatch
+      that is only found when somebody wonders why a number is off.
+    * the update runs only ``AND j.status = RUNNING`` and only for the worker
+      the Job is assigned to. A message that arrives outside that is dropped
+      by the Backend with a warning, which is its decision to make -- the
+      Worker does not try to predict it and does not change its own state
+      because of it.
+
+    A field the container never reported is **left out** rather than sent as
+    null. Both store a null, and the absent one says the difference between
+    "not measured" and "measured as nothing".
+
+    Nothing but numbers goes in here. No dataset, no URL, no path, no token,
+    and no line of the container's output.
+    """
+    payload: dict[str, Any] = {
+        "progressPercent": float(progress.progress_percent),
+        "currentStep": int(progress.current_step),
+        "totalSteps": int(progress.total_steps),
+        "elapsedSec": int(progress.elapsed_sec),
+    }
+    if progress.current_epoch is not None:
+        payload["currentEpoch"] = int(progress.current_epoch)
+    if progress.total_epochs is not None:
+        payload["totalEpochs"] = int(progress.total_epochs)
+    return {
+        "type": JOB_PROGRESS,
+        "jobId": progress.job_id,
         "timestamp": timestamp,
         "payload": payload,
     }
