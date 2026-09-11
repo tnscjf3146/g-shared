@@ -63,8 +63,10 @@ class WorkerMineIntegrationTest {
         ownerToken = jwtProvider.createAccessToken(owner.getId(), owner.getRole());
 
         RegisterWorkerResponse registered = workerService.register(owner.getId(),
-                new RegisterWorkerRequest("테스트PC", "Windows 11", "RTX 4090",
-                        24576, "561.09", 1800.0));
+                new RegisterWorkerRequest("0x" + "b".repeat(40), "0.1.0",
+                        new RegisterWorkerRequest.SystemInfo("Windows 11", true),
+                        new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
+                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, "transformer-bench-v1")));
         workerId = registered.workerId();
     }
 
@@ -82,9 +84,15 @@ class WorkerMineIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].workerId").value(workerId))
-                .andExpect(jsonPath("$[0].deviceName").value("테스트PC"))
+                // 규격 v1 등록에는 deviceName 이 없다 — 화면이 문자열을 기대하므로 null 이 아니라 빈 값
+                .andExpect(jsonPath("$[0].deviceName").value(""))
+                .andExpect(jsonPath("$[0].osVersion").value("Windows 11"))
+                .andExpect(jsonPath("$[0].wslAvailable").value(true))
+                .andExpect(jsonPath("$[0].clientVersion").value("0.1.0"))
                 .andExpect(jsonPath("$[0].gpuModel").value("RTX 4090"))
                 .andExpect(jsonPath("$[0].vramMb").value(24576))
+                .andExpect(jsonPath("$[0].benchmarkVersion").value("transformer-bench-v1"))
+                .andExpect(jsonPath("$[0].operatorAddress").value("0x" + "b".repeat(40)))
                 // 등록 직후엔 아직 접속 전이라 OFFLINE 이다
                 .andExpect(jsonPath("$[0].status").value("OFFLINE"))
                 .andExpect(jsonPath("$[0].currentJobId").doesNotExist());
@@ -114,8 +122,10 @@ class WorkerMineIntegrationTest {
         User other = userRepository.save(User.createUser(
                 "other-" + UUID.randomUUID() + "@gshared.io", "encoded", "남"));
         workerService.register(other.getId(),
-                new RegisterWorkerRequest("남의PC", "Windows 11", "RTX 3060",
-                        12288, "560.00", 900.0));
+                new RegisterWorkerRequest("0x" + "c".repeat(40), "0.1.0",
+                        new RegisterWorkerRequest.SystemInfo("Windows 11", true),
+                        new RegisterWorkerRequest.GpuInfo("RTX 3060", 12288),
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1")));
 
         mockMvc.perform(get(MINE_URL)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))

@@ -34,17 +34,20 @@ public interface WorkerRepository extends JpaRepository<Worker, String> {
     Optional<Worker> findByIdAndOwnerId(String id, Long ownerId);
 
     /**
-     * 매칭용: 배정 가능한 워커 목록.
-     * ONLINE 이면서, 이미 맡은 Job(ASSIGNED/RUNNING)이 없는 워커만 — 이중 배정 방지.
+     * 매칭용: 배정 가능한 워커 목록 — 규격 §28 의 "운영 조건"을 Backend 가 여기서 거른다.
+     * ONLINE(연결·하트비트 살아 있음)이면서, 이미 맡은 Job(ASSIGNED/RUNNING)이 없고,
+     * 에스크로에 넣을 두 주소(operator = 서명, owner.walletAddress = provider 정산)가 모두 있는 워커만.
+     * 주소가 없는 워커를 배정하면 acceptJob() 까지 못 가고 JOB_REJECTED 로 돌아온다.
      * 하트비트 최신 순(확실히 살아있는 순).
      *
-     * <p>owner 를 함께 읽는 이유는 예치할 때 넣을 공급자 지갑 주소가 owner 에 있기 때문이다.
-     * ponytail: 단순 선택. AI Scheduler GPU 추천 연동 시 이 쿼리를 교체
+     * <p>기술적 적합성(VRAM·예측 실행시간)은 여기서 보지 않는다 — 그건 AI Scheduler 몫이다(§34).
      */
     @Query("""
             SELECT w FROM Worker w
-              JOIN FETCH w.owner
+              JOIN FETCH w.owner o
              WHERE w.status = com.gshared.back.worker.domain.WorkerStatus.ONLINE
+               AND w.operatorAddress IS NOT NULL
+               AND o.walletAddress IS NOT NULL
                AND w.id NOT IN (
                    SELECT j.assignedWorkerId FROM Job j
                     WHERE j.assignedWorkerId IS NOT NULL

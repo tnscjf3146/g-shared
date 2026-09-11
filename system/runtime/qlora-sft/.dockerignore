@@ -1,0 +1,10 @@
+# The image holds the runner and nothing else. Everything below is either a
+# development tool that is allowed to reach the internet (tools/), a test that
+# has no business shipping, or generated data.
+tests/
+tools/
+fixtures/
+README.md
+.dockerignore
+**/__pycache__/
+**/*.pyc

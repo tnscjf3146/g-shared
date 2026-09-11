@@ -4,7 +4,8 @@ import com.gshared.back.user.domain.User;
 import com.gshared.back.user.repository.UserRepository;
 import com.gshared.back.worker.dto.request.AuthenticateWorkerRequest;
 import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
-import com.gshared.back.worker.dto.request.UpdateWorkerGpuRequest;
+import com.gshared.back.worker.dto.request.UpdateBenchmarkRequest;
+import com.gshared.back.worker.dto.request.UpdateOperatorRequest;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
 import com.gshared.back.worker.repository.WorkerRepository;
 import com.gshared.back.worker.service.WorkerService;
@@ -29,12 +30,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 사람 없이 워커 프로그램이 부르는 두 창구를 보안 필터까지 거쳐 확인한다.
- * 로그인 JWT 가 아니라 워커 토큰으로 인증되는지가 핵심이다.
+ * 사람 없이 워커 프로그램이 부르는 세 창구(§4 authenticate · §5 operator · §6 benchmark)를
+ * 보안 필터까지 거쳐 확인한다. 로그인 JWT 가 아니라 워커 토큰으로 인증되는지가 핵심이다.
  *
- * <p>404 응답의 code 가 WORKER_NOT_FOUND 인지를 매번 확인하는 이유:
- * 워커 클라이언트는 그 문자열을 보고 "내 등록이 사라졌으니 재등록하자"로 넘어간다.
- * 코드가 달라지면 워커는 재등록하지 못하고 그대로 멈춘다.
+ * <p>실패 코드가 규격(401/403)과 맞는지를 매번 확인하는 이유: 워커 클라이언트는 401/403 을
+ * "재연결로 풀리지 않는 실패"로 읽고 멈춘다. 다른 코드를 주면 무한 재접속을 돌 수 있다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -42,6 +42,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class WorkerAuthIntegrationTest {
 
     private static final String AUTHENTICATE_URL = "/api/workers/authenticate";
+    private static final String OPERATOR = "0x" + "b".repeat(40);
 
     @Autowired
     private MockMvc mockMvc;
@@ -63,93 +64,163 @@ class WorkerAuthIntegrationTest {
                 "worker-" + UUID.randomUUID() + "@gshared.io", "encoded", "워커주인"));
 
         // 원문 토큰은 등록 응답에서만 나오므로 서비스로 등록해 받아둔다 (DB엔 해시만 남는다)
-        RegisterWorkerResponse registered = workerService.register(owner.getId(),
-                new RegisterWorkerRequest("테스트PC", "Windows 11", "RTX 4090",
-                        24576, "561.09", 1800.0));
+        RegisterWorkerResponse registered = workerService.register(owner.getId(), registerRequest(OPERATOR));
         workerId = registered.workerId();
         workerToken = registered.workerToken();
     }
 
-    private String gpuUrl(String id) {
-        return "/api/workers/" + id + "/gpu";
+    private static RegisterWorkerRequest registerRequest(String operatorAddress) {
+        return new RegisterWorkerRequest(operatorAddress, "0.1.0",
+                new RegisterWorkerRequest.SystemInfo("Windows 11", true),
+                new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
+                new RegisterWorkerRequest.BenchmarkInfo(1800.0, "transformer-bench-v1"));
+    }
+
+    private String operatorUrl(String id) {
+        return "/api/workers/" + id + "/operator";
+    }
+
+    private String benchmarkUrl(String id) {
+        return "/api/workers/" + id + "/benchmark";
+    }
+
+    // ── 등록 ────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("등록 응답은 operatorAddress 를 정규화(소문자)해 돌려주고 DB 에도 그렇게 남는다")
+    void registerNormalizesOperator() {
+        User owner = userRepository.save(User.createUser(
+                "reg-" + UUID.randomUUID() + "@gshared.io", "encoded", "등록자"));
+        String checksummed = "0x" + "AbCdEf".repeat(6) + "AbCd";   // 대소문자 섞인 42자
+
+        RegisterWorkerResponse response = workerService.register(owner.getId(), registerRequest(checksummed));
+
+        assertThat(response.operatorAddress()).isEqualTo(checksummed.toLowerCase());
+        assertThat(workerRepository.findById(response.workerId()))
+                .hasValueSatisfying(w -> {
+                    assertThat(w.getOperatorAddress()).isEqualTo(checksummed.toLowerCase());
+                    assertThat(w.getWslAvailable()).isTrue();
+                    assertThat(w.getBenchmarkVersion()).isEqualTo("transformer-bench-v1");
+                });
     }
 
     // ── POST /api/workers/authenticate ──────────────────────────
 
     @Test
-    @DisplayName("워커 토큰으로 확인하면 서버가 인정한 workerId 를 돌려준다")
+    @DisplayName("workerId + workerToken 이 맞으면 200 과 authenticated=true")
     void authenticate() throws Exception {
         mockMvc.perform(post(AUTHENTICATE_URL)
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthenticateWorkerRequest(workerId))))
+                        .content(objectMapper.writeValueAsString(new AuthenticateWorkerRequest(workerId, workerToken))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.workerId").value(workerId));
+                .andExpect(jsonPath("$.workerId").value(workerId))
+                .andExpect(jsonPath("$.authenticated").value(true));
     }
 
     @Test
-    @DisplayName("등록되지 않은 토큰이면 404 WORKER_NOT_FOUND — 워커는 이걸 보고 재등록한다")
+    @DisplayName("모르는 토큰이면 401 INVALID_WORKER_TOKEN — 워커는 재연결하지 않고 멈춘다")
     void authenticateWithUnknownToken() throws Exception {
         mockMvc.perform(post(AUTHENTICATE_URL)
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + UUID.randomUUID())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthenticateWorkerRequest(workerId))))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("WORKER_NOT_FOUND"));
-    }
-
-    @Test
-    @DisplayName("토큰은 유효해도 다른 워커를 주장하면 404 WORKER_NOT_FOUND")
-    void authenticateWithMismatchedWorkerId() throws Exception {
-        mockMvc.perform(post(AUTHENTICATE_URL)
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
-                                new AuthenticateWorkerRequest("worker-" + UUID.randomUUID()))))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("WORKER_NOT_FOUND"));
-    }
-
-    @Test
-    @DisplayName("Authorization 헤더가 없으면 401 — 인증 시도 자체가 없었던 것이라 재등록 대상이 아니다")
-    void authenticateWithoutHeader() throws Exception {
-        mockMvc.perform(post(AUTHENTICATE_URL)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new AuthenticateWorkerRequest(workerId))))
+                                new AuthenticateWorkerRequest(workerId, UUID.randomUUID().toString()))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("INVALID_WORKER_TOKEN"));
     }
 
-    // ── PUT /api/workers/{workerId}/gpu ─────────────────────────
+    @Test
+    @DisplayName("토큰은 유효해도 다른 워커를 주장하면 403 WORKER_FORBIDDEN")
+    void authenticateWithMismatchedWorkerId() throws Exception {
+        mockMvc.perform(post(AUTHENTICATE_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new AuthenticateWorkerRequest("worker-" + UUID.randomUUID(), workerToken))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("WORKER_FORBIDDEN"));
+    }
 
     @Test
-    @DisplayName("GPU 정보를 갱신하면 204 와 함께 저장된 스펙이 바뀐다")
-    void updateGpu() throws Exception {
-        mockMvc.perform(put(gpuUrl(workerId))
+    @DisplayName("본문에 토큰이 없으면 400 — 규격상 토큰은 헤더가 아니라 본문이다")
+    void authenticateWithoutToken() throws Exception {
+        mockMvc.perform(post(AUTHENTICATE_URL)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workerId\":\"" + workerId + "\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ── PUT /api/workers/{workerId}/operator ────────────────────
+
+    @Test
+    @DisplayName("operator 주소를 바꾸면 정규화된 주소와 updated=true 를 돌려준다")
+    void updateOperator() throws Exception {
+        String newOperator = "0x" + "ABCDEF".repeat(6) + "ABCD";
+
+        mockMvc.perform(put(operatorUrl(workerId))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new UpdateWorkerGpuRequest(
-                                "RTX 5090", 32768, "580.00", 2600.5))))
-                .andExpect(status().isNoContent());
+                        .content(objectMapper.writeValueAsString(new UpdateOperatorRequest(newOperator))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workerId").value(workerId))
+                .andExpect(jsonPath("$.operatorAddress").value(newOperator.toLowerCase()))
+                .andExpect(jsonPath("$.updated").value(true));
+
+        assertThat(workerRepository.findById(workerId))
+                .hasValueSatisfying(w -> assertThat(w.getOperatorAddress()).isEqualTo(newOperator.toLowerCase()));
+    }
+
+    @Test
+    @DisplayName("주소 형식이 틀리면 400 INVALID_OPERATOR_ADDRESS — 잘못된 주소로는 acceptJob 을 부를 수 없다")
+    void updateOperatorWithInvalidAddress() throws Exception {
+        mockMvc.perform(put(operatorUrl(workerId))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateOperatorRequest("0x1234"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_OPERATOR_ADDRESS"));
+    }
+
+    @Test
+    @DisplayName("Authorization 헤더가 없으면 401 — 인증 시도 자체가 없었던 것이다")
+    void updateOperatorWithoutHeader() throws Exception {
+        mockMvc.perform(put(operatorUrl(workerId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateOperatorRequest(OPERATOR))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_WORKER_TOKEN"));
+    }
+
+    // ── PUT /api/workers/{workerId}/benchmark ───────────────────
+
+    @Test
+    @DisplayName("벤치마크를 갱신하면 updated=true 와 함께 저장된 스펙이 바뀐다")
+    void updateBenchmark() throws Exception {
+        mockMvc.perform(put(benchmarkUrl(workerId))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new UpdateBenchmarkRequest(
+                                "RTX 5090", 32768, 2600.5, "transformer-bench-v2"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.workerId").value(workerId))
+                .andExpect(jsonPath("$.updated").value(true));
 
         assertThat(workerRepository.findById(workerId)).hasValueSatisfying(worker -> {
             assertThat(worker.getGpuModel()).isEqualTo("RTX 5090");
             assertThat(worker.getVramMb()).isEqualTo(32768);
-            assertThat(worker.getDriverVersion()).isEqualTo("580.00");
             assertThat(worker.getBenchmarkTokensPerSec()).isEqualTo(2600.5);
+            assertThat(worker.getBenchmarkVersion()).isEqualTo("transformer-bench-v2");
         });
     }
 
     @Test
-    @DisplayName("남의 워커 GPU 정보는 갱신할 수 없다")
-    void updateGpuOfAnotherWorker() throws Exception {
-        mockMvc.perform(put(gpuUrl("worker-" + UUID.randomUUID()))
+    @DisplayName("남의 워커 벤치마크는 갱신할 수 없다 — 403")
+    void updateBenchmarkOfAnotherWorker() throws Exception {
+        mockMvc.perform(put(benchmarkUrl("worker-" + UUID.randomUUID()))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new UpdateWorkerGpuRequest(
-                                "RTX 5090", 32768, "580.00", 2600.5))))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("WORKER_NOT_FOUND"));
+                        .content(objectMapper.writeValueAsString(new UpdateBenchmarkRequest(
+                                "RTX 5090", 32768, 2600.5, "transformer-bench-v1"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("WORKER_FORBIDDEN"));
 
         // 내 워커 스펙도 그대로여야 한다
         assertThat(workerRepository.findById(workerId))
@@ -158,12 +229,12 @@ class WorkerAuthIntegrationTest {
 
     @Test
     @DisplayName("벤치마크 값이 0 이면 400 — 스케줄러가 빈 성능치를 그대로 믿게 두지 않는다")
-    void updateGpuWithInvalidBenchmark() throws Exception {
-        mockMvc.perform(put(gpuUrl(workerId))
+    void updateBenchmarkWithInvalidValue() throws Exception {
+        mockMvc.perform(put(benchmarkUrl(workerId))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new UpdateWorkerGpuRequest(
-                                "RTX 5090", 32768, "580.00", 0.0))))
+                        .content(objectMapper.writeValueAsString(new UpdateBenchmarkRequest(
+                                "RTX 5090", 32768, 0.0, "transformer-bench-v1"))))
                 .andExpect(status().isBadRequest());
     }
 }

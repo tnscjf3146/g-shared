@@ -12,24 +12,23 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 
 /**
- * Worker WebSocket 교환원.
- * 스프링이 연결/메시지/종료 시점에 아래 메서드들을 자동 호출한다.
- *
- * <p>4-1(현재): 뼈대만 — type 분기 골격. 실제 처리 내용은 다음 스텝에서 채운다.
+ * Worker WebSocket 교환원. 스프링이 연결/메시지/종료 시점에 아래 메서드들을 자동 호출한다.
+ * 메시지 봉투·payload 는 System ↔ Backend 연동 규격 v1 §7~§21 을 따른다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WorkerWebSocketHandler extends TextWebSocketHandler {
 
-    // 세션 attribute 에 저장해둘 workerId 키 (핸드셰이크 인터셉터가 넣어줌 → 부품 5)
+    // 세션 attribute 에 저장해둘 workerId 키 (핸드셰이크 인터셉터가 넣어줌)
     public static final String WORKER_ID = "workerId";
     // "REGISTER 를 마친 세션" 표시 플래그 (등록 전에 다른 메시지를 보내면 무시)
     public static final String REGISTERED = "registered";
@@ -89,9 +88,11 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
                 case REGISTER      -> handleRegister(session, workerId, msg);
                 case HEARTBEAT     -> handleHeartbeat(session, workerId, msg);
                 case JOB_ACCEPTED  -> handleJobAccepted(workerId, msg);
+                case JOB_REJECTED  -> handleJobRejected(workerId, msg);
                 case JOB_PROGRESS  -> handleJobProgress(workerId, msg);
                 case JOB_RESULT    -> handleJobResult(workerId, msg);
                 case JOB_FAILED    -> handleJobFailed(workerId, msg);
+                case JOB_CANCELLED -> handleJobCancelled(workerId, msg);
                 // 나머지(REGISTER_ACK/JOB_ASSIGN 등)는 백엔드가 "보내는" 타입이라 수신될 일 없음
                 default -> log.warn("[WS] 예상치 못한 수신 type={} workerId={}", msg.type(), workerId);
             }
@@ -142,18 +143,109 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
         send(session, WorkerMessage.of(WorkerMessageType.HEARTBEAT_ACK, now(), emptyPayload()));
     }
 
+    /** §13 payload: escrowJobId · operatorAddress · txHash */
     private void handleJobAccepted(String workerId, WorkerMessage msg) {
         Long jobId = parseJobId(msg);
         if (jobId == null) {
             return;
         }
-        boolean started = jobService.acceptJob(workerId, jobId);
+        boolean started = jobService.acceptJob(workerId, jobId,
+                textOrNull(msg, "escrowJobId"), textOrNull(msg, "operatorAddress"), textOrNull(msg, "txHash"));
         if (started) {
-            log.info("[WS] JOB_ACCEPTED → RUNNING workerId={} jobId={}", workerId, jobId);
+            log.info("[WS] JOB_ACCEPTED → RUNNING workerId={} jobId={} tx={}", workerId, jobId, textOrNull(msg, "txHash"));
         } else {
-            log.warn("[WS] JOB_ACCEPTED 무시(배정 불일치/중복) workerId={} jobId={}", workerId, jobId);
+            // 배정 불일치·중복이거나, escrowJobId/operatorAddress 가 기록과 달라 fail closed 된 경우(서비스가 error 로그)
+            log.warn("[WS] JOB_ACCEPTED 미반영 workerId={} jobId={}", workerId, jobId);
         }
     }
+
+    /** §14 payload: code · message */
+    private void handleJobRejected(String workerId, WorkerMessage msg) {
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        String code = textOrNull(msg, "code");
+        boolean handled = jobService.rejectJob(workerId, jobId, code, textOrNull(msg, "message"));
+        if (handled) {
+            log.warn("[WS] JOB_REJECTED workerId={} jobId={} code={} message={}",
+                    workerId, jobId, code, textOrNull(msg, "message"));
+        } else {
+            log.warn("[WS] JOB_REJECTED 무시(배정 불일치) workerId={} jobId={} code={}", workerId, jobId, code);
+        }
+    }
+
+    /** §16 payload: progressPercent · currentStep · totalSteps · currentEpoch · totalEpochs · elapsedSec */
+    private void handleJobProgress(String workerId, WorkerMessage msg) {
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean applied = jobService.updateProgress(workerId, jobId,
+                doubleOrNull(msg, "progressPercent"),
+                intOrNull(msg, "currentStep"),
+                intOrNull(msg, "totalSteps"),
+                intOrNull(msg, "currentEpoch"),
+                intOrNull(msg, "totalEpochs"),
+                intOrNull(msg, "elapsedSec"));
+        if (applied) {
+            log.debug("[WS] JOB_PROGRESS workerId={} jobId={} {}%", workerId, jobId, doubleOrNull(msg, "progressPercent"));
+        } else {
+            log.warn("[WS] JOB_PROGRESS 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** §19 payload: objectKey · resultHash · submitTxHash · actualRuntimeSec */
+    private void handleJobResult(String workerId, WorkerMessage msg) {
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean completed = jobService.completeJob(workerId, jobId,
+                textOrNull(msg, "objectKey"),
+                textOrNull(msg, "resultHash"),
+                textOrNull(msg, "submitTxHash"),
+                doubleOrNull(msg, "actualRuntimeSec"));
+        if (completed) {
+            log.info("[WS] JOB_RESULT → COMPLETED workerId={} jobId={} runtime={}s",
+                    workerId, jobId, doubleOrNull(msg, "actualRuntimeSec"));
+        } else {
+            log.warn("[WS] JOB_RESULT 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** §20 payload: code · message · abortTxHash · actualRuntimeSec */
+    private void handleJobFailed(String workerId, WorkerMessage msg) {
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        String code = textOrNull(msg, "code");
+        boolean failed = jobService.failJob(workerId, jobId, code, textOrNull(msg, "message"),
+                textOrNull(msg, "abortTxHash"), doubleOrNull(msg, "actualRuntimeSec"));
+        if (failed) {
+            log.info("[WS] JOB_FAILED → FAILED workerId={} jobId={} code={}", workerId, jobId, code);
+        } else {
+            log.warn("[WS] JOB_FAILED 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    /** §21 payload: reason · abortTxHash · actualRuntimeSec */
+    private void handleJobCancelled(String workerId, WorkerMessage msg) {
+        Long jobId = parseJobId(msg);
+        if (jobId == null) {
+            return;
+        }
+        boolean confirmed = jobService.confirmCancelled(workerId, jobId,
+                textOrNull(msg, "abortTxHash"), doubleOrNull(msg, "actualRuntimeSec"));
+        if (confirmed) {
+            log.info("[WS] JOB_CANCELLED → CANCELLED workerId={} jobId={} reason={}", workerId, jobId, textOrNull(msg, "reason"));
+        } else {
+            log.warn("[WS] JOB_CANCELLED 무시(CANCELLING 아님) workerId={} jobId={}", workerId, jobId);
+        }
+    }
+
+    // ── payload 헬퍼 ────────────────────────────────────────────
 
     /** 봉투의 jobId(문자열) → Long. 없거나 숫자가 아니면 null + 경고. */
     private Long parseJobId(WorkerMessage msg) {
@@ -169,84 +261,26 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    private void handleJobProgress(String workerId, WorkerMessage msg) {
-        Long jobId = parseJobId(msg);
-        if (jobId == null) {
-            return;
-        }
-        boolean applied = jobService.updateProgress(workerId, jobId,
-                intOrNull(msg, "progress"),
-                intOrNull(msg, "currentEpoch"),
-                intOrNull(msg, "totalEpochs"));
-        if (applied) {
-            log.debug("[WS] JOB_PROGRESS workerId={} jobId={} {}%", workerId, jobId, intOrNull(msg, "progress"));
-        } else {
-            log.warn("[WS] JOB_PROGRESS 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
-        }
-    }
-
     /** payload 에서 정수 필드 꺼내기. 없거나 숫자가 아니면 null. */
     private Integer intOrNull(WorkerMessage msg, String field) {
-        if (msg.payload() == null) {
-            return null;
-        }
-        var node = msg.payload().path(field);   // path(): 없어도 예외 대신 missing 노드 반환
-        return node.isNumber() ? node.asInt() : null;
-    }
-
-    private void handleJobResult(String workerId, WorkerMessage msg) {
-        Long jobId = parseJobId(msg);
-        if (jobId == null) {
-            return;
-        }
-        boolean completed = jobService.completeJob(workerId, jobId,
-                textOrNull(msg, "resultHash"),
-                textOrNull(msg, "resultUrl"),
-                doubleOrNull(msg, "actualRuntimeSec"));
-        if (completed) {
-            log.info("[WS] JOB_RESULT → COMPLETED workerId={} jobId={}", workerId, jobId);
-        } else {
-            log.warn("[WS] JOB_RESULT 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
-        }
+        JsonNode node = field(msg, field);
+        return node != null && node.isNumber() ? node.asInt() : null;
     }
 
     /** payload 에서 실수 필드 꺼내기. 없거나 숫자가 아니면 null. */
     private Double doubleOrNull(WorkerMessage msg, String field) {
-        if (msg.payload() == null) {
-            return null;
-        }
-        var node = msg.payload().path(field);
-        return node.isNumber() ? node.asDouble() : null;
+        JsonNode node = field(msg, field);
+        return node != null && node.isNumber() ? node.asDouble() : null;
     }
 
     /** payload 에서 문자열 필드 꺼내기. 없으면 null. */
     private String textOrNull(WorkerMessage msg, String field) {
-        if (msg.payload() == null) {
-            return null;
-        }
-        var node = msg.payload().path(field);
-        return node.isString() ? node.asString() : null;   // Jackson 3: isTextual/asText 의 새 이름
+        JsonNode node = field(msg, field);
+        return node != null && node.isString() ? node.asString() : null;   // Jackson 3: isTextual/asText 의 새 이름
     }
 
-    private void handleJobFailed(String workerId, WorkerMessage msg) {
-        Long jobId = parseJobId(msg);
-        if (jobId == null) {
-            return;
-        }
-        // 사유 = "에러코드: 메시지" 형태로 합쳐 저장 (예: "GPU_OOM: GPU out of memory")
-        String errorCode = textOrNull(msg, "errorCode");
-        String message = textOrNull(msg, "message");
-        String failReason = (errorCode != null ? errorCode : "UNKNOWN") + (message != null ? ": " + message : "");
-        if (failReason.length() > 2000) {
-            failReason = failReason.substring(0, 2000);   // 폭주 메시지 상한 (DB는 TEXT지만 무한 저장 방지)
-        }
-
-        boolean failed = jobService.failJob(workerId, jobId, failReason);
-        if (failed) {
-            log.info("[WS] JOB_FAILED → FAILED workerId={} jobId={} reason={}", workerId, jobId, failReason);
-        } else {
-            log.warn("[WS] JOB_FAILED 무시(RUNNING 아님) workerId={} jobId={}", workerId, jobId);
-        }
+    private JsonNode field(WorkerMessage msg, String field) {
+        return msg.payload() == null ? null : msg.payload().path(field);   // path(): 없어도 예외 대신 missing 노드 반환
     }
 
     // ── 공통 헬퍼 ───────────────────────────────────────────────
@@ -272,11 +306,12 @@ public class WorkerWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /** 규격 §1.2 — ISO-8601 UTC ("2026-09-11T06:30:25.123Z"). */
     private String now() {
-        return OffsetDateTime.now().toString();   // ISO 8601
+        return Instant.now().toString();
     }
 
-    private tools.jackson.databind.JsonNode emptyPayload() {
+    private JsonNode emptyPayload() {
         return objectMapper.createObjectNode();   // {}
     }
 }

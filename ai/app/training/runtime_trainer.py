@@ -34,6 +34,14 @@ from app.scheduler.runtime_features import (
     TARGET_NAME,
     CategoryMapping,
 )
+from app.training.baselines import compare
+from app.training.provenance import (
+    REAL,
+    is_production_ready,
+    limitations_for,
+    provenance_of,
+    select_trainable,
+)
 from app.training.runtime_dataset import TRAINING_DATA_TYPE
 
 #: 저장되는 파일 이름. 예측 쪽도 이 상수를 쓴다.
@@ -99,6 +107,8 @@ class TrainingReport:
     metadata_path: Path
     #: synthetic 데이터로 잰 값인지. metrics를 읽는 사람이 반드시 알아야 한다.
     training_data_type: str
+    #: median / throughput baseline과의 비교. 검증셋이 없으면 ``None``.
+    baselines: dict | None = None
 
     def summary(self) -> str:
         if self.mae_sec is None:
@@ -107,6 +117,19 @@ class TrainingReport:
             f"{self.row_count} rows | MAE {self.mae_sec:,.1f} sec"
             f" | MAPE {self.mape_percent:.2f}%"
         )
+
+
+def _dominant_kind(counts: Mapping[str, int]) -> str:
+    """metadata의 ``trainingDataKind``.
+
+    섞여 있으면 **가장 약한 쪽**을 적는다. BOOTSTRAP이 한 줄이라도 들어간 모델을
+    MEASURED라고 부르면, 그 한 줄이 어디에 섞였는지 모르는 채로 실측 모델이라고
+    읽히게 된다.
+    """
+    for kind in ("BOOTSTRAP", "CALIBRATION", "MEASURED", "PRODUCTION"):
+        if counts.get(kind):
+            return kind
+    return "UNKNOWN"
 
 
 def build_frame(rows: Sequence[Mapping[str, object]]) -> pd.DataFrame:
@@ -171,30 +194,52 @@ def train_runtime_model(
     models_directory: Path,
     training_data_type: str = TRAINING_DATA_TYPE,
 ) -> TrainingReport:
-    """학습하고, 저장하고, 무엇으로 학습했는지 함께 남긴다."""
-    frame = build_frame(rows)
-    target = _targets(rows)
-    categories = CategoryMapping.learned_from(rows)
+    """학습하고, 저장하고, 무엇으로 학습했는지 함께 남긴다.
+
+    첫 줄이 출처를 거르는 것이다. 이 순서가 중요하다 -- calibration 행은 feature가
+    완전한 정상 행이라 뒤쪽 어느 검증에도 걸리지 않고, 걸러 내지 않으면 그대로
+    학습된다. 자세한 이유는 :mod:`app.training.provenance` 에 적었다.
+    """
+    trainable, provenance_counts = select_trainable(rows)
+    if not trainable:
+        raise TrainingDataError(
+            "no rows are usable as training targets; provenance counts: "
+            f"{provenance_counts or 'none'}")
+
+    frame = build_frame(trainable)
+    target = _targets(trainable)
+    categories = CategoryMapping.learned_from(trainable)
     encoded = encode(frame, categories)
 
-    if len(rows) >= MIN_ROWS_FOR_VALIDATION:
-        x_train, x_valid, y_train, y_valid = train_test_split(
-            encoded, target, test_size=VALIDATION_FRACTION, random_state=RANDOM_STATE)
+    if len(trainable) >= MIN_ROWS_FOR_VALIDATION:
+        # 행 자체가 아니라 위치를 나눈다. baseline이 원본 행을 다시 봐야 하고
+        # (throughput은 encode된 카테고리 코드가 아니라 토큰 수를 쓴다), 위치로
+        # 나누면 X·y·원본 셋이 어긋날 자리가 없다.
+        positions = np.arange(len(trainable))
+        train_at, valid_at = train_test_split(
+            positions, test_size=VALIDATION_FRACTION, random_state=RANDOM_STATE)
+        x_train, y_train = encoded.iloc[train_at], target[train_at]
+        x_valid, y_valid = encoded.iloc[valid_at], target[valid_at]
+        valid_rows = [trainable[position] for position in valid_at]
     else:
         # 행이 적을 때 숫자를 채우려고 의미 없는 검증셋을 떼지 않는다.
         x_train, y_train = encoded, target
-        x_valid = y_valid = None
+        x_valid = y_valid = valid_rows = None
 
     model = XGBRegressor(**XGB_PARAMS)
     model.fit(x_train, np.log(y_train))
 
     mae = mape = None
+    baselines = None
     if x_valid is not None:
         # 지표는 초 단위 원래 값으로 되돌려 잰다. log 공간의 오차는 사람이 읽을 수
         # 있는 값이 아니고, 보고서에 적히는 숫자는 초여야 한다.
         predicted = np.exp(model.predict(x_valid))
         mae = float(mean_absolute_error(y_valid, predicted))
         mape = float(np.mean(np.abs((y_valid - predicted) / y_valid)) * 100.0)
+        baselines = compare(
+            train_target=y_train, valid_target=y_valid,
+            valid_rows=valid_rows, model_predicted=predicted)
 
     models_directory.mkdir(parents=True, exist_ok=True)
     model_path = models_directory / MODEL_FILE_NAME
@@ -213,7 +258,28 @@ def train_runtime_model(
         "targetTransform": TARGET_TRANSFORM,
         "trainedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "trainingDataType": training_data_type,
+        # 이 모델을 실제 예측에 써도 되는가. 지금은 거짓이고, 거짓인 이유가
+        # limitations에 문장으로 들어간다. 두 값을 함께 두는 이유는 boolean 하나만
+        # 보고 "언젠가 참이 되겠지" 하고 넘어가지 못하게 하기 위해서다.
+        "productionReady": is_production_ready(provenance_counts),
+        # 실측 행의 GPU만 센다. 합성 행을 넣으면 생성기가 만든 다섯 종류가
+        # cross-GPU 검증을 한 것처럼 보이게 만든다.
+        "limitations": limitations_for(
+            provenance_counts,
+            measured_gpu_models=[
+                str(row.get("gpu_model", "")) for row in trainable
+                if provenance_of(row) in REAL
+            ],
+        ),
+        # 행 하나하나가 어디서 왔는지의 합계. metadata만 보고도 이 모델이 무엇으로
+        # 만들어졌는지 알 수 있어야 한다.
+        "trainingDataKind": _dominant_kind(provenance_counts),
+        "provenanceCounts": provenance_counts,
+        # XGBoost가 아무것도 학습하지 않은 답과 한 줄짜리 물리 공식을 실제로
+        # 이겼는지. 이기지 못한 채로도 저장되며, 그 사실이 여기 남는다.
+        "baselines": baselines,
         "rowCount": len(rows),
+        "trainableRowCount": len(trainable),
         "trainRows": int(len(x_train)),
         "validationRows": 0 if x_valid is None else int(len(x_valid)),
         "xgbParams": dict(XGB_PARAMS),
@@ -243,4 +309,5 @@ def train_runtime_model(
         model_path=model_path,
         metadata_path=metadata_path,
         training_data_type=training_data_type,
+        baselines=baselines,
     )

@@ -52,3 +52,19 @@ scheduler:
   base-url: ${SCHEDULER_BASE_URL:http://localhost:8000}
   connect-timeout: 2s
   read-timeout: 5s
+
+# 오브젝트 스토리지 — 데이터셋 내려받기·결과물 올리기용 서명 URL 발급 (연동 규격 §11·§17).
+# 지금은 Backend 가 파일을 직접 보관한다(LocalObjectStorage). S3 로 옮겨도 이 키 이름은 유지.
+storage:
+  root: ${STORAGE_ROOT:./storage-data}
+  # 워커가 바깥에서 접속하는 Backend 주소. 서명 URL 앞에 그대로 붙는다.
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:http://localhost:8080}
+  # URL 서명 키. 따로 두지 않으면 JWT 키를 겸용한다 — 운영에서는 분리 권장.
+  signing-secret: ${STORAGE_SIGNING_SECRET:${JWT_SECRET}}
+  upload-ttl: 1h
+  download-ttl: 2h
+
+# 에스크로 컨트랙트 — Worker 가 acceptJob() 전에 온체인 값과 대조하는 기준 (연동 규격 §11 escrow).
+# chainId 는 wallet-auth.chain-id 를 같이 쓴다 (토큰·에스크로 모두 같은 체인).
+escrow:
+  contract-address: ${ESCROW_CONTRACT_ADDRESS:}

@@ -2,9 +2,10 @@
 
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useMemo } from 'react'
-import { type Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
-import { P } from '../progress'
+import { useEffect, useMemo } from 'react'
+import { Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { GPU_READY_EVENT, P } from '../progress'
 
 const MODEL = '/models/gpu.glb'
 
@@ -15,9 +16,11 @@ type Part = {
   core: number // 0 히트파이프, 1 콜드플레이트·브릿지, 아니면 -1
   choke: number // VRM 초크면 위상(A 조 0, B 조 π), 아니면 -1 — 챕터 9 이후 두 조가 번갈아 높이가 줄었다 돌아옴
   spin: boolean // 팬(회전)
+  shroud: boolean // 쉬라우드(팬과 같은 구간에 분리·상승)
   hs: boolean // 히트싱크(핀·히트파이프) — 챕터 7~8 에서 함께 들리고 위로 나감
 }
 
+const FAN_SPEED = 4 // 팬 회전 속도(rad/s). 5 → 3 → 4 (2026-09-11, 낮은 프레임에서도 매끄럽게)
 const FAN_LIFT = 4 // 챕터 3: 팬 상승 거리(화면 밖)
 const SHROUD_LIFT = 4.5 // 챕터 5: 쉬라우드가 화면 밖까지 올라가는 높이(glTF 단위)
 const HS_LIFT = 0.5 // 챕터 7: 히트싱크(핀+히트파이프)가 들리는 높이
@@ -43,10 +46,39 @@ const LOOKS: [RegExp, MeshStandardMaterial][] = [
   [/_IC$/, new MeshStandardMaterial({ color: '#0a0b0c', metalness: 0.2, roughness: 0.42 })], // PWM/BIOS IC: 검은 몰딩
 ]
 
+// 반복 부품 병합 — 드로우콜 154 → 약 55. 같은 재질이고 개별로 움직이지 않는 그룹만: Fin_(66, 히트싱크와 함께 한 덩어리로 움직임) · Cap_(17) · Mosfet_(11) · VRAM_(8, 셋은 기판에 고정).
+// 초크는 A/B 조가 따로 펌핑하고, 팬은 각각 회전하므로 병합하지 않는다. 조립이 끝나 전 부품이 다시 보일 때 프레임이 떨어지던 것(2026-09-11)의 처방.
+// useGLTF 는 scene 을 캐시하므로 두 번째 호출엔 대상이 1개 미만 → 그대로 둔다(멱등)
+const MERGE_GROUPS = ['Fin_', 'Cap_', 'Mosfet_', 'VRAM_']
+function mergeGroup(scene: Object3D, prefix: string) {
+  const meshes: Mesh[] = []
+  scene.traverse((o) => {
+    if (o.name.startsWith(prefix) && (o as Mesh).isMesh) meshes.push(o as Mesh)
+  })
+  if (meshes.length < 2) return
+  const geos = meshes.map((m) => {
+    m.updateMatrix()
+    return m.geometry.clone().applyMatrix4(m.matrix) // 각 부품의 로컬 배치를 정점에 굽는다 → 병합 메시는 원점(0,0,0)이 base
+  })
+  const merged = mergeGeometries(geos, false)
+  geos.forEach((g) => g.dispose())
+  if (!merged) return // 속성 구성이 다르면 병합 불가 — 개별 메시 유지
+  const mesh = new Mesh(merged, meshes[0].material)
+  mesh.name = `${prefix}merged` // 접두로 LOOKS·hs 판정이 그대로 걸린다
+  mesh.userData = { ...meshes[0].userData } // explode 태그가 있어야 '부품'으로 인식
+  meshes.forEach((m) => m.removeFromParent())
+  scene.add(mesh)
+}
+
 export function GpuModel() {
   const { scene } = useGLTF(MODEL, true) // Draco 디코더는 drei 기본(구글 CDN) 사용
+  // 이 컴포넌트가 마운트됐다 = Suspense 를 통과했다 = 모델이 있다 → 인트로를 시작해도 빈 화면이 아니다
+  useEffect(() => {
+    window.dispatchEvent(new Event(GPU_READY_EVENT))
+  }, [])
 
   const parts = useMemo<Part[]>(() => {
+    MERGE_GROUPS.forEach((prefix) => mergeGroup(scene, prefix))
     const list: Part[] = []
     scene.traverse((o) => {
       const ex = o.userData.explode as number[] | undefined
@@ -55,7 +87,7 @@ export function GpuModel() {
       if (look) o.traverse((c) => { if ((c as Mesh).isMesh) (c as Mesh).material = look })
       const core = o.name.startsWith('Heatpipe_') ? 0 : o.name === 'ColdPlate' || o.name.startsWith('PlateBridge_') ? 1 : -1
       const choke = o.name.startsWith('Choke_') ? (CHOKE_A.has(Number(o.name.slice(6))) ? 0 : Math.PI) : -1
-      list.push({ obj: o, base: o.position.clone(), ex: new Vector3(ex[0], ex[2], -ex[1]), core, choke, spin: o.userData.spin === 1, hs: o.name.startsWith('Fin_') || core === 0 }) // Blender(x,y,z) → glTF(x,z,-y)
+      list.push({ obj: o, base: o.position.clone(), ex: new Vector3(ex[0], ex[2], -ex[1]), core, choke, spin: o.userData.spin === 1, shroud: o.name === 'Shroud', hs: o.name.startsWith('Fin_') || core === 0 }) // Blender(x,y,z) → glTF(x,z,-y)
     })
     return list
   }, [scene])
@@ -65,10 +97,10 @@ export function GpuModel() {
     for (const p of parts) {
       // 매 프레임 조립 위치에서 시작해 챕터별 오프셋을 더한다(스크롤 되감기 가능)
       // 챕터 3: 팬 3개가 동시에 위로 상승해 화면 밖으로(시차 없음 — 시차를 두면 스크롤이 조금만 움직여도 한 팬만 먼저 떠 보인다). 챕터 5: 쉬라우드가 분리되어 위로
-      const up = p.spin ? P.fans * FAN_LIFT : p.obj.name === 'Shroud' ? P.shroud * SHROUD_LIFT : 0
+      const up = p.spin ? P.fans * FAN_LIFT : p.shroud ? P.shroud * SHROUD_LIFT : 0
       p.obj.position.set(p.base.x, p.base.y + up, p.base.z)
       // 다 올라간 팬(fans=1)·쉬라우드(shroud=1)는 숨김 — 뒤 챕터에서 카메라가 위로 올라가도 안 보이게. 되감으면 다시 보임
-      let hidden = p.spin ? P.fans >= 1 : p.obj.name === 'Shroud' ? P.shroud >= 1 : false
+      let hidden = p.spin ? P.fans >= 1 : p.shroud ? P.shroud >= 1 : false
       if (p.hs || p.core === 1) {
         // 챕터 7: 히트싱크는 HS_LIFT, 콜드플레이트·브릿지는 PLATE_LIFT 만큼 들려 층이 구분됨. 챕터 8: 함께 위로 상승해 화면 밖으로, 다 나간 뒤 숨김
         p.obj.position.y += P.hsLift * (p.hs ? HS_LIFT : PLATE_LIFT) + P.hsOff * HS_OFF
@@ -87,13 +119,13 @@ export function GpuModel() {
         const gap = STACK_SCALE * (1 - P.assemble)
         stackTarget.copy(p.base)
         if (p.hs) stackTarget.y += STACK_FIN_Y * gap // 핀·히트파이프: 조립 상태 그대로 한 층으로 함께 떠오름
-        else if (p.spin || p.obj.name === 'Shroud') stackTarget.y += STACK_TOP_Y * gap // 쉬라우드+팬: 조립 상태 그대로 한 층
+        else if (p.spin || p.shroud) stackTarget.y += STACK_TOP_Y * gap // 쉬라우드+팬: 조립 상태 그대로 한 층
         else if (p.core === 1) stackTarget.addScaledVector(p.ex, gap) // 콜드플레이트·브릿지: explode 배치
         p.obj.position.lerp(stackTarget, P.stack)
         hidden = false
       }
       p.obj.visible = !hidden
-      if (p.spin) p.obj.rotation.y -= dt * 5 * P.spin // 블레이드 앞전 방향(시계 방향, 위에서 볼 때)
+      if (p.spin) p.obj.rotation.y -= Math.min(dt, 1 / 30) * FAN_SPEED * P.spin // dt 상한 1/30: 무거운 프레임 뒤 한 번에 크게 튀지 않게(끊김 대신 잠깐 느려짐). 블레이드 앞전 방향(시계 방향, 위에서 볼 때)
     }
   })
 

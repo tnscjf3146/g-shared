@@ -12,7 +12,7 @@ public record JobSummaryResponse(
         Long jobId,
         JobStatus status,
         Long workloadId,
-        Integer progressPercent,
+        Double progressPercent,   // currentStep / totalSteps × 100 — 규격상 소수
         Long estimatedCost,
         LocalDateTime createdAt
 ) {

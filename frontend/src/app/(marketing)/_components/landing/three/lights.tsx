@@ -7,12 +7,17 @@ import { type Group, type Light, type SpotLight } from 'three'
 import { P } from '../progress'
 
 // 스윕 빔 세기 (P.beam 배율). INTRO TOP(sweep 0..1) 은 팬 위를 비스듬히 훑는 컷이라 카드가 어둡게 보여 더 밝게
-const BEAM_TOP_MAIN = 30 // 이전 16
-const BEAM_TOP_AUX = 40 // 이전 22
-const BEAM_LOGO = 40 // HERO(sweep 2..3) 로고 스윕
+const BEAM_TOP_MAIN = 18 // 30 → 18: 인트로 밝기 낮춤(2026-09-10)
+const BEAM_TOP_AUX = 24 // 40 → 24
+const BEAM_LOGO = 26 // HERO(sweep 2..3) 로고 스윕. 40 → 26
 const LOGO_SWEEP_HZ = 0.22 // 조립 완료 뒤 좌우 왕복 속도(초당 왕복 수) — 한쪽 끝에서 반대쪽까지 약 2.3초
-const BEAM_LOGO_END = 26 // 조립 완료 뒤 로고 빔 세기(HERO 스윕 40 보다 어둡게)
 const LOGO_SWEEP_Z = 1.0 // 왕복 폭(±z). 끝 캡 폭보다 조금 넓게 지나가 빔 자국이 로고를 완전히 가로지름
+// 조립 완료 뒤 조명은 "위에서 내려오는 스팟이 좌우로 훑으며 앞뒤로도 조금 움직이고, 비추는 지점도 카드 위를 돌아 각도가 계속 바뀌는" 느낌(2026-09-11 사용자 요청).
+// 광원은 카드 위 높은 곳(y≈3), 타깃은 카드 윗면과 로고 캡 사이를 도는 별도 주기라 빔의 입사각이 계속 달라진다
+const ROAM_HEIGHT = 2.4 // 광원 높이(로고 캡 앞 위쪽 — 캡 면과 윗면을 둘 다 비추는 각)
+const ROAM_X = 0.4 // 광원 앞뒤(x) 흔들림 폭
+const ROAM_HZ = 0.13 // 앞뒤·타깃 주기(좌우 왕복과 다른 주기 → 같은 궤적이 반복되지 않음)
+const ROAM_INTENSITY = 90 // 물리 감쇠(거리²) 때문에 멀어진 만큼 세기를 올린다(로고 앞 1.3 거리의 26 과 비슷한 밝기)
 
 // 조명: 스튜디오 조명은 전부 P.env 배율(챕터 1 암전 → 챕터 2 페이드인).
 // 스윕 스팟 하나가 +X 끝 캡(로고)을 화면 왼→오(=+Z→−Z)로 훑는다. 살짝 위에서 비춰 metallic 상감의 반사각을 잡는다.
@@ -66,11 +71,16 @@ export function Lights() {
     // 조립 완료 뒤(P.logoSweep): 같은 스팟이 시간 기반으로 로고 앞을 좌우(+Z↔−Z)로 계속 왕복한다.
     // CAM_END(tilt 0.22, dist 4.5)의 카메라 축 근처에 두어 metallic 상감 하이라이트가 보이게 — 로고(1.55, 0.02, 0)에서 카메라 방향(0.95, 0.32)으로 1.3 만큼 떨어진 위치
     if (P.logoSweep > 0) {
-      const z = LOGO_SWEEP_Z * Math.sin(clock.elapsedTime * Math.PI * 2 * LOGO_SWEEP_HZ)
-      s.angle = 0.4
-      s.position.set(2.8, 0.44, z)
-      s.target.position.set(1.55, 0.02, 0)
-      s.intensity = Math.max(s.intensity, P.logoSweep * BEAM_LOGO_END)
+      const t = clock.elapsedTime
+      const z = LOGO_SWEEP_Z * Math.sin(t * Math.PI * 2 * LOGO_SWEEP_HZ) // 좌우 왕복(기존 속도·폭 유지)
+      const w = t * Math.PI * 2 * ROAM_HZ
+      s.angle = 0.5
+      // 광원: 로고 캡 앞 위쪽에서 좌우로 훑고, 앞뒤(x)로도 천천히 오가며 살짝 오르내린다
+      s.position.set(2.4 + ROAM_X * Math.sin(w), ROAM_HEIGHT + 0.3 * Math.cos(w * 0.7), z)
+      // 타깃: 로고(1.55, 0.02) 와 카드 윗면 안쪽(0.9, 0.15) 사이를 오가고 z 도 광원과 다른 위상 → 입사각이 계속 바뀌며 캡과 윗면을 번갈아 비춘다
+      const k2 = 0.5 + 0.5 * Math.sin(w + 0.9)
+      s.target.position.set(1.55 - 0.65 * k2, 0.02 + 0.13 * k2, 0.5 * Math.sin(t * Math.PI * 2 * LOGO_SWEEP_HZ + 1.1))
+      s.intensity = Math.max(s.intensity, P.logoSweep * ROAM_INTENSITY)
       if (s2) s2.intensity = 0
     }
     s.target.updateMatrixWorld()

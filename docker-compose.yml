@@ -12,6 +12,7 @@ services:
       SCHEDULER_BASE_URL: http://ai:8000   # AI Scheduler 내부 호출 주소 (컨테이너 이름으로 접근)
     volumes:
       - ./logs:/app/logs      # 애플리케이션 로그를 서버에 보관
+      - ./storage:/app/storage   # 데이터셋·학습 결과물 오브젝트 (LocalObjectStorage) — 컨테이너 재생성해도 유지
     depends_on:
       - mysql                 # mysql이 먼저 뜬 뒤 backend 시작
       - redis                 # redis도 먼저 기동

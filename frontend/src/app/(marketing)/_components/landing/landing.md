@@ -8,7 +8,7 @@
 
 | 구간 | 피그마 | 웹 구현 | 상태 |
 | --- | --- | --- | --- |
-| **Hero** (밝음, 900) | 91:478. 배경 `#f7f9f4`. Nav: 로고 `G-shared`(Barlow SemiBold 26) · 메뉴 `서비스 소개 / 이용 방법 / GPU 목록`(Inter Medium 15) · `로그인` 필(Inter Semi Bold 14, radius 999). **웹에서는 Hero 와 분리된 고정 레이어(`page.tsx` 최상위 `SiteNav`, L1)** — 유리 레이어(`globals.css` `.nav-glass`): 블러 16px + 옅은 틴트 + 하단 헤어라인 + 상단 안쪽 하이라이트, 높이 72. 배경 테마 두 벌을 `body[data-nav-theme]`(landingScene 이 Hero 위=light / 검정 섹션·Footer 위=dark 로 설정)로 전환 — light: 흰 55% 유리·글자 `#0d0f0b`, dark: 흰 6% 유리·글자 `#f7f9f4`. 전환 300ms `--ease-out-expo`. **표시 규칙**: Hero 위에선 보임 → 인트로 시작(스테이지 고정)에 위로 슬라이드아웃 → GPU 스크롤 스토리 내내 숨김 → ASSEMBLE 끝(`tl.progress ≥ 0.985`, Footer 진입)에 다시 슬라이드인. `landingScene` 이 `body[data-nav]` 를 쓰고 `siteNav` CSS 가 `-translate-y-full` 로 반응(리렌더 0). Copy(520 폭, gap 24): 아이브로 `DECENTRALIZED GPU SHARING`(Manrope ExtraBold 16, `#76b900`) · 제목 `잠자는 그래픽카드가 / 누군가의 AI가 됩니다`(Manrope ExtraBold 56, `#0d0f0b`) · 본문 `전국의 유휴 GPU를 연결해 클라우드보다 저렴하게 학습을 돌리고, 정산은 블록체인이 증명합니다.`(Inter 19, `#333333`) · CTA `지금 시작하기`(Primary 버튼 46h r12 `#76b900`) + `내 GPU로 수익 내기`(고스트, 테두리 `#333333`). HeroArt(520×420): 민트 링 2개 + 배선 라인 + 노드 점 + `GpuIllustration`(State=Busy). 장식 블러 원 10개(초록, 투명도 ≤0.35) | `_components/hero/heroSection.tsx` + `hero/heroArt.tsx`(인라인 SVG); 네비는 `_components/siteNav.tsx`(고정 레이어, page.tsx 에서 조립), 버튼은 `components/ui/button.tsx`(Primary/Secondary/Ghost, auth 와 공유). `page.tsx` 에서 `<HeroSection/>` → `<LandingScene/>` → `<SiteFooter/>` 순으로 조립. 폰트는 `app/layout.tsx` 에서 next/font 로 Inter·Manrope·JetBrains Mono·Barlow 를 CSS 변수로 주입, `globals.css` 에 `--font-logo` 토큰 추가 | 구현됨 (2026-09-07) |
+| ~~**Hero** (밝음, 900)~~ | 91:478 | **2026-09-10 제거** — 페이지가 GPU 모션(스크롤 연출)으로 바로 시작. `_components/hero/` 삭제 | 삭제 |
 | **GPU 모션** (`dark` #333333, sticky — INTRO TOP 동안만 `black` #0d0f0b 바닥 `#deep`) | 91:591 `GpuMotion` — 피그마는 움직이지 않으므로 챕터 10개(인트로 0–2 + 스크롤 3–9, 피그마 컷은 팬/연기/쉬라우드 분리 이전의 12장이라 갱신 필요)를 1440×900 풀스크린 **정지 컷**으로 세로 배치. 각 컷 좌상단 칩 = `번호 · 챕터명 · 설명 · 구간(ms)`. 이미지는 실제 페이지 헤드리스 캡처(§4) | 이 폴더 전체 (`landingScene` 등). Hero 가 위에 붙으므로 인트로는 **sticky 스테이지가 뷰포트에 완전히 들어와 고정되는 순간**(IntersectionObserver, threshold 0.98) 1회 재생하며 **재생 중(5초) 스크롤 잠금**(`html overflow:hidden` + `touchmove` 차단, 끝나면 해제, 건너뛰기 없음). 이미 챕터 구간까지 스크롤된 채 진입(`tl.progress > 0.01`)이면 생략 | 구현됨 |
 | **Footer** (어둠, 80) | 91:588. 배경 `#0d0f0b`, 좌 `G-shared`(Barlow SemiBold 20, `#f7f9f4`), 우 `SSAFY 15기 특화 프로젝트 · E204 · 이용약관 · 개인정보처리방침`(Inter 13, `#5e5c63`), 패딩 28/64 | `_components/siteFooter.tsx` (서버 컴포넌트) | 구현됨 |
 
@@ -25,16 +25,19 @@ src/app/(marketing)/
   page.tsx                        라우트. <LandingScene/> 만 렌더 (서버 컴포넌트)
   _components/landing/            랜딩 연출 전부
     landing.md                    이 문서
-    landingScene.tsx    71줄      섹션 DOM(sticky 캔버스, 높이 1600vh) + 타임라인 2개 생성(인트로=시간, 스크롤=onScroll sync) + 스킵 규칙. 챕터 함수 호출만
-    progress.ts         22줄      공유 상태 P(카메라 yaw/tilt/dist/lookY/shift, 조명 env/sweep/beam/topLight, 부품 fans/smoke/shroud/hsLift/hsOff/stack/assemble, spin). 타임라인이 쓰고 r3f 가 매 프레임 읽음
+    landingScene.tsx    ~190줄    섹션 DOM(sticky 캔버스, 높이 100vh + 챕터 수×150vh) + 타임라인 2개(인트로=시간, 스크롤=챕터 스텝: 스크롤이 챕터 시작을 넘으면 animate(cursor)→tl.seek 로 그 챕터를 제 속도로 재생, 되돌아가면 되감기) + 인트로 시작(GPU_READY_EVENT)·스킵·네비 규칙
+    chapter-store.ts    28줄      현재 챕터 인덱스·점프 함수 — landingScene 이 쓰고 chapterSidebar 가 읽는 외부 스토어(useSyncExternalStore)
+    chapterSidebar.tsx  36줄      오른쪽 챕터 목록(CHAPTER_LABELS). 현재 챕터 상시 강조, 접근 시 글자 등장, 클릭 점프. 스타일은 chapterSidebar.module.css(CSS transition 만)
+    three/starfield.tsx 17줄      우주 배경 별(drei Stars, P.stars 로 인트로 중엔 숨김)
+    progress.ts         27줄      GPU_READY_EVENT + 공유 상태 P(카메라 yaw/tilt/dist/lookY/shift, 조명 env/sweep/beam/topLight, 부품 fans/smoke/shroud/hsLift/hsOff/stack/assemble, spin). 타임라인이 쓰고 r3f 가 매 프레임 읽음
     motion/
-      chapters.ts       ~110줄    챕터 정의: 상수 I(인트로 ms)/T(스크롤 챕터 시작·끝 ms) + 챕터별 함수 cameraTrack(카메라 전 구간) + introTop·hero·reveal·fansOut·smoke·shroudOff·hsLift·hsOff·topView·stack·assemble ← **연출 수정은 여기**
+      chapters.ts       ~130줄    CHAPTERS(트리거·라벨·duration·ease)/CHAPTER_LABELS + 챕터 정의: 상수 I(인트로 ms)/T(스크롤 챕터 시작·끝 ms) + 챕터별 함수 cameraTrack(카메라 전 구간) + introTop·hero·reveal·fansOut·smoke·shroudOff·hsLift·hsOff·topView·stack·assemble ← **연출 수정은 여기**
     three/
-      gpuCanvas.tsx     ~30줄     r3f Canvas 조립만(아래 컴포넌트를 얹는다)
+      gpuCanvas.tsx     ~55줄     r3f Canvas 조립 + PerformanceMonitor 적응형 dpr(1~1.5) + 뷰포트 밖 frameloop 정지
       cameraRig.tsx     ~20줄     P → 구면좌표 카메라(마우스 시차 없음)
-      lights.tsx        ~90줄     Lights(스튜디오 조명 × P.env, 스윕 스팟 경로, 탑뷰 조명) + Studio(Lightformer 환경맵)
-      gpuModel.tsx      ~105줄    GLB 로드, 부품 목록(Blender tag 프로퍼티 있는 오브젝트) + 재질 오버라이드(LOOKS), 매 프레임 위치(팬·쉬라우드 상승, 히트싱크 들림·이탈, 초크 펌핑, 스택/조립, 팬 회전). 튜닝 상수(FAN_LIFT·SHROUD_LIFT·HS_*·CHOKE_*·STACK_*)는 파일 상단
-      statusLeds.tsx    ~90줄     PCB 위 붉은 상태 LED 6개 + VRAM 초록 활동 LED 64개(InstancedMesh 2개), 패턴별 점멸
+      lights.tsx        ~110줄    Lights(스튜디오 조명 × P.env, 스윕 스팟 경로, 탑뷰 조명) + Studio(Lightformer 환경맵)
+      gpuModel.tsx      ~135줄    GLB 로드, 반복 부품 병합(Fin_/Cap_/Mosfet_/VRAM_ → 메시 1개씩), 부품 목록(Blender tag 프로퍼티 있는 오브젝트) + 재질 오버라이드(LOOKS), 매 프레임 위치(팬·쉬라우드 상승, 히트싱크 들림·이탈, 초크 펌핑, 스택/조립, 팬 회전). 튜닝 상수(FAN_LIFT·SHROUD_LIFT·HS_*·CHOKE_*·STACK_*)는 파일 상단
+      statusLeds.tsx    ~90줄     PCB 위 붉은 상태 LED 6개 + VRAM 초록 활동 LED 64개(InstancedMesh 2개), 위치 행렬은 마운트 때 1회·프레임엔 색만, 패턴별 점멸
       smoke.tsx        135줄      연기 퍼프(ShaderMaterial 포인트, fbm). 백플레이트 가장자리에서 P.smoke 의 결정론적 함수로 위치·크기·알파
 public/models/gpu.glb                     모델(Draco 압축, 디코더는 drei 기본 CDN)
 tools/gpu_model.py                        모델 생성기 (Blender). 실행하면 tools/main_gpu.blend 도 만들지만 산출물이라 추적하지 않음. build_pcb: 배선 Traces — 같은 층 교차 없는 구역 배정(기판 좌/우변: 위 VRAM 버스 12 / 가운데 전원·디스플레이 / 아래 VRAM 버스 12, 상변: 위 VRAM 버스, 하변: 아래 VRAM 버스 + 가운데 틈으로 PCIe 24가닥 → 동심 45° 챔퍼 회전 → 핑거), 45° 도그레그·서펜타인, 좌 VRM 전원은 위 VRAM 위 빈 띠(y 0.345)로 우회, Vias(비아 링), 우측 모서리 디커플링 캡 클러스터(SMD_Die), VRAM 저항열(SMD_VRAM), PWM_IC(초크 열 아래)/BIOS_IC(좌상단), 입력 필터 캡 3(Cap_F, 전원 커넥터 옆)/출력 필터 캡 3(Cap_O, VRM 아래), 팬 헤더 2(FanHeader + 금핀), DP_IC + SMD_DP + Crystal(좌하단 블록), 쿨러 마운팅 홀 4(PCB 관통 + Hole_Rings 도금 링). 전부 배선 구역·콜드플레이트/브릿지 높이와 충돌 없음(렌더로 확인)
@@ -80,9 +83,9 @@ tools/gpu_model.py                        모델 생성기 (Blender). 실행하�
 | 2 | **REVEAL** | 시간 3400–5000ms | 줌 아웃하며 카드 전체가 한눈에. 끝 캡(정면)이 **화면 우측 하단**을 향하는 입체 뷰로 회전 — 카메라는 위·앞·오른쪽 (`yaw≈1.0, tilt≈0.55, dist≈6.5, lookY≈0, shift=0`, 스크린샷으로 튠) | **위에서 비추는 빛** 페이드인: `env 0→1` (키 라이트 (3,6,4) 가 위쪽이라 기존 조명 그대로 사용). 스윕 스팟은 3400–3900ms 에서 `beam 1→0` 으로 빠짐 | (미정) |
 | 3 | **FANS + SHROUD OFF** | 스크롤 1000–3000 (**0–1000 은 정지 구간** — 인트로 직후 조립 상태 그대로, 스크롤이 조금 움직여도 부품이 반응하지 않음) | 챕터 2 뷰 유지 | 팬 3개와 쉬라우드가 **같은 구간에 함께** 위로 가속 상승해 화면 밖으로(`fans 0→1`, `shroud 0→1`, 모두 ease in(2)). 그 사이(500–2000) 백플레이트 가장자리에서 연기 퍼프가 밀려 나와 흩어짐(`smoke 0→1`). 이전 FANS OUT / SMOKE / SHROUD OFF 세 챕터를 하나로 합침 | (미정) · (미정) · (미정) |
 | 4 | **ORBIT** | 스크롤 3500–4500 (3000–3500 은 정지 구간) | `cameraTrack`: CAM0 → CAM_ORBIT (`yaw 1.0 → π−1.0`, inOut(2)) — 정면(끝 캡)을 스쳐 반대편으로 돌아 **끝 캡이 화면 왼쪽 하단**을 향함. tilt/dist 유지 | 유지 | (미정) |
-| 5 | **HS LIFT** | 스크롤 5000–5500 (4500–5000 은 정지) | 유지 | 히트싱크(핀 66장 + 히트파이프)는 **+0.5**, 콜드플레이트·플레이트 브릿지는 **+0.2** 만 들려 두 층이 구분됨(`hsLift 0→1`, inOut(2)). 이때부터 초크 펌핑 시작 | (미정) |
-| 6 | **HS OFF** | 스크롤 6000–7000 (5500–6000 은 정지) | 유지 | 들린 히트싱크·플레이트류가 **함께 위로 상승해 화면 밖(+7)으로 나간 뒤 숨김**(`hsOff 0→1`, in(1.2)) | (미정) |
-| 7 | **TOP VIEW** | 스크롤 7500–9000 (7000–7500 은 정지) | `cameraTrack`: CAM_ORBIT → CAM_TOP (`yaw → 0`, `tilt → 0.785`, `dist → 5.6`). **탑뷰 동안만 위에서 내려 비추는 조명** `topLight 0→1`(STACK 시작 시 꺼짐) — 남은 PCB·백플레이트·브라켓을 **위(+Z)에서 −Y(PCIe 엣지) 쪽으로 45° 기울여 내려보는 뷰**. 화면 오른쪽 = +X, 아래 = PCIe 엣지, 비스듬한 회전 없음 | 유지 | (미정) |
+| 5 | **HS LIFT** | 스크롤 5000–5500 (4500–5000 은 정지, 챕터 진입 시 커서가 5000 으로 바로 맞춰짐) | 유지 | 히트싱크(핀 66장 + 히트파이프)는 **+0.5**, 콜드플레이트·플레이트 브릿지는 **+0.2** 만 들려 두 층이 구분됨(`hsLift 0→1`, inOut(2)). 이때부터 초크 펌핑 시작 | (미정) |
+| 6 | **HS OFF** | 스크롤 5500–6100 (들림 직후 바로, 사이 공백 없음 — 사이드바에선 5+6 이 '히트싱크 분리' 한 챕터, 1초·선형 커서·이탈 in(3)) | 유지 | 들린 히트싱크·플레이트류가 **함께 위로 상승해 화면 밖(+7)으로 나간 뒤 숨김**(`hsOff 0→1`, in(1.2)) | (미정) |
+| 7 | **TOP VIEW** | 스크롤 7500–9000 (6100–7500 은 정지) | `cameraTrack`: CAM_ORBIT → CAM_TOP (`yaw → 0`, `tilt → 0.785`, `dist → 5.6`). **탑뷰 동안만 위에서 내려 비추는 조명** `topLight 0→1`(STACK 시작 시 꺼짐) — 남은 PCB·백플레이트·브라켓을 **위(+Z)에서 −Y(PCIe 엣지) 쪽으로 45° 기울여 내려보는 뷰**. 화면 오른쪽 = +X, 아래 = PCIe 엣지, 비스듬한 회전 없음 | 유지 | (미정) |
 | 8 | **STACK** | 스크롤 9500–12000 (9000–9500 은 정지) | `cameraTrack`: CAM_TOP → CAM_STACK — 낮은 각으로 내려와 **한 바퀴 회전**(`yaw 0 → 2π−0.9`, `tilt → 0.42`, `dist → 8.0`) | **햄버거 레시피 구조도** — 나갔던 팬·쉬라우드·핀·히트파이프·플레이트까지 전부 돌아와 **냉각 스택만** Blender `explode` 배치 ×1.0 으로 층층이 떠 있음(층 3개: 쉬라우드+팬(조립 상태, 0.95) / 핀+히트파이프(조립 상태, 0.55) / 콜드플레이트·브릿지(explode 배치 0.32). 핀·파이프·팬은 explode 벡터를 쓰지 않아 벌어지거나 높이가 달라지지 않음). 브라켓·PCB·백플레이트와 그 위 부속(VRAM·초크·캡 등)은 조립 상태로 붙어 있음(`stack 0→1`, 1200 동안 현재 위치에서 보간, 이후 유지). 초크 펌핑 유지 | (미정) |
 | 9 | **ASSEMBLE** | 스크롤 12500–14500 (12000–12500 은 정지) | `cameraTrack`: CAM_STACK → CAM_END — +X 끝 캡(로고) 정면 쪽, 살짝 위(`yaw → 2.5π`, `tilt → 0.22`, `dist → 4.5`) | 구조도의 층 간격이 0 으로 줄어 **조립 완료**(`assemble 0→1`, stack 유지 상태에서 간격만 축소) — 로고가 앞에 보임 | (미정) |
 | 10 | **END** | 스크롤 15000 (14500–15000 은 조립 완료 상태로 정지) | CAM_END 고정 | 정지 구간에 `logoSweep 0→1` 로 빔이 켜져 로고 앞을 좌우(±z 1.0, 0.22Hz, 세기 26)로 천천히 왕복하며 상감 로고를 비춘다(`lights.tsx`, 시간 기반 — 스크롤이 멈춰도 움직임). 스크롤 sync 는 끝나도 그대로(위로 올리면 역재생). 네비가 돌아오고 Footer 가 보이며, 푸터 위 우측에 떠 있는 **맨 위로** 고정 버튼(`backToTop.tsx`, `nav-btn` 모양, `body[data-nav=shown][data-nav-theme=dark]` 일 때만 표시, smooth scrollTo 0)으로 Hero 복귀 | `page.tsx` 최상위 `<BackToTop/>` + `globals.css .back-to-top` |
@@ -143,6 +146,11 @@ assemble: 0, // 층 간격 → 0 (조립 완료)
 ## 5. 결정 필요 / 다음 작업
 - [x] Hero·Footer 구현 후 `page.tsx` 조립 (2026-09-07)
 - [x] 인트로 자동 재생 시작점을 스테이지 고정 시점으로 변경 (2026-09-07)
+- [x] **챕터 간 스크롤 거리 균등화(2026-09-11)** — 진행률을 균등 분할(카드 + 챕터 수, 지금 7)해 구간 번호 → 챕터. 한 챕터당 `SCROLL_PER_CHAPTER_VH`(150vh, 처음 100 에서 반 화면 늘림), 섹션 높이 = 100vh + 7×150vh = 1150vh(이전 1600vh, 타임라인 시각 비례). `CHAPTERS[].at` 은 더 이상 스크롤 위치에 쓰이지 않는다(타임라인 안 챕터 순서·`to` 만 사용)
+- [x] **오른쪽 챕터 사이드바(2026-09-10)** — `chapterSidebar.tsx`(React Bits LineSidebar 의 TS 포팅, 좌우 반전, `chapterSidebar.module.css`)가 `chapter-store.ts` 로 현재 챕터를 읽어 상시 강조, 커서가 사이드바 근처로 오면 글자 전체가 한 번에 오른쪽→왼쪽으로 등장(2026-09-11, 순차 지연 제거), hover 항목·현재 챕터는 초록으로 더 밀림, 클릭하면 그 챕터 트리거 위치로 점프(`yFor` → `step`). 항목 7개: 카드·팬 분리·오빗·히트싱크 분리(들림+이탈 합침 2026-09-11)·탑뷰·구조도·조립 = `motion/chapters.ts` 의 `CHAPTER_LABELS`. 스크롤 입력은 가로채지 않는다(휠 한 번 = 한 챕터 방식은 사용자 결정으로 뺐다)
+- [x] **우주 배경(2026-09-10)** — 섹션·sticky 바닥 `bg-black`, 캔버스 안 `three/starfield.tsx`(drei Stars 래핑, `P.stars` 가 0 이면 숨김 → 인트로는 순수 검정, REVEAL 에서 켜짐) `<Stars radius 30 depth 40 count 440(5000 → 1250 → 440, 2026-09-10) factor 8 fade speed .5>`(점 크기 = factor×30/거리라 멀면 사라짐, 카메라 far 50→200 으로 늘려 잘리지 않게). 별은 조명(P.env)과 무관해 인트로 암전 중에도 떠 있고, 카메라 오빗 때 시차로 함께 돈다
+- [x] **스크롤 스크럽 → 챕터 스텝(2026-09-10)** — `sync: true` 스크럽을 버리고, 스크롤 위치→시각(ms) 매핑은 유지한 채 `CHAPTERS`(at→to) 트리거를 넘으면 `animate(cursor, { t: to, 1300~2800ms(거리×0.9), out(3) })`(2026-09-11 inOut→out: 즉시 시작·끝에서 감속). 챕터별 `duration` 으로 덮어쓸 수 있음(히트싱크 이탈은 3600ms) 로 `tl.seek`. 되돌아가면 이전 챕터 끝으로 되감기. `section[data-chapter]` 로 어느 챕터까지 재생됐는지 노출(검증용). reduced-motion 은 즉시 seek
+- [x] **Hero 삭제(2026-09-10)** — 캔버스가 첫 화면. 인트로는 로드 직후 스크롤을 잠그고 `GPU_READY_EVENT`(gpuModel 마운트 = GLB 로드 완료)를 받으면 재생, 8초 안에 안 오면 그냥 진행. 네비는 dark 고정, 인트로 뒤 맨 위와 Footer 구간에서만 보임. Hero 의 CTA(지금 시작하기 / 내 GPU로 수익 내기)가 사라졌으므로 랜딩에 진입 버튼을 다시 둘 자리(마지막 챕터 뒤 등) 결정 필요
 - [ ] Nav 메뉴 앵커(`#about` `#how` `#gpus`)의 실제 대상 섹션이 없음 — 랜딩이 세 구간으로 끝나므로 메뉴를 줄이거나 챕터 위치로 스크롤시킬지 결정
 - [ ] 각 챕터 카피(피그마 칩의 설명 문구를 그대로 쓸지, 캔버스 위 오버레이로 노출할지)
 - [ ] 스팟 반사만으로 로고 가시성이 충분한지 (부족하면 스팟 2개/각도 조정, 재질은 그대로)

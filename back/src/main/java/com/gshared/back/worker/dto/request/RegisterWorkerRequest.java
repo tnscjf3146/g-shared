@@ -1,27 +1,63 @@
 package com.gshared.back.worker.dto.request;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
 /**
- * 공급자 PC 등록 요청. 하드웨어 스펙 스냅샷.
- * (Worker 클라이언트가 자기 환경을 조사해 채워 보낸다)
+ * 공급자 PC 등록 요청 (규격 §3). Worker 클라이언트가 자기 환경을 조사·측정해 채워 보낸다.
+ *
+ * <p>operatorAddress 는 워커 PC 가 만든 서명 키의 <b>공개 주소</b>다. 개인키는 절대 오지 않는다.
+ * gpu·benchmark 는 AI Scheduler 가 실행시간을 예측하는 입력이라 전부 필수·양수다 —
+ * 비워 두면 스케줄러가 빈 값을 그대로 믿는다.
  */
 public record RegisterWorkerRequest(
 
-        @NotBlank(message = "deviceName은 필수값입니다.")
-        String deviceName,
+        @NotBlank(message = "operatorAddress는 필수값입니다.")
+        String operatorAddress,
 
-        String osVersion,
+        @NotBlank(message = "clientVersion은 필수값입니다.")
+        String clientVersion,
 
-        @NotBlank(message = "gpuModel은 필수값입니다.")
-        String gpuModel,
+        @NotNull(message = "system은 필수값입니다.")
+        @Valid
+        SystemInfo system,
 
-        @Positive(message = "vramMb는 양수여야 합니다.")
-        Integer vramMb,
+        @NotNull(message = "gpu는 필수값입니다.")
+        @Valid
+        GpuInfo gpu,
 
-        String driverVersion,
-
-        Double benchmarkTokensPerSec
+        @NotNull(message = "benchmark는 필수값입니다.")
+        @Valid
+        BenchmarkInfo benchmark
 ) {
+    public record SystemInfo(
+            @NotBlank(message = "system.os는 필수값입니다.")
+            String os,
+
+            @NotNull(message = "system.wslAvailable은 필수값입니다.")
+            Boolean wslAvailable
+    ) {
+    }
+
+    public record GpuInfo(
+            @NotBlank(message = "gpu.gpuModel은 필수값입니다.")
+            String gpuModel,
+
+            @NotNull(message = "gpu.vramMb는 필수값입니다.")
+            @Positive(message = "gpu.vramMb는 양수여야 합니다.")
+            Integer vramMb
+    ) {
+    }
+
+    public record BenchmarkInfo(
+            @NotNull(message = "benchmark.benchmarkTokensPerSec은 필수값입니다.")
+            @Positive(message = "benchmark.benchmarkTokensPerSec은 양수여야 합니다.")
+            Double benchmarkTokensPerSec,
+
+            @NotBlank(message = "benchmark.benchmarkVersion은 필수값입니다.")
+            String benchmarkVersion
+    ) {
+    }
 }

@@ -3,6 +3,7 @@ package com.gshared.back.job.controller;
 import com.gshared.back.global.security.userdetails.CustomUserDetails;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.request.EstimateJobRequest;
+import com.gshared.back.job.dto.request.FundJobRequest;
 import com.gshared.back.job.dto.request.JobSpecRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.domain.JobStatus;
@@ -82,12 +83,17 @@ public class JobController {
         return ResponseEntity.ok(jobService.getJobs(userDetails.getId(), status, pageable));
     }
 
+    /**
+     * 예치 확인 (개발용). 온체인 예치를 마친 뒤 받은 escrowJobId 를 실어 보내면 기록해 두고,
+     * 매칭이 JOB_ASSIGN 에 실어 워커가 acceptJob 사전 검증에 쓴다.
+     */
     @PostMapping("/{jobId}/fund")
     public ResponseEntity<Void> fundJob(
             @PathVariable Long jobId,
+            @Valid @RequestBody FundJobRequest request,
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
-        jobService.fundJob(userDetails.getId(), jobId);
+        jobService.fundJob(userDetails.getId(), jobId, request.escrowJobId());
         return ResponseEntity.ok().build();
     }
 

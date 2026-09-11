@@ -1,3 +1,6 @@
+/** GLB 가 로드되어 첫 프레임을 그릴 수 있을 때 gpuModel 이 window 에 쏘는 이벤트. landingScene 은 이걸 기다려 인트로를 시작한다(Hero 가 없어 첫 화면이 곧 캔버스) */
+export const GPU_READY_EVENT = 'gshared:gpu-ready'
+
 // anime.js 타임라인이 스크롤에 맞춰 이 숫자들을 움직이고, r3f useFrame 이 매 프레임 읽는다.
 // (React state 를 거치지 않는 단일 공유 상태 — 리렌더 0)
 export const P = {
@@ -20,4 +23,5 @@ export const P = {
   assemble: 0, // 구조도의 층 간격이 0 으로 줄어 조립 완료 0..1 (stack 유지 상태에서)
   topLight: 0, // 탑뷰 전용 위 조명 세기 0..1
   logoSweep: 0, // 조립 완료 뒤 로고를 좌우로 계속 훑는 빔 세기 0..1 (lights.tsx, 시간 기반 왕복)
+  stars: 0, // 우주 배경 별 표시 0/1 — 인트로(암전·빔) 동안 0, REVEAL 에서 1 (starfield.tsx)
 }

@@ -123,11 +123,16 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             <h1 className="text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
             <span className="text-[17px] font-medium text-dark">{meta.label}</span>
           </div>
-          {CANCELLABLE_STATUSES.has(job.status) && (
-            <Button variant="secondary" size="sm" disabled={pending} onClick={cancel}>
-              {pending ? '취소 중…' : '작업 취소'}
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" href={`/jobs/${job.jobId}/chain`}>
+              한눈에 보기 →
             </Button>
-          )}
+            {CANCELLABLE_STATUSES.has(job.status) && (
+              <Button variant="secondary" size="sm" disabled={pending} onClick={cancel}>
+                {pending ? '취소 중…' : '작업 취소'}
+              </Button>
+            )}
+          </div>
         </div>
       </header>
       {error && (

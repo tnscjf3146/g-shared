@@ -53,6 +53,28 @@ WORKER_NOT_FOUND = "WORKER_NOT_FOUND"
 REGISTER_PATH = "/api/workers/register"
 AUTHENTICATE_PATH = "/api/workers/authenticate"
 
+#: quote() with nothing left safe -- a worker id goes in a path segment.
+SAFE = ""
+
+
+def benchmark_path(worker_id: str) -> str:
+    """Where a re-measured benchmark goes.
+
+    Replaces ``PUT .../gpu``. What this updates is a measurement, and it now
+    carries the benchmark's version so a number produced by an older workload
+    is never compared against one from a newer workload.
+    """
+    return f"/api/workers/{quote(worker_id, safe=SAFE)}/benchmark"
+
+
+def operator_path(worker_id: str) -> str:
+    """Where this machine's public signing address goes.
+
+    Used to attach an operator address to a Worker registered before operator
+    keys existed. **Only the address.** The key behind it never leaves this PC.
+    """
+    return f"/api/workers/{quote(worker_id, safe=SAFE)}/operator"
+
 
 def gpu_path(worker_id: str) -> str:
     """The GPU endpoint for one Worker, with the id safe to put in a path."""
@@ -60,22 +82,30 @@ def gpu_path(worker_id: str) -> str:
 
 
 @dataclass(frozen=True)
-class GpuUpdate:
-    """What this machine is offering, as ``PUT .../gpu`` states it."""
+class BenchmarkUpdate:
+    """A re-measured GPU, as ``PUT .../benchmark`` states it.
+
+    ``driverVersion`` is deliberately **not** here. It is not part of this
+    contract: the Scheduler plans with the GPU model, its VRAM and the measured
+    throughput, and a driver string is neither an input to that nor something
+    the Backend keeps.
+    """
 
     gpu_model: str
     vram_mb: int
-    driver_version: str
-    #: Measured, never assumed. The field name the Backend settled on is
-    #: ``benchmarkTokensPerSec``; ``benchmarkScore`` is not part of this API.
+    #: Measured, never assumed. The one number the Scheduler plans with.
     benchmark_tokens_per_sec: float
+    #: Which fixed workload produced that number. Results from two benchmark
+    #: versions are not comparable, and a Scheduler ranking across them would
+    #: be ranking on the wrong thing.
+    benchmark_version: str
 
-    def as_payload(self) -> dict[str, Any]:
+    def as_payload(self):
         return {
             "gpuModel": self.gpu_model,
             "vramMb": int(self.vram_mb),
-            "driverVersion": self.driver_version,
             "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
+            "benchmarkVersion": self.benchmark_version,
         }
 
 
@@ -83,47 +113,72 @@ class GpuUpdate:
 class WorkerRegistrationRequest:
     """What ``POST /api/workers/register`` is told about this machine.
 
-    Built from :class:`gshared_worker.machine_facts.MachineFacts` plus a
-    measured benchmark. Every field is required, because a machine registered
-    with a placeholder is a machine the scheduler will believe.
+    Grouped rather than flat -- ``system``, ``gpu``, ``benchmark`` -- because
+    the three answer different questions and change on different schedules. The
+    benchmark is re-measured; the GPU changes when somebody swaps a card; the
+    operating system rarely changes at all.
+
+    ``operatorAddress`` is **required**. A Worker registered without one cannot
+    be approved on chain, so it would be scheduled work it could never accept.
+    The address is public; the key behind it is made on this PC, sealed with
+    DPAPI, and never sent anywhere.
     """
 
-    device_name: str
+    operator_address: str
+    client_version: str
     os_version: str
+    wsl_available: bool
     gpu_model: str
     vram_mb: int
-    driver_version: str
     benchmark_tokens_per_sec: float
+    benchmark_version: str
 
     @classmethod
     def describing(
-        cls, facts: Any, benchmark_tokens_per_sec: float
+        cls,
+        facts,
+        benchmark_tokens_per_sec: float,
+        *,
+        operator_address: str,
+        client_version: str,
+        benchmark_version: str,
+        wsl_available: bool = True,
     ) -> "WorkerRegistrationRequest":
-        """This machine, plus the one number that has to be measured."""
+        """This machine, plus what has to be measured or made rather than read."""
         return cls(
-            device_name=facts.device_name,
+            operator_address=operator_address,
+            client_version=client_version,
             os_version=facts.os_version,
+            wsl_available=wsl_available,
             gpu_model=facts.gpu_model,
             vram_mb=facts.vram_mb,
-            driver_version=facts.driver_version,
             benchmark_tokens_per_sec=benchmark_tokens_per_sec,
+            benchmark_version=benchmark_version,
         )
 
-    def as_payload(self) -> dict[str, Any]:
+    def as_payload(self):
         return {
-            "deviceName": self.device_name,
-            "osVersion": self.os_version,
-            "gpuModel": self.gpu_model,
-            "vramMb": int(self.vram_mb),
-            "driverVersion": self.driver_version,
-            "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
+            "operatorAddress": self.operator_address,
+            "clientVersion": self.client_version,
+            "system": {
+                "os": self.os_version,
+                "wslAvailable": bool(self.wsl_available),
+            },
+            "gpu": {
+                "gpuModel": self.gpu_model,
+                "vramMb": int(self.vram_mb),
+            },
+            "benchmark": {
+                "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
+                "benchmarkVersion": self.benchmark_version,
+            },
         }
 
-    def gpu_update(self) -> GpuUpdate:
-        """The same GPU facts, for the endpoint that refreshes them later."""
-        return GpuUpdate(
-            self.gpu_model, self.vram_mb, self.driver_version,
-            self.benchmark_tokens_per_sec,
+    def benchmark_update(self) -> BenchmarkUpdate:
+        """The same measurement, for the endpoint that refreshes it later."""
+        return BenchmarkUpdate(
+            self.gpu_model, self.vram_mb,
+            self.benchmark_tokens_per_sec, self.benchmark_version,
         )
 
 
@@ -141,9 +196,13 @@ class HttpWorkerRegistry:
 
     def verify(self, credentials: WorkerCredentials) -> RegistryAnswer:
         """Does the Backend still accept this Worker. Changes nothing."""
+        # Both identifiers travel in the body. This endpoint is the one place
+        # the Worker token is **not** an Authorization header: here it is the
+        # thing being checked, not the thing authorising the request.
         answered = self._client.request(
-            "POST", AUTHENTICATE_PATH, {"workerId": credentials.worker_id},
-            bearer=credentials.worker_token,
+            "POST", AUTHENTICATE_PATH,
+            {"workerId": credentials.worker_id,
+             "workerToken": credentials.worker_token},
         )
         if not answered.succeeded:
             return _refused(answered, "this Worker")
@@ -182,24 +241,45 @@ class HttpWorkerRegistry:
             WorkerCredentials(worker_id.strip(), token.strip()),
         )
 
-    def update_gpu(
-        self, credentials: WorkerCredentials, gpu: GpuUpdate
+    def update_benchmark(
+        self, credentials: WorkerCredentials, benchmark: BenchmarkUpdate
     ) -> RegistryAnswer:
-        """Refresh what this Worker is offering. Accepted means 204.
+        """Refresh what this Worker measured. Accepted means 204.
 
-        Not called from the auth flow: what would produce a fresh benchmark
-        does not exist yet. It is here because it is the same contract and the
-        same client, and the branch that measures GPUs should find it built.
-        REGISTERED means the update was accepted.
+        Replaces the old ``PUT .../gpu``.
         """
         answered = self._client.request(
-            "PUT", gpu_path(credentials.worker_id), gpu.as_payload(),
+            "PUT", benchmark_path(credentials.worker_id), benchmark.as_payload(),
             bearer=credentials.worker_token,
         )
         if not answered.succeeded:
             return _refused(answered, "this Worker")
         return RegistryAnswer(
-            WorkerAuthState.REGISTERED, "the GPU details were accepted")
+            WorkerAuthState.REGISTERED, "the benchmark was accepted")
+
+    def register_operator(
+        self, credentials: WorkerCredentials, operator_address: str
+    ) -> RegistryAnswer:
+        """Attach a public signing address to a Worker that has none.
+
+        For installations registered before operator keys existed. **Only the
+        address**; the private key stays sealed on this PC.
+
+        Nothing here decides whether attaching it is safe. That is
+        :func:`gshared_worker.worker_wallet.plan_operator_migration`, which
+        refuses when the Backend already knows a different address -- silently
+        overwriting one would break every job the old key had accepted, with
+        no way to finish them.
+        """
+        answered = self._client.request(
+            "PUT", operator_path(credentials.worker_id),
+            {"operatorAddress": operator_address},
+            bearer=credentials.worker_token,
+        )
+        if not answered.succeeded:
+            return _refused(answered, "this Worker")
+        return RegistryAnswer(
+            WorkerAuthState.REGISTERED, "the operator address was accepted")
 
 
 def _given(value: Any) -> bool:
