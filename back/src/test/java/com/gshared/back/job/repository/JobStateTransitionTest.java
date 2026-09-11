@@ -61,6 +61,7 @@ class JobStateTransitionTest {
     void setUp() {
         owner = userRepository.save(User.createUser(
                 "transition-" + UUID.randomUUID() + "@gshared.io", "encoded", "전이테스터"));
+        owner.linkWallet("0x" + "a".repeat(40));   // provider 정산 주소 — 없으면 워커가 후보에 오르지 못한다
         workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
         baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
         dataset = datasetRepository.save(Dataset.create(
@@ -93,36 +94,57 @@ class JobStateTransitionTest {
     }
 
     private Worker newWorker(String suffix) {
-        return workerRepository.save(Worker.register(
-                "worker-test-" + suffix, owner, "hash-" + suffix,
-                "테스트PC", "Windows 11", "RTX 4070", 12000, "551.23", 42.5));
+        return newWorker(suffix, "0x" + "b".repeat(40));
     }
 
-    // ── cancelIfCancellable ─────────────────────────────────────
+    /** operatorAddress 를 고를 수 있는 버전 — null 이면 "서명 주소 없는 워커" 케이스. */
+    private Worker newWorker(String suffix, String operatorAddress) {
+        return workerRepository.save(Worker.register(
+                "worker-test-" + suffix, owner, "hash-" + suffix, operatorAddress, "0.1.0",
+                "Windows 11", true, "RTX 4070", 12000, 42.5, "transformer-bench-v1"));
+    }
+
+    // ── cancelIfUnassigned / markCancellingIfActive ─────────────
 
     @Test
-    @DisplayName("취소: CREATED·FUNDED·ASSIGNED 는 성공한다")
-    void cancel_allowed_states() {
-        for (JobStatus from : List.of(JobStatus.CREATED, JobStatus.FUNDED, JobStatus.ASSIGNED)) {
+    @DisplayName("취소 ①: 워커 손에 가기 전(CREATED·FUNDED)은 바로 CANCELLED")
+    void cancel_unassigned_states() {
+        for (JobStatus from : List.of(JobStatus.CREATED, JobStatus.FUNDED)) {
             Job job = newJob();
             setState(job.getId(), from, null);
 
-            int updated = jobRepository.cancelIfCancellable(job.getId(), owner.getId(), NOW);
-
-            assertThat(updated).as("%s 에서 취소", from).isEqualTo(1);
+            assertThat(jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), NOW))
+                    .as("%s 에서 취소", from).isEqualTo(1);
             assertThat(statusOf(job.getId())).isEqualTo(JobStatus.CANCELLED);
         }
     }
 
     @Test
-    @DisplayName("취소: RUNNING 이후는 0행 — 실행 중인 작업을 되돌리지 않는다")
-    void cancel_running_is_rejected() {
-        for (JobStatus from : List.of(JobStatus.RUNNING, JobStatus.COMPLETED, JobStatus.FAILED)) {
+    @DisplayName("취소 ②: 워커 손에 있는 Job(ASSIGNED·RUNNING)은 CANCELLING 까지만 — 확정은 JOB_CANCELLED 가 한다")
+    void cancel_active_states_become_cancelling() {
+        for (JobStatus from : List.of(JobStatus.ASSIGNED, JobStatus.RUNNING)) {
             Job job = newJob();
             setState(job.getId(), from, workerA.getId());
 
-            assertThat(jobRepository.cancelIfCancellable(job.getId(), owner.getId(), NOW))
-                    .as("%s 에서 취소 시도", from).isZero();
+            assertThat(jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), NOW))
+                    .as("%s 는 ①로 바로 취소되지 않는다", from).isZero();
+            assertThat(jobRepository.markCancellingIfActive(job.getId(), owner.getId()))
+                    .as("%s → CANCELLING", from).isEqualTo(1);
+            assertThat(statusOf(job.getId())).isEqualTo(JobStatus.CANCELLING);
+        }
+    }
+
+    @Test
+    @DisplayName("취소: 종료 상태(COMPLETED/FAILED/CANCELLED)와 CANCELLING 은 두 UPDATE 모두 0행")
+    void cancel_finished_is_rejected() {
+        for (JobStatus from : List.of(JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED, JobStatus.CANCELLING)) {
+            Job job = newJob();
+            setState(job.getId(), from, workerA.getId());
+
+            assertThat(jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), NOW))
+                    .as("%s 에서 취소 ①", from).isZero();
+            assertThat(jobRepository.markCancellingIfActive(job.getId(), owner.getId()))
+                    .as("%s 에서 취소 ②", from).isZero();
             assertThat(statusOf(job.getId())).isEqualTo(from);   // 상태 유지
         }
     }
@@ -132,8 +154,22 @@ class JobStateTransitionTest {
     void cancel_twice_second_is_zero() {
         Job job = newJob();
 
-        assertThat(jobRepository.cancelIfCancellable(job.getId(), owner.getId(), NOW)).isEqualTo(1);
-        assertThat(jobRepository.cancelIfCancellable(job.getId(), owner.getId(), NOW)).isZero();
+        assertThat(jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), NOW)).isEqualTo(1);
+        assertThat(jobRepository.cancelIfUnassigned(job.getId(), owner.getId(), NOW)).isZero();
+    }
+
+    @Test
+    @DisplayName("fail closed: 배정된 워커의 ASSIGNED Job 만 CANCELLING 으로 — RUNNING 은 건드리지 않는다")
+    void mark_cancelling_by_worker_only_when_assigned() {
+        Job assigned = newJob();
+        setState(assigned.getId(), JobStatus.ASSIGNED, workerA.getId());
+        assertThat(jobRepository.markCancellingIfAssigned(assigned.getId(), workerB.getId())).as("남의 워커").isZero();
+        assertThat(jobRepository.markCancellingIfAssigned(assigned.getId(), workerA.getId())).isEqualTo(1);
+        assertThat(statusOf(assigned.getId())).isEqualTo(JobStatus.CANCELLING);
+
+        Job running = newJob();
+        setState(running.getId(), JobStatus.RUNNING, workerA.getId());
+        assertThat(jobRepository.markCancellingIfAssigned(running.getId(), workerA.getId())).isZero();
     }
 
     // ── assignIfFunded ──────────────────────────────────────────
@@ -199,7 +235,7 @@ class JobStateTransitionTest {
         Job job = newJob();
         setState(job.getId(), JobStatus.ASSIGNED, workerA.getId());
 
-        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), NOW)).isEqualTo(1);
+        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), "0xaccept", NOW)).isEqualTo(1);
 
         em.clear();
         Job started = jobRepository.findById(job.getId()).orElseThrow();
@@ -213,9 +249,9 @@ class JobStateTransitionTest {
         Job job = newJob();
         setState(job.getId(), JobStatus.ASSIGNED, workerA.getId());
 
-        assertThat(jobRepository.startIfAssigned(job.getId(), workerB.getId(), NOW)).isZero();   // 남의 워커
-        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), NOW)).isEqualTo(1);
-        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), NOW)).isZero();   // 중복
+        assertThat(jobRepository.startIfAssigned(job.getId(), workerB.getId(), "0xaccept", NOW)).isZero();   // 남의 워커
+        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), "0xaccept", NOW)).isEqualTo(1);
+        assertThat(jobRepository.startIfAssigned(job.getId(), workerA.getId(), "0xaccept", NOW)).isZero();   // 중복
     }
 
     // ── completeIfRunning / failIfRunning ───────────────────────
@@ -227,13 +263,15 @@ class JobStateTransitionTest {
         setState(job.getId(), JobStatus.RUNNING, workerA.getId());
 
         int updated = jobRepository.completeIfRunning(job.getId(), workerA.getId(),
-                "sha256:abc", "https://storage/result", 1480.5, NOW);
+                "jobs/1/result.tar", "0xabc", "0xsubmit", 1480.5, NOW);
 
         assertThat(updated).isEqualTo(1);
         em.clear();
         Job done = jobRepository.findById(job.getId()).orElseThrow();
         assertThat(done.getStatus()).isEqualTo(JobStatus.COMPLETED);
-        assertThat(done.getResultHash()).isEqualTo("sha256:abc");
+        assertThat(done.getResultHash()).isEqualTo("0xabc");
+        assertThat(done.getResultObjectKey()).isEqualTo("jobs/1/result.tar");
+        assertThat(done.getSubmitTxHash()).isEqualTo("0xsubmit");
         assertThat(done.getActualRuntimeSec()).isEqualTo(1480.5);
     }
 
@@ -243,8 +281,8 @@ class JobStateTransitionTest {
         Job job = newJob();
         setState(job.getId(), JobStatus.RUNNING, workerA.getId());
 
-        assertThat(jobRepository.completeIfRunning(job.getId(), workerB.getId(), "h", "u", 1.0, NOW)).isZero();
-        assertThat(jobRepository.failIfRunning(job.getId(), workerB.getId(), "GPU_OOM", NOW)).isZero();
+        assertThat(jobRepository.completeIfRunning(job.getId(), workerB.getId(), "k", "h", "t", 1.0, NOW)).isZero();
+        assertThat(jobRepository.failIfRunning(job.getId(), workerB.getId(), "CUDA_OOM", "0xabort", 1.0, NOW)).isZero();
         assertThat(statusOf(job.getId())).isEqualTo(JobStatus.RUNNING);
     }
 
@@ -254,12 +292,76 @@ class JobStateTransitionTest {
         Job job = newJob();
         setState(job.getId(), JobStatus.RUNNING, workerA.getId());
 
-        assertThat(jobRepository.failIfRunning(job.getId(), workerA.getId(), "GPU_OOM: out of memory", NOW))
-                .isEqualTo(1);
+        assertThat(jobRepository.failIfRunning(job.getId(), workerA.getId(),
+                "CUDA_OOM: CUDA out of memory.", "0xabort", 124.2, NOW)).isEqualTo(1);
         em.clear();
         Job failed = jobRepository.findById(job.getId()).orElseThrow();
         assertThat(failed.getStatus()).isEqualTo(JobStatus.FAILED);
-        assertThat(failed.getFailReason()).isEqualTo("GPU_OOM: out of memory");
+        assertThat(failed.getFailReason()).isEqualTo("CUDA_OOM: CUDA out of memory.");
+        assertThat(failed.getAbortTxHash()).isEqualTo("0xabort");
+        assertThat(failed.getActualRuntimeSec()).isEqualTo(124.2);
+    }
+
+    // ── rejectIfAssigned / confirmCancelledIfCancelling ─────────
+
+    @Test
+    @DisplayName("거절: 배정된 워커의 JOB_REJECTED 만 FAILED + 사유 기록, RUNNING 이면 0행")
+    void reject_by_assigned_worker_only() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.ASSIGNED, workerA.getId());
+
+        assertThat(jobRepository.rejectIfAssigned(job.getId(), workerB.getId(), "PRICE_MISMATCH", NOW)).isZero();
+        assertThat(jobRepository.rejectIfAssigned(job.getId(), workerA.getId(),
+                "PRICE_MISMATCH: On-chain price does not match backend assignment.", NOW)).isEqualTo(1);
+
+        em.clear();
+        Job rejected = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(rejected.getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(rejected.getFailReason()).startsWith("PRICE_MISMATCH");
+
+        Job running = newJob();
+        setState(running.getId(), JobStatus.RUNNING, workerA.getId());
+        assertThat(jobRepository.rejectIfAssigned(running.getId(), workerA.getId(), "X", NOW)).isZero();
+    }
+
+    @Test
+    @DisplayName("취소 확인: CANCELLING 인 그 워커의 Job 만 CANCELLED 로 확정 + abortTxHash·실측 시간 기록")
+    void confirm_cancelled_only_when_cancelling() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.RUNNING, workerA.getId());
+        assertThat(jobRepository.confirmCancelledIfCancelling(job.getId(), workerA.getId(), "0xabort", 512.3, NOW))
+                .as("취소 요청 전 — RUNNING 은 확정 대상이 아니다").isZero();
+
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+        assertThat(jobRepository.confirmCancelledIfCancelling(job.getId(), workerB.getId(), "0xabort", 512.3, NOW))
+                .as("남의 워커").isZero();
+        assertThat(jobRepository.confirmCancelledIfCancelling(job.getId(), workerA.getId(), "0xabort", 512.3, NOW))
+                .isEqualTo(1);
+        assertThat(jobRepository.confirmCancelledIfCancelling(job.getId(), workerA.getId(), "0xabort", 512.3, NOW))
+                .as("중복").isZero();
+
+        em.clear();
+        Job cancelled = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(cancelled.getStatus()).isEqualTo(JobStatus.CANCELLED);
+        assertThat(cancelled.getAbortTxHash()).isEqualTo("0xabort");
+        assertThat(cancelled.getActualRuntimeSec()).isEqualTo(512.3);
+        assertThat(cancelled.getFinishedAt()).isEqualTo(NOW);
+    }
+
+
+    @Test
+    @DisplayName("예치 확인: CREATED 만 FUNDED 로 전이하고 온체인 jobId 를 기록한다")
+    void fund_records_escrow_job_id() {
+        Job job = newJob();
+
+        assertThat(jobRepository.fundIfCreated(job.getId(), owner.getId(), "17")).isEqualTo(1);
+        assertThat(jobRepository.fundIfCreated(job.getId(), owner.getId(), "18")).as("중복").isZero();
+
+        em.clear();
+        Job funded = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(funded.getStatus()).isEqualTo(JobStatus.FUNDED);
+        assertThat(funded.getEscrowJobId()).isEqualTo("17");
+        assertThat(funded.getExternalRef()).matches("^0x[0-9a-f]{64}$");   // 생성 시 발급된 bytes32
     }
 
     // ── 소유권 ──────────────────────────────────────────────────
@@ -296,5 +398,27 @@ class JobStateTransitionTest {
 
         assertThat(ids).contains(online.getId());
         assertThat(ids).doesNotContain(offline.getId(), busy.getId());
+    }
+
+    @Test
+    @DisplayName("가용 워커: operator 주소나 주인 지갑이 없으면 ONLINE 이어도 후보가 아니다 (규격 §28 operator 조건)")
+    void available_workers_require_escrow_addresses() {
+        Worker noOperator = newWorker("no-operator", null);
+        noOperator.goOnline(NOW);
+
+        User walletless = userRepository.save(User.createUser(
+                "walletless-" + UUID.randomUUID() + "@gshared.io", "encoded", "지갑없음"));
+        Worker noWallet = workerRepository.save(Worker.register(
+                "worker-test-no-wallet", walletless, "hash-no-wallet", "0x" + "c".repeat(40), "0.1.0",
+                "Windows 11", true, "RTX 4070", 12000, 42.5, "transformer-bench-v1"));
+        noWallet.goOnline(NOW);
+
+        Worker ready = newWorker("ready");
+        ready.goOnline(NOW);
+
+        List<String> ids = workerRepository.findAvailableWorkers().stream().map(Worker::getId).toList();
+
+        assertThat(ids).contains(ready.getId());
+        assertThat(ids).doesNotContain(noOperator.getId(), noWallet.getId());
     }
 }

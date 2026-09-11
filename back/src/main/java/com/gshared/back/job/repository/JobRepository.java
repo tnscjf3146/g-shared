@@ -22,13 +22,26 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     // 본인 Job 단건 (소유권 확인까지 한 번에)
     Optional<Job> findByIdAndOwnerId(Long id, Long ownerId);
 
-    // 매칭 순찰용: 배정 대기(FUNDED) Job을 오래된 순(선착순)으로
-    java.util.List<Job> findByStatusOrderByCreatedAtAsc(JobStatus status);
+    // 워커 전용 창구용: "이 워커에게 배정된" Job 단건. 남의 Job 은 애초에 안 잡힌다.
+    Optional<Job> findByIdAndAssignedWorkerId(Long id, String assignedWorkerId);
 
     /**
-     * 원자적 취소: "취소 가능한 상태일 때만" UPDATE 가 한 방에 실행된다.
+     * 매칭 순찰용: 배정 대기(FUNDED) Job을 오래된 순(선착순)으로.
+     * owner 를 함께 읽는 이유는 JOB_ASSIGN 에 의뢰자 지갑(clientWallet)이 실리기 때문이다 —
+     * 순찰은 트랜잭션 밖이라 LAZY 로 두면 접근 시점에 세션이 없다.
+     */
+    @Query("""
+            SELECT j FROM Job j
+              JOIN FETCH j.owner
+             WHERE j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+             ORDER BY j.createdAt ASC
+            """)
+    java.util.List<Job> findFundedWithOwner();
+
+    /**
+     * 원자적 취소 ①: 아직 워커 손에 가지 않은 Job(CREATED/FUNDED)은 바로 CANCELLED.
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).
-     * @return 영향받은 행 수 (1=취소 성공, 0=상태가 이미 바뀌어 취소 불가)
+     * @return 영향받은 행 수 (1=취소 성공, 0=상태가 이미 바뀜 — ②를 시도하거나 409)
      */
     @Modifying(clearAutomatically = true)
     @Query("""
@@ -38,59 +51,81 @@ public interface JobRepository extends JpaRepository<Job, Long> {
              WHERE j.id = :jobId
                AND j.owner.id = :ownerId
                AND j.status IN (com.gshared.back.job.domain.JobStatus.CREATED,
-                                com.gshared.back.job.domain.JobStatus.FUNDED,
-                                com.gshared.back.job.domain.JobStatus.ASSIGNED)
+                                com.gshared.back.job.domain.JobStatus.FUNDED)
             """)
-    int cancelIfCancellable(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId, @Param("now") LocalDateTime now);
+    int cancelIfUnassigned(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId, @Param("now") LocalDateTime now);
 
     /**
-     * 원자적 시작(JOB_ACCEPTED): "이 워커에게 배정된 ASSIGNED 상태일 때만" RUNNING 전이.
+     * 원자적 취소 ②: 워커 손에 있는 Job(ASSIGNED/RUNNING)은 CANCELLING 으로만 바꾼다.
+     * 워커가 컨테이너를 멈추고 abortJob() 한 뒤 JOB_CANCELLED 로 답해야 CANCELLED 로 확정된다 —
+     * 워커 응답을 보장된 것으로 보지 않으므로, 답이 없으면 CANCELLING 에 남아 온체인 대조 대상이 된다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+             WHERE j.id = :jobId
+               AND j.owner.id = :ownerId
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.ASSIGNED,
+                                com.gshared.back.job.domain.JobStatus.RUNNING)
+            """)
+    int markCancellingIfActive(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId);
+
+    /**
+     * Backend 가 fail closed 로 멈출 때: "이 워커에게 ASSIGNED" 인 Job 을 CANCELLING 으로.
+     * JOB_ACCEPTED 의 escrowJobId·operatorAddress 가 기록과 다를 때 RUNNING 대신 이쪽으로 보내고
+     * 워커에게 JOB_CANCEL 을 보낸다 (온체인은 이미 accept 됐을 수 있어 abortJob 이 필요하다).
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
+            """)
+    int markCancellingIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId);
+
+    /**
+     * JOB_CANCELLED 수신: CANCELLING 인 "이 워커의 Job" 을 CANCELLED 로 확정 + abortJob() 흔적·실측 시간 기록.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
+                   j.abortTxHash = :abortTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+            """)
+    int confirmCancelledIfCancelling(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                                     @Param("abortTxHash") String abortTxHash,
+                                     @Param("actualRuntimeSec") Double actualRuntimeSec,
+                                     @Param("now") LocalDateTime now);
+
+    /**
+     * 원자적 시작(JOB_ACCEPTED): "이 워커에게 배정된 ASSIGNED 상태일 때만" RUNNING 전이 + acceptJob() 해시 기록.
      * 엉뚱한 워커의 메시지·중복 메시지는 조건 불일치로 0행 → 무시된다.
      */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.RUNNING,
+                   j.acceptTxHash = :acceptTxHash,
                    j.startedAt = :now
              WHERE j.id = :jobId
                AND j.assignedWorkerId = :workerId
                AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
             """)
-    int startIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId, @Param("now") LocalDateTime now);
+    int startIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                        @Param("acceptTxHash") String acceptTxHash, @Param("now") LocalDateTime now);
 
-    /** JOB_PROGRESS: "이 워커의 RUNNING Job"일 때만 진행률 갱신. */
-    @Modifying(clearAutomatically = true)
-    @Query("""
-            UPDATE Job j
-               SET j.progressPercent = :percent,
-                   j.progressEpoch = :epoch,
-                   j.progressTotalEpochs = :totalEpochs
-             WHERE j.id = :jobId
-               AND j.assignedWorkerId = :workerId
-               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
-            """)
-    int updateProgressIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
-                                @Param("percent") Integer percent, @Param("epoch") Integer epoch,
-                                @Param("totalEpochs") Integer totalEpochs);
-
-    /** JOB_RESULT: "이 워커의 RUNNING Job"일 때만 COMPLETED 전이 + 결과 기록. */
-    @Modifying(clearAutomatically = true)
-    @Query("""
-            UPDATE Job j
-               SET j.status = com.gshared.back.job.domain.JobStatus.COMPLETED,
-                   j.resultHash = :resultHash,
-                   j.resultUrl = :resultUrl,
-                   j.actualRuntimeSec = :actualRuntimeSec,
-                   j.finishedAt = :now
-             WHERE j.id = :jobId
-               AND j.assignedWorkerId = :workerId
-               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
-            """)
-    int completeIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
-                          @Param("resultHash") String resultHash, @Param("resultUrl") String resultUrl,
-                          @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
-
-    /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유 기록. */
+    /**
+     * JOB_REJECTED (영구 사유): "이 워커에게 배정된 ASSIGNED 상태일 때만" FAILED 전이 + 사유 기록.
+     * 워커가 acceptJob 전 검증(가격·주소·상태 불일치)에서 거절한 것이라 다시 배정해도 같은 결과다.
+     */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
@@ -99,10 +134,66 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                    j.finishedAt = :now
              WHERE j.id = :jobId
                AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
+            """)
+    int rejectIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                         @Param("failReason") String failReason, @Param("now") LocalDateTime now);
+
+    /** JOB_PROGRESS: "이 워커의 RUNNING Job"일 때만 진행률 갱신. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.progressPercent = :percent,
+                   j.progressStep = :step,
+                   j.progressTotalSteps = :totalSteps,
+                   j.progressEpoch = :epoch,
+                   j.progressTotalEpochs = :totalEpochs,
+                   j.progressElapsedSec = :elapsedSec
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
+            """)
+    int updateProgressIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                                @Param("percent") Double percent,
+                                @Param("step") Integer step, @Param("totalSteps") Integer totalSteps,
+                                @Param("epoch") Integer epoch, @Param("totalEpochs") Integer totalEpochs,
+                                @Param("elapsedSec") Integer elapsedSec);
+
+    /** JOB_RESULT: "이 워커의 RUNNING Job"일 때만 COMPLETED 전이 + 결과·submitResult() 해시 기록. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.COMPLETED,
+                   j.resultObjectKey = :resultObjectKey,
+                   j.resultHash = :resultHash,
+                   j.submitTxHash = :submitTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
+            """)
+    int completeIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                          @Param("resultObjectKey") String resultObjectKey, @Param("resultHash") String resultHash,
+                          @Param("submitTxHash") String submitTxHash,
+                          @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
+
+    /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유·abortJob() 해시 기록. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.FAILED,
+                   j.failReason = :failReason,
+                   j.abortTxHash = :abortTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
                AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
             """)
     int failIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
-                      @Param("failReason") String failReason, @Param("now") LocalDateTime now);
+                      @Param("failReason") String failReason, @Param("abortTxHash") String abortTxHash,
+                      @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
     /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
@@ -120,7 +211,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int assignIfFunded(@Param("jobId") Long jobId, @Param("workerId") String workerId);
 
     /**
-     * 배정 되돌리기: JOB_ASSIGN 전송 실패(죽은 워커 등) 시 FUNDED 로 복귀 → 다음 순찰에 재매칭.
+     * 배정 되돌리기: JOB_ASSIGN 전송 실패(죽은 워커 등)·일시적 거절(RPC 장애) 시 FUNDED 로 복귀 → 다음 순찰에 재매칭.
      * "그 워커에게 ASSIGNED 인 상태일 때만" — 이미 JOB_ACCEPTED 로 RUNNING 이 됐으면 건드리지 않는다.
      */
     @Modifying(clearAutomatically = true)
@@ -135,19 +226,21 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int unassignIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId);
 
     /**
-     * 원자적 예치 확인: "본인 Job이면서 아직 CREATED 일 때만" FUNDED 전이.
+     * 원자적 예치 확인: "본인 Job이면서 아직 CREATED 일 때만" FUNDED 전이 + 온체인 jobId 기록.
      * 중복 호출·동시 호출은 조건 불일치(0행)로 한쪽만 성공한다.
      *
-     * TODO: 블록체인 Escrow 연동 후 온체인 예치 확인으로 교체
+     * TODO: 블록체인 Escrow 연동 후 온체인 예치(JobFunded 이벤트) 확인으로 교체
      * @return 영향받은 행 수 (1=전이 성공, 0=상태가 CREATED가 아님)
      */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
-               SET j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+               SET j.status = com.gshared.back.job.domain.JobStatus.FUNDED,
+                   j.escrowJobId = :escrowJobId
              WHERE j.id = :jobId
                AND j.owner.id = :ownerId
                AND j.status = com.gshared.back.job.domain.JobStatus.CREATED
             """)
-    int fundIfCreated(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId);
+    int fundIfCreated(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId,
+                      @Param("escrowJobId") String escrowJobId);
 }

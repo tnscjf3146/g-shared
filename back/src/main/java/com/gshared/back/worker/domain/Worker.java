@@ -19,21 +19,34 @@ public class Worker extends BaseTimeEntity {
     @Column(name = "worker_id", length = 64)
     private String id;                 // "worker-{uuid}" — WebSocket 메시지에 실려 다니는 식별자
 
-    // 공급자(주인). 정산 시 이 회원에게 토큰 지급.
+    // 공급자(주인). 정산 시 이 회원의 지갑(provider)으로 토큰 지급.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
     @Column(nullable = false, unique = true)   // DB: uk_workers_token (V3 마이그레이션)
-    private String workerToken;        // WebSocket 인증 토큰의 SHA-256 해시 (원문은 발급 시 1회만 노출)
+    private String workerToken;        // 워커 토큰의 SHA-256 해시 (원문은 발급 시 1회만 노출)
+
+    /**
+     * 온체인 트랜잭션(acceptJob·submitResult·abortJob)에 서명하는 주소. 공개 주소만 저장한다 —
+     * 개인키는 Worker PC(DPAPI)에만 있고 Backend 로 넘어오지 않는다.
+     * 정산 주소(owner.walletAddress = provider)와는 다른 키다: provider 가 setOperator 로 승인해야 쓸 수 있다.
+     */
+    @Column(length = 42)
+    private String operatorAddress;
+    @Column(length = 32)
+    private String clientVersion;      // G-shared.exe 버전 — 규격 불일치 추적용
 
     // 하드웨어 스펙 (register 시점 스냅샷)
-    private String deviceName;
-    private String osVersion;
+    private String deviceName;         // 구 규격 필드 — 새 등록에서는 채우지 않는다
+    private String osVersion;          // system.os
+    private Boolean wslAvailable;      // system.wslAvailable — Docker(WSL2) 실행 가능 여부
     private String gpuModel;
     private Integer vramMb;
-    private String driverVersion;
+    private String driverVersion;      // 구 규격 필드 — 새 등록에서는 채우지 않는다
     private Double benchmarkTokensPerSec;
+    @Column(length = 64)
+    private String benchmarkVersion;   // 어떤 벤치마크로 잰 값인가 — 버전이 다르면 수치를 비교할 수 없다
 
     // 실시간 상태 (WebSocket 단계에서 갱신)
     @Column(nullable = false)
@@ -43,39 +56,51 @@ public class Worker extends BaseTimeEntity {
     private Long currentJobId;        // jobs.job_id 와 타입 일치 (BIGINT)
     private LocalDateTime lastHeartbeatAt;
 
-    private Worker(String id, User owner, String workerToken,
-                   String deviceName, String osVersion, String gpuModel,
-                   Integer vramMb, String driverVersion, Double benchmarkTokensPerSec) {
+    private Worker(String id, User owner, String workerToken, String operatorAddress, String clientVersion,
+                   String osVersion, Boolean wslAvailable, String gpuModel, Integer vramMb,
+                   Double benchmarkTokensPerSec, String benchmarkVersion) {
         this.id = id;
         this.owner = owner;
         this.workerToken = workerToken;
-        this.deviceName = deviceName;
+        this.operatorAddress = operatorAddress;
+        this.clientVersion = clientVersion;
         this.osVersion = osVersion;
+        this.wslAvailable = wslAvailable;
         this.gpuModel = gpuModel;
         this.vramMb = vramMb;
-        this.driverVersion = driverVersion;
         this.benchmarkTokensPerSec = benchmarkTokensPerSec;
+        this.benchmarkVersion = benchmarkVersion;
         this.status = WorkerStatus.OFFLINE;   // 등록 직후엔 아직 연결 전
     }
 
-    public static Worker register(String id, User owner, String workerToken,
-                                  String deviceName, String osVersion, String gpuModel,
-                                  Integer vramMb, String driverVersion, Double benchmarkTokensPerSec) {
-        return new Worker(id, owner, workerToken, deviceName, osVersion, gpuModel,
-                vramMb, driverVersion, benchmarkTokensPerSec);
+    /** 규격 v1 등록. operatorAddress 는 정규화(소문자)된 값만 넘어온다는 전제다. */
+    public static Worker register(String id, User owner, String workerToken, String operatorAddress,
+                                  String clientVersion, String osVersion, Boolean wslAvailable,
+                                  String gpuModel, Integer vramMb,
+                                  Double benchmarkTokensPerSec, String benchmarkVersion) {
+        return new Worker(id, owner, workerToken, operatorAddress, clientVersion, osVersion, wslAvailable,
+                gpuModel, vramMb, benchmarkTokensPerSec, benchmarkVersion);
     }
 
     /**
-     * GPU 정보 갱신. 그래픽카드 교체·드라이버 갱신·벤치마크 재측정 시 워커가 다시 알려준다.
+     * operator 주소 교체. 이후 provider 가 온체인 setOperator(operator, true) 로 승인해야
+     * 이 워커가 다시 후보에 오른다 — Backend 는 주소만 바꿔 두고 승인 여부는 System 이 확인한다.
+     */
+    public void updateOperator(String operatorAddress) {
+        this.operatorAddress = operatorAddress;
+    }
+
+    /**
+     * GPU·벤치마크 갱신. 그래픽카드 교체·벤치마크 재측정 시 워커가 다시 알려준다.
      * 신원(id·토큰·주인)과 실시간 상태(status·currentJobId)는 건드리지 않는다 —
      * 여기서 바뀌는 것은 "이 워커가 무엇을 제공하는가" 뿐이다.
      */
-    public void updateGpu(String gpuModel, Integer vramMb,
-                          String driverVersion, Double benchmarkTokensPerSec) {
+    public void updateBenchmark(String gpuModel, Integer vramMb,
+                                Double benchmarkTokensPerSec, String benchmarkVersion) {
         this.gpuModel = gpuModel;
         this.vramMb = vramMb;
-        this.driverVersion = driverVersion;
         this.benchmarkTokensPerSec = benchmarkTokensPerSec;
+        this.benchmarkVersion = benchmarkVersion;
     }
 
     /** REGISTER 수신: 연결됨 + 작업 없음 상태로. */
@@ -112,9 +137,18 @@ public class Worker extends BaseTimeEntity {
         this.currentJobId = jobId;
     }
 
-    /** JOB_RESULT/FAILED: 작업 종료 → 다시 대기(ONLINE) + 현재 작업 비움. */
+    /** JOB_RESULT/FAILED/CANCELLED: 작업 종료 → 다시 대기(ONLINE) + 현재 작업 비움. */
     public void finishJob() {
         this.status = WorkerStatus.ONLINE;
         this.currentJobId = null;
+    }
+
+    /**
+     * 작업 후보 자격 — 규격 §28 "operator 조건 충족".
+     * 에스크로에 넣을 정산 주소(provider)와 트랜잭션에 서명할 주소(operator)가 모두 있어야
+     * 배정해도 acceptJob() 까지 갈 수 있다. 둘 중 하나라도 없으면 후보에서 뺀다.
+     */
+    public boolean isEscrowReady() {
+        return operatorAddress != null && owner.getWalletAddress() != null;
     }
 }

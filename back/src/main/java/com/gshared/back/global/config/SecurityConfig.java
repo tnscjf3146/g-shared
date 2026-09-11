@@ -69,7 +69,12 @@ public class SecurityConfig {
                         // (/api/workers/register 는 사람이 로그인해서 부르므로 아래 authenticated 에 남는다)
                         // ⚠ 이 목록을 고치면 JwtAuthenticationFilter.WORKER_TOKEN_PATHS 도 같이 고쳐야 한다.
                         .requestMatchers(HttpMethod.POST, "/api/workers/authenticate").permitAll()
-                        .requestMatchers(HttpMethod.PUT, "/api/workers/*/gpu").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/workers/*/operator").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/workers/*/benchmark").permitAll()
+                        // 워커 전용 Job 창구 (execution-context · result-upload) — 역시 워커 토큰
+                        .requestMatchers("/api/worker/**").permitAll()
+                        // 서명 URL 로 오브젝트를 올리고 내려받는 곳. 인증은 URL 서명(StorageController)이 한다.
+                        .requestMatchers("/storage/**").permitAll()
 
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()

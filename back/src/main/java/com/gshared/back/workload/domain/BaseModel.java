@@ -31,6 +31,12 @@ public class BaseModel extends BaseTimeEntity {
     @Column(nullable = false, length = 128)
     private String displayName;
 
+    @Column(length = 255)
+    private String modelRef;         // Hugging Face 저장소 참조 "Qwen/Qwen2.5-7B" — Worker 가 내려받는 대상 (V10)
+
+    @Column(length = 64)
+    private String modelRevision;    // 고정 커밋 SHA. 없으면 Worker 가 기본 브랜치를 받는다 — 재현성이 떨어지므로 채울 것
+
     private Long paramCount;
 
     @Column(length = 66)

@@ -75,9 +75,11 @@ class JobCreateValidationTest {
     }
 
     private void addOnlineWorker() {
+        owner.linkWallet("0x" + "a".repeat(40));   // provider 정산 주소 — 없으면 후보 제외 (규격 §28)
         Worker worker = workerRepository.save(Worker.register(
                 "worker-create-" + UUID.randomUUID(), owner, "hash-" + UUID.randomUUID(),
-                "테스트PC", "Windows 11", "RTX 4090", 24_564, "551.23", 72_000.0));
+                "0x" + "b".repeat(40), "0.1.0", "Windows 11", true,
+                "RTX 4090", 24_564, 72_000.0, "transformer-bench-v1"));
         worker.goOnline(LocalDateTime.now());
         workerRepository.flush();   // 목 검증 전에 DB 반영
     }

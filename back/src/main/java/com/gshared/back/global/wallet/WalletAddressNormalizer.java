@@ -1,6 +1,7 @@
 package com.gshared.back.global.wallet;
 
 import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.global.exception.ErrorCode;
 import com.gshared.back.user.exception.UserErrorCode;
 import org.springframework.stereotype.Component;
 
@@ -20,13 +21,21 @@ public class WalletAddressNormalizer {
     private static final Pattern ADDRESS = Pattern.compile("^0x[0-9a-fA-F]{40}$");
 
     public String normalize(String walletAddress) {
-        if (walletAddress == null) {
-            throw new BusinessException(UserErrorCode.INVALID_WALLET_ADDRESS);
+        return normalize(walletAddress, UserErrorCode.INVALID_WALLET_ADDRESS);
+    }
+
+    /**
+     * 형식 규칙은 같지만 어느 주소가 틀렸는지(회원 지갑 / 워커 operator)에 따라 응답 코드가 달라야
+     * 클라이언트가 고칠 곳을 안다. 그래서 실패 코드를 호출자가 정한다.
+     */
+    public String normalize(String address, ErrorCode onInvalid) {
+        if (address == null) {
+            throw new BusinessException(onInvalid);
         }
 
-        String trimmed = walletAddress.trim();
+        String trimmed = address.trim();
         if (!ADDRESS.matcher(trimmed).matches()) {
-            throw new BusinessException(UserErrorCode.INVALID_WALLET_ADDRESS);
+            throw new BusinessException(onInvalid);
         }
 
         return trimmed.toLowerCase(Locale.ROOT);
