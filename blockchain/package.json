@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "hardhat test",
     "abi": "hardhat build && node scripts/export-abi.mjs",
+    "snapshot": "hardhat test solidity --snapshot",
+    "snapshot:check": "hardhat test solidity --snapshot-check",
     "check": "npm run build && npm run typecheck && npm test",
     "deploy:local": "hardhat ignition deploy ignition/modules/GCoin.ts",
     "dev:node": "hardhat node",
