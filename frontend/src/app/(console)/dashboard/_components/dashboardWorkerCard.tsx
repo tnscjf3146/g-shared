@@ -11,20 +11,24 @@ const COLS = ['26%', '10%', '14%', '16%', '18%', '16%']
 
 export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { worker: Worker; index: number; now: number; onUnlink: (w: Worker) => void; style?: React.CSSProperties }) {
   const heartbeat = worker.lastHeartbeatAt ? relativeTime(worker.lastHeartbeatAt, now) : '기록 없음'
+  // 오프라인 워커는 꺼진 기계처럼 — 작업 목록의 완료·취소와 같은 어두운 회색 배경
+  const offline = worker.status === 'OFFLINE'
   return (
-    <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={style}>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 md:grid-cols-[minmax(0,3fr)_1.4fr_2.2fr_auto]">
+    <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={{ ...style, ...(offline && { background: 'color-mix(in srgb, var(--color-hairline-strong) 45%, var(--color-surface-2))' }) }}>
+      {/* 이름 칸 ≈ 26% — 상태가 아래 표의 VRAM 열 시작점 부근에서 시작하게 */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_auto]">
         <h3 className="truncate text-[17px] font-bold tracking-heading text-dark" title={worker.workerId}>
           <span className="tabular-nums">{index}.</span> {worker.deviceName}
         </h3>
-        <div className="hidden md:block">
-          <div className="text-[17px] font-medium text-dark">{STATUS_LABEL[worker.status]}</div>
+        {/* 좁은 폭에서 두 줄로 꺾이지 않게 — 전부 한 줄 truncate, 잘리면 … + title 툴팁 */}
+        <div className="hidden min-w-0 md:block">
+          <div className="truncate text-[17px] font-medium text-dark" title={STATUS_LABEL[worker.status]}>{STATUS_LABEL[worker.status]}</div>
           {/* 지갑 미연결이면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다 — 주인만 알 수 있으니 여기서 알린다 */}
-          {!worker.walletLinked && <div className="text-[14px] text-danger">지갑 미연결 · 작업을 받을 수 없습니다</div>}
+          {!worker.walletLinked && <div className="truncate text-[14px] text-danger" title="지갑 미연결 · 작업을 받을 수 없습니다">지갑 미연결 · 작업을 받을 수 없습니다</div>}
         </div>
-        <div className="hidden md:block">
+        <div className="hidden min-w-0 md:block">
           <div className="text-[14px] text-text-muted">OS</div>
-          <div className="truncate text-[17px] font-medium text-dark">{worker.osVersion ?? '—'}</div>
+          <div className="truncate text-[17px] font-medium text-dark" title={worker.osVersion ?? undefined}>{worker.osVersion ?? '—'}</div>
         </div>
         <Button variant="ghost" size="sm" disabled={worker.status === 'RUNNING'} title={worker.status === 'RUNNING' ? '작업이 끝난 뒤 해제할 수 있습니다' : undefined} onClick={() => onUnlink(worker)}>
           등록 해제

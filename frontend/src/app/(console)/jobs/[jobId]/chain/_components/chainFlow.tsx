@@ -161,7 +161,7 @@ export function ChainFlow({ jobId }: { jobId: number }) {
       )}
       {state.s === 'ready' && (
         <section className="flex flex-col gap-2">
-          {/* 상태 — 그래프 위 우측. 실패·취소는 빨강, 그 외 메인 그린 */}
+          {/* 상태 — 그래프 바로 위, 오른쪽 끝을 그래프와 정렬. 실패·취소는 빨강, 그 외 메인 그린 */}
           <span className="self-end text-[15px] text-text-muted">
             상태{' '}
             <span className={`text-[19px] font-bold ${state.job.status === 'FAILED' || state.job.status === 'CANCELLED' ? 'text-danger' : 'text-primary'}`}>

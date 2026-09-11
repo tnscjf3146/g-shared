@@ -125,7 +125,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" href={`/jobs/${job.jobId}/chain`}>
-              한눈에 보기 →
+              블록체인 거래 흐름 보기 →
             </Button>
             {CANCELLABLE_STATUSES.has(job.status) && (
               <Button variant="secondary" size="sm" disabled={pending} onClick={cancel}>

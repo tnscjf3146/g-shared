@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
 import { jobMessageFor } from '@/features/jobs/errors'
-import { ACTIVE_STATUSES, formatCost } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
 import { deleteWorker, getMyWorkers } from '@/features/workers/api'
 import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
@@ -15,6 +14,8 @@ import { formatVram } from '@/features/workers/format'
 import type { Worker } from '@/features/workers/types'
 import { DashboardJobRow } from './dashboardJobRow'
 import { DashboardWorkerCard } from './dashboardWorkerCard'
+import { JobsOverview } from './jobsOverview'
+import { Pager } from './pager'
 import { StatTiles } from './statTiles'
 
 // 대시보드 본문(/dashboard/jobs · /dashboard/workers, 참고 디자인 구조): 헤더(제목 — 작업/공급, 전환은 사이드바) → 지표 4개 → 작업·워커 모두 카드 세로 목록.
@@ -22,6 +23,7 @@ import { StatTiles } from './statTiles'
 export type DashboardTab = 'jobs' | 'workers'
 const POLL_MS = 15_000
 const PAGE_SIZE = 50
+const JOBS_PER_PAGE = 5 // 내 학습 작업 목록 — 클라이언트 페이징(받아 둔 50건 안에서)
 
 type Loaded<T> = { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: T }
 
@@ -31,6 +33,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [notice, setNotice] = useState<string | null>(null)
+  const [jobPage, setJobPage] = useState(0)
 
   // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
   const load = useCallback((silent = false) => {
@@ -92,28 +95,17 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
     }
   }
 
-  // 지표 — 있는 필드로만
-  const running = jobList.filter((j) => j.status === 'RUNNING').length
-  const waiting = jobList.filter((j) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING').length
-  const activeCost = jobList.filter((j) => ACTIVE_STATUSES.has(j.status)).reduce((a, j) => a + j.estimatedCost, 0)
+  // 지표 — 있는 필드로만. 작업 탭 지표는 JobsOverview 의 KPI 카드가 담당
   const online = workerList.filter((w) => w.status !== 'OFFLINE').length
   const busy = workerList.filter((w) => w.status === 'RUNNING').length
   const vram = workerList.reduce((a, w) => a + (w.vramMb ?? 0), 0)
   const benches = workerList.map((w) => w.benchmarkTokensPerSec).filter((v): v is number => v != null)
-  const stats =
-    tab === 'jobs'
-      ? [
-          { label: '학습 중', value: String(running), sub: `작업 ${jobList.length}개 중` },
-          { label: '배정·시작 대기', value: String(waiting), sub: '예치 대기 포함' },
-          { label: '완료', value: String(jobList.filter((j) => j.status === 'COMPLETED').length), sub: `실패·취소 ${jobList.filter((j) => j.status === 'FAILED' || j.status === 'CANCELLED').length}` },
-          { label: '진행 중 예상 비용', value: formatCost(activeCost), sub: '견적 기준 합계' },
-        ]
-      : [
-          { label: '연결된 워커', value: `${online} / ${workerList.length}`, sub: `${workerList.length - online}대 오프라인` },
-          { label: '작업 중 GPU', value: String(busy), sub: `대기 중 ${online - busy}대` },
-          { label: '총 VRAM', value: vram ? formatVram(vram) : '—', sub: '등록된 GPU 합계' },
-          { label: '평균 벤치마크', value: benches.length ? `${Math.round(benches.reduce((a, b) => a + b, 0) / benches.length).toLocaleString('ko-KR')} tok/s` : '측정 전', sub: `${benches.length}대 측정` },
-        ]
+  const stats = [
+    { label: '연결된 워커', value: `${online} / ${workerList.length}`, sub: `${workerList.length - online}대 오프라인` },
+    { label: '작업 중 GPU', value: String(busy), sub: `대기 중 ${online - busy}대` },
+    { label: '총 VRAM', value: vram ? formatVram(vram) : '—', sub: '등록된 GPU 합계' },
+    { label: '평균 벤치마크', value: benches.length ? `${Math.round(benches.reduce((a, b) => a + b, 0) / benches.length).toLocaleString('ko-KR')} tok/s` : '측정 전', sub: `${benches.length}대 측정` },
+  ]
 
   return (
     <>
@@ -128,13 +120,17 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
         </p>
       )}
 
-      <StatTiles items={stats} loading={(tab === 'jobs' ? jobs : workers).status === 'loading'} />
+      {/* 작업 탭: 히어로·도넛·최근 활동·노드 지도·KPI 카드(대시보드.png 구조) → 목록. CTA 는 히어로 배너에, 지표는 JobsOverview 의 KPI 카드가 담당 */}
+      {tab === 'jobs' ? (
+        <JobsOverview jobList={jobList} loading={jobs.status === 'loading' || workers.status === 'loading'} nameOf={nameOf} onlineWorkers={online} totalWorkers={workerList.length} />
+      ) : (
+        <StatTiles items={stats} loading={workers.status === 'loading'} />
+      )}
 
       {tab === 'jobs' ? (
         <section className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-[24px] font-bold tracking-heading text-dark">내 학습 작업</h2>
-            <Button href="/jobs/new">+ 워크로드 등록</Button>
           </div>
           {jobs.status === 'error' && <Retry what="작업 목록" onRetry={() => { setJobs({ status: 'loading' }); load() }} />}
           {jobs.status === 'loading' && <ListSkeleton />}
@@ -146,11 +142,17 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
             </section>
           )}
           {jobs.status === 'ready' && jobList.length > 0 && (
-            <ul className="flex flex-col gap-3">
-              {jobList.map((j, i) => (
-                <DashboardJobRow key={j.jobId} job={j} index={i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
-              ))}
-            </ul>
+            <>
+              <ul className="flex flex-col gap-3">
+                {jobList.slice(jobPage * JOBS_PER_PAGE, (jobPage + 1) * JOBS_PER_PAGE).map((j, i) => (
+                  <DashboardJobRow key={j.jobId} job={j} index={jobPage * JOBS_PER_PAGE + i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
+                ))}
+              </ul>
+              {/* 메인 목록은 실무 관례대로 페이지 번호 + 화살표 */}
+              <div className="flex justify-center">
+                <Pager page={jobPage} totalPages={Math.ceil(jobList.length / JOBS_PER_PAGE)} onChange={setJobPage} numbered />
+              </div>
+            </>
           )}
         </section>
       ) : (
@@ -168,9 +170,10 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
                   <DashboardWorkerCard key={w.workerId} worker={w} index={i + 1} now={now} onUnlink={onUnlink} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
                 ))}
               </ul>
-              <Link href="/workers/new" className="card-quiet flex items-center justify-between gap-4 text-[17px] font-semibold text-dark transition-colors hover:bg-black/5">
+              {/* 공급 페이지의 주 CTA — primary 그린(화면당 하나) */}
+              <Link href="/workers/new" className="btn btn-lg btn-primary w-full justify-between">
                 내 GPU 등록하기
-                <span aria-hidden className="text-text-muted">→</span>
+                <span aria-hidden>→</span>
               </Link>
             </>
           )}
