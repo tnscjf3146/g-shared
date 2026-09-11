@@ -18,7 +18,6 @@ contract GPUJobEscrowTest is Test {
     address internal operator2 = address(0x09E4A72); // 같은 사람의 다른 기계
     address internal stranger = address(0x57A9E7);
 
-    uint256 internal constant SSAFY_CHAIN_ID   = 31221;
     uint64  internal constant ACCEPT_TIMEOUT    = 2 hours;
     uint64  internal constant EXECUTION_TIMEOUT = 1 hours;
     uint256 internal constant PRICE            = 10 ether; // 10 GSC
@@ -109,19 +108,6 @@ contract GPUJobEscrowTest is Test {
 
         vm.expectRevert(bytes("Escrow: deadline is zero"));
         new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, 0);
-    }
-
-    /// @notice 검증이 끝나지 않은 버전이 SSAFY 체인에 올라가는 것을 생성자가 막는다.
-    function test_constructor_revertsOnSsafyChain() public {
-        vm.chainId(SSAFY_CHAIN_ID);
-        vm.expectRevert(GPUJobEscrow.SsafyDeploymentBlocked.selector);
-        new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT);
-    }
-
-    function test_constructor_allowsOtherChains() public {
-        vm.chainId(SSAFY_CHAIN_ID + 1);
-        GPUJobEscrow other = new GPUJobEscrow(address(token), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT);
-        assertEq(address(other.paymentToken()), address(token));
     }
 
     // ── createAndFundJob ─────────────────────────────────────────

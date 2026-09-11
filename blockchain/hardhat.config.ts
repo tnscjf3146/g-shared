@@ -18,7 +18,6 @@ export default defineConfig({
   plugins: [hardhatToolboxViem],
   networks: {
     // 로컬 개발 체인. `npx hardhat node` 로 띄운 노드에 붙는다.
-    // chainId 가 31337 이라 에스크로의 SSAFY 체인 가드에 걸리지 않는다.
     localhost: {
       type: "http",
       chainType: "l1",

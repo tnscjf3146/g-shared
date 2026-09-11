@@ -86,9 +86,6 @@ contract GPUJobEscrow is ReentrancyGuard {
         bytes32  resultHash;   // 결과물 검증을 위한 해시값
     }
 
-    /// @notice 배포 승인을 받지 않은 버전을 막아 둔 체인
-    uint256 private constant SSAFY_CHAIN_ID = 31221;
-
     /// @notice 정산에 사용될 ERC20 토큰 컨트랙트
     IERC20 public immutable paymentToken;
 
@@ -114,12 +111,6 @@ contract GPUJobEscrow is ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────
     // 오류(Errors)
     // ─────────────────────────────────────────────────────────────
-
-    /// @notice 배포 승인을 받지 않은 버전을 SSAFY 체인에 올리려 할 때 되돌립니다.
-    /// @dev 선착순 선점 문제는 의뢰자 지정으로 해소했습니다. 가드를 남겨 둔 이유는
-    ///      대금이 온체인에서 강제되지 않아 공급자 쪽 대조가 전제로 남아 있고,
-    ///      연동 측 준비가 끝나지 않았기 때문입니다.
-    error SsafyDeploymentBlocked();
 
     /// @notice 제한 시간이 지난 뒤에 정상 경로 함수를 부를 때 되돌립니다.
     /// @dev 정각(block.timestamp == deadline)까지는 허용합니다.
@@ -177,12 +168,10 @@ contract GPUJobEscrow is ReentrancyGuard {
     event OperatorUpdated(address indexed provider, address indexed operator, bool allowed);
 
     /// @notice 에스크로 컨트랙트를 초기화합니다.
-    /// @dev SSAFY 체인에서는 배포 자체를 되돌립니다. 배포 승인을 받은 뒤 이 검사를 제거합니다.
     /// @param paymentToken_ 에스크로에 사용할 결제 토큰 주소
     /// @param acceptTimeout_ 예치 후 수락까지의 기한(초)
     /// @param executionTimeout_ 수락 후 제출까지의 기한(초)
     constructor(address paymentToken_, uint64 acceptTimeout_, uint64 executionTimeout_) {
-        if (block.chainid == SSAFY_CHAIN_ID) revert SsafyDeploymentBlocked();
         require(paymentToken_ != address(0), "Escrow: token is zero");
         require(acceptTimeout_ > 0 && executionTimeout_ > 0, "Escrow: deadline is zero");
         paymentToken     = IERC20(paymentToken_);
