@@ -219,6 +219,21 @@
   body[data-nav-theme="dark"] .nav-logo {
     filter: brightness(0) invert(1);
   }
+  /* 콘솔 진입 전환 — 어두운 랜딩에서 넘어올 때 검정에서 서서히 밝아진다(랜딩 연출과 같은 결).
+     레이아웃 마운트 시 1회만 재생, 콘솔 내부 이동에서는 다시 안 뜬다 */
+  @keyframes console-brighten {
+    from { opacity: 1; }
+    to { opacity: 0; visibility: hidden; }
+  }
+  .console-brighten {
+    background: var(--color-black);
+    animation: console-brighten 800ms var(--ease-out-expo) 100ms both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .console-brighten {
+      animation-duration: 200ms;
+    }
+  }
   /* 네비 버튼(로그인·로그아웃 공용) — 회색 헤어라인 버튼. 색은 전부 globals 회색 토큰, 어두운 테마에선 surface-2 기준으로 반전. 8px 모서리, 높이 36 */
   .nav-btn {
     display: inline-flex;
