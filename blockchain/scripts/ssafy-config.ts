@@ -37,23 +37,6 @@ export function readSSAFYConfig() {
 /** SSAFY 체인의 Chain ID. 에스크로 배포 대상을 코드에 못박는다. */
 export const SSAFY_CHAIN_ID = 31221;
 
-/**
- * 에스크로를 배포할 체인의 Chain ID 를 돌려준다.
- *
- * SSAFY_CHAIN_ID 환경 변수와 RPC 가 서로 같은지만 보면, 둘이 함께 잘못 설정되었을 때
- * 엉뚱한 체인에 배포된다. 기대값을 상수로 고정해 그 경로를 막는다.
- * 로컬 노드로 배포 경로를 예행하는 경우에만 ESCROW_EXPECT_CHAIN_ID 로 바꿀 수 있다.
- */
-export function expectedEscrowChainId(): number {
-  const override = process.env.ESCROW_EXPECT_CHAIN_ID?.trim();
-  if (!override) return SSAFY_CHAIN_ID;
-  const value = Number(override);
-  if (!/^\d+$/.test(override) || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error("ESCROW_EXPECT_CHAIN_ID must be a positive decimal integer.");
-  }
-  return value;
-}
-
 export function requireDeploymentKey() {
   if (!/^0x[0-9a-fA-F]{64}$/.test(required("SSAFY_PRIVATE_KEY"))) {
     throw new Error("SSAFY_PRIVATE_KEY must be 0x followed by 64 hex characters.");
