@@ -36,7 +36,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from .job_workspace import JobWorkspace
+from .job_workspace import JobWorkspace, safe_job_id
 from .logging_setup import LOGGER_NAME
 
 _debug = logging.getLogger(LOGGER_NAME)
@@ -60,6 +60,20 @@ PIDS_LIMIT = 512
 MEMORY_LIMIT = "16g"
 CACHE_TMPFS_SIZE = "1g"
 TMP_TMPFS_SIZE = "256m"
+
+#: Labels every job container carries, so a cancellation can tell **our**
+#: container from something that merely has the same name.
+#:
+#: The name alone is not proof. It is derived from the job id, so a container
+#: left behind by an earlier run of the same Job -- or by a different Worker
+#: process on this machine -- wears it too, and stopping one of those is
+#: stopping somebody else's work.
+#:
+#: Only two values, both of them this Worker's own bookkeeping. No wallet, no
+#: token, no customer data: ``docker inspect`` is readable by anyone on the
+#: host.
+LABEL_JOB_ID = "gshared.job-id"
+LABEL_GENERATION = "gshared.generation"
 
 #: What the runtime prints its events behind. One line each.
 EVENT_MARKER = "GSHARED_EVENT="
@@ -90,6 +104,13 @@ class RuntimeState(Enum):
     RUNNING = "RUNNING"
     FINISHED = "FINISHED"
     FAILED = "FAILED"
+    #: Stopped on purpose, by a user cancellation. **Not** a failure.
+    #:
+    #: A container killed by ``docker stop`` exits 137 or 143, which the exit
+    #: table would otherwise read as UNKNOWN_RUNTIME_EXIT -- and the Job would
+    #: be reported to the customer as having crashed, when what happened is
+    #: that they asked for it to stop.
+    CANCELLED = "CANCELLED"
 
 
 class RuntimeFailure(Enum):
@@ -255,6 +276,10 @@ class RuntimeOutcome:
         return self.state is RuntimeState.FINISHED
 
     @property
+    def cancelled(self) -> bool:
+        return self.state is RuntimeState.CANCELLED
+
+    @property
     def last_event(self) -> RuntimeEvent | None:
         return self.events[-1] if self.events else None
 
@@ -346,8 +371,6 @@ def check_training(training: Any) -> None:
 
 def container_name(job_id: str) -> str:
     """One deterministic name per Job, from an id that has been checked."""
-    from .job_workspace import safe_job_id
-
     return f"gshared-job-{safe_job_id(job_id)}"
 
 
@@ -358,6 +381,7 @@ def run_command(
     training: Any,
     *,
     host_path_of: Callable[[Path], Any] | None = None,
+    generation: int = 0,
 ) -> list[str]:
     """The whole ``docker run``, as a list of arguments.
 
@@ -372,12 +396,18 @@ def run_command(
     * ``uid``/``gid`` on the tmpfs mounts -- without them the mount is
       root-owned and the non-root runtime cannot write its cache.
 
+    The two labels are not a flag chosen against anything; they are how a
+    cancellation proves the container it is about to stop is the one this
+    process started. See :data:`LABEL_JOB_ID`.
+
     No ``-e`` carries a secret. The only environment set is a cache path.
     """
     where = host_path_of or (lambda path: path)
     return [
         "docker", "run", "--rm",
         "--name", container_name(workspace.job_id),
+        "--label", f"{LABEL_JOB_ID}={safe_job_id(workspace.job_id)}",
+        "--label", f"{LABEL_GENERATION}={int(generation)}",
         "--gpus", "all",
         "--network", "none",
         "--read-only",
@@ -409,6 +439,9 @@ async def run_training(
     timeout: float = TRAINING_TIMEOUT_SECONDS,
     on_event: Callable[[RuntimeEvent], None] | None = None,
     monotonic: Callable[[], float] | None = None,
+    generation: int = 0,
+    cancelled: Callable[[], bool] | None = None,
+    on_started: Callable[[str], None] | None = None,
 ) -> RuntimeOutcome:
     """Start the container, watch it, and say what happened.
 
@@ -428,8 +461,9 @@ async def run_training(
     reaches the caller minutes before the container exits.
     """
     command = run_command(image_reference, workspace, model_path, training,
-                          host_path_of=host_path_of)
-    _debug.info("runtime: starting %s", container_name(workspace.job_id))
+                          host_path_of=host_path_of, generation=generation)
+    _debug.info("runtime: starting %s (run %s)",
+                container_name(workspace.job_id), generation)
 
     events: list[RuntimeEvent] = []
     tick = monotonic or time.monotonic
@@ -439,6 +473,11 @@ async def run_training(
     # weights, the dataset, the pull -- already happened, and everything
     # after it, the packaging and the upload and the chain, has not.
     started_at = tick()
+    if on_started is not None:
+        # The container name, handed over the moment the command goes out.
+        # A cancellation arriving a millisecond later needs something to
+        # stop, and the only thing that knows the name is this call.
+        on_started(container_name(workspace.job_id))
     try:
         finished = await _run_container(
             runner, command, timeout, events, on_event)
@@ -463,6 +502,16 @@ async def run_training(
     exit_code = int(finished.exit_code)
 
     if exit_code != 0:
+        if cancelled is not None and cancelled():
+            # We asked it to stop, and it did. ``docker stop`` gives the
+            # container SIGTERM and then SIGKILL, so this arrives as 143 or
+            # 137 -- codes the exit table does not know and would read as a
+            # crash. The Job did not crash; somebody cancelled it.
+            _debug.info("runtime: exit %s after a cancellation", exit_code)
+            return RuntimeOutcome(
+                RuntimeState.CANCELLED, None,
+                "the job was stopped at the customer's request", exit_code,
+                workspace.output_dir, events, actual_runtime_sec=ran_for)
         failure = failure_for_exit(exit_code)
         _debug.info("runtime: exit %s -- %s", exit_code, failure.value)
         return RuntimeOutcome(
@@ -479,6 +528,11 @@ async def run_training(
             exit_code, workspace.output_dir, events,
             actual_runtime_sec=ran_for)
 
+    # Exit zero with the adapter written. Reported as finished **even when a
+    # cancellation is in flight**: the training really did complete, and who
+    # owns the Job's ending is arbitrated later, against the chain, by
+    # :mod:`gshared_worker.job_cancellation`. Calling a successful run
+    # cancelled here would throw away a result that exists.
     return RuntimeOutcome(
         RuntimeState.FINISHED, None, "training finished", exit_code,
         workspace.output_dir, events, actual_runtime_sec=ran_for)

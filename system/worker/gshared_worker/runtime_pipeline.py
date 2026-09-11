@@ -111,7 +111,8 @@ class RuntimePipeline:
         self._host_path_of = host_path_of
         self._cache = ModelCache(settings.cache_root)
 
-    def run(self, job: Any, *, progress: Any = None) -> RuntimeOutcome:
+    def run(self, job: Any, *, progress: Any = None,
+            terminal: Any = None) -> RuntimeOutcome:
         """The whole pipeline for one Job, synchronously. Call off the loop.
 
         ``progress`` is a :class:`~gshared_worker.runtime_progress.\
@@ -120,7 +121,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
         this function neither reads it back nor sends anything itself.
         """
         try:
-            return asyncio.run(self._run(job, progress))
+            return asyncio.run(self._run(job, progress, terminal))
         except Exception as error:
             # The background thread must always produce an outcome. An
             # exception that escaped would otherwise leave the Job with no
@@ -130,7 +131,19 @@ ProgressTracker` when somebody is watching. It is handed the container's
                 RuntimeState.FAILED, RuntimeFailure.DOCKER_UNAVAILABLE,
                 f"the runtime pipeline failed ({type(error).__name__})")
 
-    async def _run(self, job: Any, progress: Any = None) -> RuntimeOutcome:
+    async def _run(self, job: Any, progress: Any = None,
+                   terminal: Any = None) -> RuntimeOutcome:
+        """Each phase asks, before it starts, whether the Job is still wanted.
+
+        The checks are between phases rather than inside them. A cancellation
+        arriving during a dataset download does not tear the download apart;
+        it means the image is not pulled afterwards and the container is not
+        started at all. The phases are minutes long, so the worst wait is one
+        phase, and the one that matters -- ``docker run`` -- is checked in the
+        moment before it happens.
+        """
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before the execution context")
         # -- what to run ------------------------------------------------
         try:
             body = fetch_execution_context(
@@ -143,11 +156,17 @@ ProgressTracker` when somebody is watching. It is handed the container's
                 RuntimeFailure.CONTEXT_MISMATCH if refused.fatal
                 else RuntimeFailure.CONTEXT_UNAVAILABLE, refused.detail)
 
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before the runtime image")
+
         # -- which container --------------------------------------------
         try:
             image = check_image(context.image.image_ref, context.image.digest)
         except ImageRefused as refused:
             return _failed(RuntimeFailure.IMAGE_REFUSED, str(refused))
+
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before preparing the model")
 
         # -- the weights ------------------------------------------------
         try:
@@ -158,6 +177,9 @@ ProgressTracker` when somebody is watching. It is handed the container's
         except (ModelRefused, UnsafePath) as refused:
             return _failed(
                 RuntimeFailure.MODEL_PREPARATION_FAILED, str(refused))
+
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before fetching the dataset")
 
         # -- the data ---------------------------------------------------
         try:
@@ -176,17 +198,32 @@ ProgressTracker` when somebody is watching. It is handed the container's
                 f"the job workspace could not be prepared "
                 f"({type(error).__name__})")
 
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before pulling the image")
+
         # -- the image, actually here -----------------------------------
         pulled = await self._pull(image)
         if pulled is not None:
             return pulled
 
         # -- and finally the GPU ----------------------------------------
+        #
+        # The last check, and the one the others exist for. Everything above
+        # was preparation nobody sees; below this line a GPU starts working
+        # on a Job the customer has asked to stop.
+        if _stop_now(terminal):
+            return _cancelled_before_starting("before starting the container")
+
         _debug.info("runtime: %s ready, starting training", job.job_id)
+        generation = getattr(terminal, "generation", 0)
         return await run_training(
             self._runner, image.reference, workspace, model.path,
             context.training, host_path_of=self._host_path_of,
-            on_event=progress.observe if progress is not None else None)
+            on_event=progress.observe if progress is not None else None,
+            generation=generation,
+            cancelled=(lambda: terminal.cancel_requested)
+            if terminal is not None else None,
+            on_started=_remember(terminal, job.job_id, generation))
 
     async def _pull(self, image: Any) -> RuntimeOutcome | None:
         """Fetch by digest and confirm what landed. None means it is ready.
@@ -230,3 +267,40 @@ ProgressTracker` when somebody is watching. It is handed the container's
 def _failed(failure: RuntimeFailure, detail: str) -> RuntimeOutcome:
     _debug.info("runtime: %s -- %s", failure.value, detail)
     return RuntimeOutcome(RuntimeState.FAILED, failure, detail)
+
+
+def _stop_now(terminal: Any) -> bool:
+    """Whether this Job has been cancelled since the last phase."""
+    return terminal is not None and terminal.cancel_requested
+
+
+def _cancelled_before_starting(where: str) -> RuntimeOutcome:
+    """Stopped during preparation. **Not a failure, and no runtime.**
+
+    ``actual_runtime_sec`` stays None: no container ran, so there is no
+    duration, and a zero would be a measurement nobody made.
+    """
+    _debug.info("runtime: stopped %s", where)
+    return RuntimeOutcome(
+        RuntimeState.CANCELLED, None,
+        f"the job was stopped at the customer's request {where}")
+
+
+def _remember(terminal: Any, job_id: str, generation: int):
+    """Hand the container's identity to whoever may have to stop it.
+
+    Called the moment ``docker run`` goes out, so a cancellation arriving a
+    millisecond later has something specific to stop rather than a name it
+    would have to guess at.
+    """
+    if terminal is None:
+        return None
+
+    def started(container_name: str) -> None:
+        from .runtime_stop import RuntimeHandle
+
+        terminal.container_started(RuntimeHandle(
+            job_id=job_id, generation=generation,
+            container_name=container_name))
+
+    return started
