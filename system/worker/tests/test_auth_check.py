@@ -18,6 +18,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from gshared_worker.worker_wallet import WorkerWallet
 from gshared_worker.auth_check import _http_origin_of, authenticate_worker
 from gshared_worker.config import (
     CONFIG_FILE_NAME,
@@ -34,6 +35,13 @@ from gshared_worker.benchmark import (
 from gshared_worker.machine_facts import MachineFacts
 from gshared_worker.worker_auth import RegistryAnswer, WorkerAuthState
 from gshared_worker.worker_credentials import WorkerCredentials
+
+#: A stub signing identity. Only the address matters to registration, and an
+#: address is public -- the field below is a placeholder, not a real key.
+A_WALLET = WorkerWallet(
+    address="0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    private_key="not-a-real-key")
+
 
 SETTINGS = WorkerSettings(
     backend_url="ws://localhost:8080/ws/workers",
@@ -120,13 +128,18 @@ class StageTestCase(unittest.TestCase):
             "workerId": worker_id, "workerTokenProtected": sealed,
         }), encoding="utf-8")
 
-    def run_stage(self, registry, sign_in="user-jwt", benchmark=measured):
+    def run_stage(self, registry, sign_in="user-jwt", benchmark=measured,
+                  make_wallet=None):
         return authenticate_worker(
             SETTINGS, self.said.append,
             registry=registry,
             ask_to_sign_in=lambda: sign_in,
             describe=lambda: FACTS,
             benchmark=benchmark,
+            # Injected: making a real key needs eth_account, which this package
+            # deliberately does not require. The address is what registration
+            # sends, and it is public.
+            make_wallet=make_wallet or (lambda say: A_WALLET),
         )
 
     @property
@@ -182,7 +195,8 @@ class AnExistingMachineTest(StageTestCase):
             code = authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: asked.append(1) or "jwt",
-                describe=lambda: FACTS, benchmark=measured)
+                describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
         self.assertEqual(code, WorkerExitCode.OK)
         self.assertEqual(asked, [])
@@ -267,7 +281,8 @@ class A404IsNotARevocationTest(StageTestCase):
                     SETTINGS, self.said.append,
                     registry=Registry(verifies=RegistryAnswer(state, "404")),
                     ask_to_sign_in=lambda: asked.append(1) or "jwt",
-                    describe=lambda: FACTS, benchmark=measured)
+                    describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
             self.assertEqual(asked, [])
 
@@ -313,7 +328,8 @@ class AServiceThatIsDownTest(StageTestCase):
             self.code = authenticate_worker(
                 SETTINGS, self.said.append, registry=self.registry,
                 ask_to_sign_in=lambda: self.asked.append(1) or "jwt",
-                describe=lambda: FACTS, benchmark=measured)
+                describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
     def test_it_is_a_transport_failure_not_a_credential_one(self):
         # A launcher reads these differently: one is worth retrying.
@@ -367,7 +383,8 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "a-real-user-jwt",
-                describe=lambda: FACTS, benchmark=measured)
+                describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
         self.assertNotIn("a-real-user-jwt", self.logged)
 
@@ -377,7 +394,8 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "jwt",
-                describe=lambda: FACTS, benchmark=measured)
+                describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
         self.assertNotIn("issued-token", self.logged)
 
@@ -387,7 +405,8 @@ class NothingSensitiveReachesTheLogTest(StageTestCase):
             authenticate_worker(
                 SETTINGS, self.said.append, registry=Registry(),
                 ask_to_sign_in=lambda: "a-real-user-jwt",
-                describe=lambda: FACTS, benchmark=measured)
+                describe=lambda: FACTS, benchmark=measured,
+                make_wallet=lambda say: A_WALLET)
 
         self.assertNotIn("a-real-user-jwt", self.output)
         self.assertNotIn("issued-token", self.output)
@@ -433,22 +452,43 @@ class WhatTheMachineIsRegisteredAsTest(StageTestCase):
 
     def test_it_carries_the_fields_the_worker_api_asks_for(self):
         self.assertEqual(set(self.sent), {
-            "deviceName", "osVersion", "gpuModel", "vramMb", "driverVersion",
-            "benchmarkTokensPerSec",
+            "operatorAddress", "clientVersion", "system", "gpu", "benchmark",
         })
 
     def test_the_gpu_is_this_machine_s_own(self):
-        self.assertEqual(self.sent["gpuModel"], FACTS.gpu_model)
-        self.assertEqual(self.sent["vramMb"], 8188)
-        self.assertEqual(self.sent["driverVersion"], "596.36")
+        self.assertEqual(self.sent["gpu"]["gpuModel"], FACTS.gpu_model)
+        self.assertEqual(self.sent["gpu"]["vramMb"], 8188)
+
+    def test_the_driver_version_is_no_longer_sent(self):
+        # Not part of the Backend contract: it is not an input to scheduling
+        # and the Backend does not keep it.
+        self.assertNotIn("driverVersion", json.dumps(self.sent))
 
     def test_the_benchmark_is_the_measured_figure(self):
-        self.assertEqual(self.sent["benchmarkTokensPerSec"], MEASURED_RATE)
+        self.assertEqual(
+            self.sent["benchmark"]["benchmarkTokensPerSec"], MEASURED_RATE)
+
+    def test_the_benchmark_says_which_workload_produced_it(self):
+        self.assertEqual(self.sent["benchmark"]["benchmarkVersion"],
+                         "gshared-benchmark-v1")
+
+    def test_the_operator_address_is_registered_with_the_machine(self):
+        # Required. A Worker with no operator address cannot be approved on
+        # chain, so it would be scheduled work it could never accept.
+        self.assertEqual(self.sent["operatorAddress"], A_WALLET.address)
+
+    def test_the_signing_key_itself_is_never_registered(self):
+        raw = json.dumps(self.sent)
+
+        for forbidden in ("privateKey", "private_key", "not-a-real-key",
+                          "mnemonic", "seed"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, raw)
 
     def test_no_user_id_is_ever_sent(self):
         # The owner is decided by the Backend from the access token. A client
         # that names its own owner can name somebody else's.
-        self.assertNotIn("userId", self.sent)
+        self.assertNotIn("userId", json.dumps(self.sent))
 
     def test_the_gpu_is_named_on_screen_before_anybody_signs_in(self):
         self.assertIn("RTX 4070", self.output)

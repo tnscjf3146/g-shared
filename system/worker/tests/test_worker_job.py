@@ -13,17 +13,23 @@ from __future__ import annotations
 import json
 import unittest
 
+from gshared_worker.job_rejection import RejectCode
 from gshared_worker.worker_job import (
     JOB_ACCEPTED,
+    SlotState,
     AssignedJob,
     JobAssignmentError,
     JobSlot,
     OfferOutcome,
     job_accepted_message,
+    job_rejected_message,
     read_assignment,
 )
 
 TOKEN = "gsh_wk_a-secret-nobody-should-see"
+
+#: A public signing address. Not a key.
+OPERATOR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 
 
 def payload(**changes):
@@ -36,6 +42,13 @@ def payload(**changes):
         "trainingConfig": {
             "epochs": 3, "batchSize": 8, "learningRate": 0.0002, "maxLength": 1024,
         },
+        # The on-chain half. Required since the escrow contract was finalised:
+        # a Worker cannot accept a job whose terms it has no way to check.
+        "escrowJobId": "17",
+        "externalRef": "0x" + "ab" * 32,
+        "price": "9000000000000000000",
+        "clientWallet": "0x1111111111111111111111111111111111111111",
+        "providerWallet": "0x2222222222222222222222222222222222222222",
     }
     values.update(changes)
     return values
@@ -225,16 +238,54 @@ class TestTheOneSlot(unittest.TestCase):
         self.assertFalse(slot.is_idle)
         self.assertEqual(slot.held.job_id, "123")
 
-    def test_the_same_job_again_is_not_a_new_job(self):
+    def test_taking_it_is_a_reservation_not_an_acceptance(self):
+        # Between the offer and the chain saying yes the slot is neither free
+        # nor settled.
+        slot = JobSlot()
+        slot.offer(self.job())
+
+        self.assertIs(slot.state, SlotState.ACCEPTING)
+        self.assertTrue(slot.is_accepting)
+
+    def test_the_same_job_again_while_still_deciding(self):
         slot = JobSlot()
         slot.offer(self.job("123"))
+
+        self.assertIs(slot.offer(self.job("123")), OfferOutcome.STILL_ACCEPTING)
+        self.assertEqual(slot.held.job_id, "123")
+
+    def test_confirming_settles_it(self):
+        slot = JobSlot()
+        slot.offer(self.job())
+        slot.confirm()
+
+        self.assertIs(slot.state, SlotState.ASSIGNED)
+        self.assertFalse(slot.is_accepting)
+
+    def test_the_same_job_again_after_it_settled(self):
+        slot = JobSlot()
+        slot.offer(self.job("123"))
+        slot.confirm()
 
         self.assertIs(slot.offer(self.job("123")), OfferOutcome.ALREADY_HELD)
         self.assertEqual(slot.held.job_id, "123")
 
+    def test_confirming_an_empty_slot_does_nothing(self):
+        slot = JobSlot()
+        slot.confirm()
+
+        self.assertTrue(slot.is_idle)
+
+    def test_a_different_job_is_refused_while_one_is_being_decided(self):
+        slot = JobSlot()
+        slot.offer(self.job("123"))
+
+        self.assertIs(slot.offer(self.job("456")), OfferOutcome.BUSY)
+
     def test_a_different_job_is_refused_while_one_is_held(self):
         slot = JobSlot()
         slot.offer(self.job("123"))
+        slot.confirm()
 
         self.assertIs(slot.offer(self.job("456")), OfferOutcome.BUSY)
 
@@ -261,40 +312,111 @@ class TestTheOneSlot(unittest.TestCase):
 
 
 class TestTheAcceptedMessage(unittest.TestCase):
+    """The reply, which is what moves a Job to RUNNING on the Backend."""
+
+    def accepted(self, job_id="123", stamp="t", **changes):
+        values = {"escrow_job_id": 17, "operator_address": OPERATOR,
+                  "transaction_hash": "0x" + "cd" * 32}
+        values.update(changes)
+        return job_accepted_message(job_id, stamp, **values)
+
     def test_it_is_a_job_accepted(self):
-        self.assertEqual(job_accepted_message("123", "t")["type"], JOB_ACCEPTED)
+        self.assertEqual(self.accepted()["type"], JOB_ACCEPTED)
 
     def test_the_job_id_is_in_the_envelope(self):
         # parseJobId reads msg.jobId(), not the payload.
-        self.assertEqual(job_accepted_message("123", "t")["jobId"], "123")
-
-    def test_the_payload_is_empty(self):
-        # handleJobAccepted reads nothing out of it.
-        self.assertEqual(job_accepted_message("123", "t")["payload"], {})
+        self.assertEqual(self.accepted()["jobId"], "123")
 
     def test_the_envelope_is_the_agreed_four_fields(self):
-        self.assertEqual(
-            set(job_accepted_message("123", "t")),
-            {"type", "jobId", "timestamp", "payload"})
+        self.assertEqual(set(self.accepted()),
+                         {"type", "jobId", "timestamp", "payload"})
 
     def test_the_timestamp_is_carried_through(self):
         stamp = "2026-09-10T14:00:01+09:00"
 
-        self.assertEqual(job_accepted_message("123", stamp)["timestamp"], stamp)
+        self.assertEqual(self.accepted(stamp=stamp)["timestamp"], stamp)
 
     def test_the_job_id_goes_back_exactly_as_it_arrived(self):
         # Long.parseLong reads it. A reformatted number would not parse the same.
         job = read_assignment(assignment("9007199254740993"))
 
-        self.assertEqual(
-            job_accepted_message(job.job_id, "t")["jobId"], "9007199254740993")
+        self.assertEqual(self.accepted(job.job_id)["jobId"], "9007199254740993")
+
+    def test_the_payload_names_the_on_chain_job(self):
+        # An earlier build sent {}. The Backend can now check the claim
+        # against the chain instead of trusting it, which matters because
+        # this message is what starts the Job.
+        self.assertEqual(self.accepted()["payload"]["escrowJobId"], "17")
+
+    def test_the_escrow_job_id_is_a_string(self):
+        # uint256. It does not survive a JavaScript number, and the Backend
+        # stores it in a column that would overflow.
+        self.assertIsInstance(self.accepted()["payload"]["escrowJobId"], str)
+
+    def test_the_payload_names_the_key_that_signed(self):
+        self.assertEqual(self.accepted()["payload"]["operatorAddress"], OPERATOR)
+
+    def test_the_payload_carries_the_transaction(self):
+        self.assertTrue(self.accepted()["payload"]["txHash"].startswith("0x"))
+
+    def test_a_job_that_needed_no_transaction_omits_the_hash(self):
+        # Already ours on chain. There is no transaction to point at, and a
+        # null would decode to something that looks like an answer.
+        payload = self.accepted(transaction_hash=None)["payload"]
+
+        self.assertNotIn("txHash", payload)
+        self.assertEqual(payload["escrowJobId"], "17")
 
     def test_it_carries_no_credential(self):
-        raw = json.dumps(job_accepted_message("123", "t"))
+        raw = json.dumps(self.accepted())
 
         for forbidden in (TOKEN, "workerToken", "accessToken", "refreshToken",
-                          "password", "Authorization", "workerId"):
+                          "password", "Authorization", "workerId",
+                          "privateKey", "private_key"):
             self.assertNotIn(forbidden, raw)
+
+    def test_the_operator_address_is_not_a_credential(self):
+        # It is public and it is the thing being asserted. Worth saying once:
+        # this is an address, never the key behind it.
+        raw = json.dumps(self.accepted())
+
+        self.assertIn(OPERATOR, raw)
+        self.assertNotIn("0x" + "11" * 32, raw)   # a key-shaped value
+
+
+class TestTheRejectedMessage(unittest.TestCase):
+    """Saying no. Silence costs the client their deposit for the full timeout."""
+
+    def test_it_is_a_job_rejected(self):
+        message = job_rejected_message("123", "t", code="PRICE_MISMATCH",
+                                       message="funded for a different amount")
+
+        self.assertEqual(message["type"], "JOB_REJECTED")
+
+    def test_the_job_id_is_in_the_envelope(self):
+        message = job_rejected_message("123", "t", code="PRICE_MISMATCH",
+                                       message="x")
+
+        self.assertEqual(message["jobId"], "123")
+
+    def test_it_carries_a_code_a_program_can_read(self):
+        message = job_rejected_message("123", "t", code="OPERATOR_NOT_APPROVED",
+                                       message="x")
+
+        self.assertEqual(message["payload"]["code"], "OPERATOR_NOT_APPROVED")
+
+    def test_it_carries_a_message_a_person_can_read(self):
+        message = job_rejected_message("123", "t", code="PRICE_MISMATCH",
+                                       message="funded for 1 wei, not 9")
+
+        self.assertIn("funded for", message["payload"]["message"])
+
+    def test_every_reject_code_can_be_sent(self):
+        for code in RejectCode:
+            with self.subTest(code=code):
+                message = job_rejected_message(
+                    "123", "t", code=code.value, message="x")
+                self.assertEqual(message["payload"]["code"], code.value)
 
 
 class TestWhatThisBuildDoesNotDo(unittest.TestCase):
@@ -329,9 +451,27 @@ class TestWhatThisBuildDoesNotDo(unittest.TestCase):
             self.assertNotIn(absent, self.source().lower())
 
     def test_the_later_messages_are_not_here(self):
-        for absent in ("JOB_PROGRESS", "JOB_RESULT", "JOB_FAILED", "JOB_CANCEL",
+        # JOB_CANCEL and JOB_CANCELLED are here now: the escrow cleanup path
+        # needs them to give a refused job back on chain. The rest belong to
+        # stages that have not been written.
+        for absent in ("JOB_PROGRESS", "JOB_RESULT", "JOB_FAILED",
                        "progressPercent", "resultHash"):
-            self.assertNotIn(absent, self.source())
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, self.source())
+
+    def test_cancellation_is_read_but_nothing_is_executed_for_it(self):
+        # This module turns a JOB_CANCEL into a value. Deciding what to do
+        # about it -- and the abortJob that follows -- lives elsewhere.
+        source = self.source()
+
+        self.assertIn("read_cancellation", source)
+        # `abort_tx_hash` is a field of the outgoing message and `escrow_job_id`
+        # is a field of EscrowTerms -- both belong here. What must be absent is
+        # anything that *reaches a chain*.
+        for absent in ("abort_escrow_job", "web3", "ReadsEscrow", "send_abort",
+                       "Web3Escrow"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, source)
 
     def test_nothing_is_written_to_disk(self):
         # An assignment that outlived the process would have this Worker come

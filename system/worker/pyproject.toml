@@ -23,6 +23,15 @@ dependencies = [
     # thread-and-blocking-call program it already is rather than growing an
     # event loop for one connection. 13.0 is where that client arrived.
     "websockets>=13.0",
+    # Signing escrow transactions. Brings eth-account with it, which is what
+    # actually makes and uses the key -- listing that separately would pin a
+    # second version of the same dependency tree.
+    #
+    # Imported inside gshared_worker.escrow.Web3Escrow and
+    # gshared_worker.worker_wallet.EthAccounts, so the Worker starts and every
+    # test runs without it. Nothing on chain is reachable yet in any case: the
+    # escrow contract is not deployed on 31221.
+    "web3>=7.0",
 ]
 
 [project.scripts]

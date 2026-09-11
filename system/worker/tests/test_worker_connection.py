@@ -15,6 +15,7 @@ import unittest
 from gshared_worker.config import WorkerSettings
 from gshared_worker.exit_codes import WorkerExitCode
 from gshared_worker.worker_credentials import WorkerCredentials
+from gshared_worker.escrow import AcceptOutcome, AcceptResult
 from gshared_worker.worker_connection import (
     BACKOFF_MAX_SECONDS,
     HEARTBEAT_ACK_TIMEOUT_SECONDS,
@@ -24,11 +25,13 @@ from gshared_worker.worker_connection import (
     InterruptibleStop,
     backoff_delays,
     _dispatch_to,
+    answer_decisions,
     connect_to_backend,
     heartbeat_message,
     keep_alive,
     stay_connected,
 )
+from gshared_worker.job_acceptance import JobAcceptance
 from gshared_worker.worker_job import JobSlot
 from gshared_worker.worker_socket import (
     ConnectionWentAway,
@@ -36,6 +39,13 @@ from gshared_worker.worker_socket import (
     RegisteredSocket,
     TransportUnavailable,
 )
+
+#: This machine's on-chain signing address in these tests. Public, not a key.
+OPERATOR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
+#: A decision stub. These tests are about wiring, not about chains.
+ACCEPTED_STUB = AcceptResult(AcceptOutcome.ACCEPTED, "stubbed", "0xtx")
+
 
 TOKEN = "gsh_wk_a-secret-nobody-should-see"
 CREDENTIALS = WorkerCredentials("worker-001", TOKEN)
@@ -228,6 +238,14 @@ class FakeBackend:
     @property
     def accepteds(self) -> list[dict]:
         return self._of_type("JOB_ACCEPTED")
+
+    @property
+    def rejecteds(self) -> list[dict]:
+        return self._of_type("JOB_REJECTED")
+
+    @property
+    def cancelleds(self) -> list[dict]:
+        return self._of_type("JOB_CANCELLED")
 
 
 #: Kept as the old name so the reconnect tests below read unchanged.
@@ -469,26 +487,45 @@ class TestAJobArrivingOnTheConnection(unittest.TestCase):
             "trainingConfig": {
                 "epochs": 3, "batchSize": 8,
                 "learningRate": 0.0002, "maxLength": 1024},
+            "escrowJobId": "17",
+            "externalRef": "0x" + "ab" * 32,
+            "price": "9000000000000000000",
+            "clientWallet": "0x1111111111111111111111111111111111111111",
+            "providerWallet": "0x2222222222222222222222222222222222222222",
         }
         payload.update(changes)
         return json.dumps({
             "type": "JOB_ASSIGN", "jobId": job_id,
             "timestamp": "2026-09-10T14:00:00+09:00", "payload": payload})
 
-    def run_with(self, *scheduled, slot=None, **kwargs):
+    def run_with(self, *scheduled, slot=None, decide=None, **kwargs):
+        """One keep_alive run with a background decider wired in.
+
+        ``decide`` defaults to a stub that accepts at once. That is **not**
+        what the Worker does any more -- the real default refuses, because a
+        Worker with no escrow configured cannot check any of the on-chain terms
+        it was sent. Escrow behaviour is exercised in test_escrow.py; here the
+        question is the wiring, so the decision is stubbed out.
+        """
+        decide = decide if decide is not None else (lambda job: ACCEPTED_STUB)
         stop = Stop()
         clock = Clock()
         backend = FakeBackend(*scheduled, clock=clock, stop=stop, **kwargs)
         socket = RegisteredSocket(backend, "worker-001")
         slot = slot if slot is not None else JobSlot()
+        acceptance = JobAcceptance(decide, operator_address=OPERATOR)
         lines = []
-        outcome, _ = keep_alive(
-            socket, stop,
-            interval=HEARTBEAT_INTERVAL_SECONDS,
-            ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
-            monotonic=clock,
-            on_message=_dispatch_to(
-                socket, slot, lambda *p: lines.append(" ".join(str(x) for x in p))))
+        say = lambda *p: lines.append(" ".join(str(x) for x in p))
+        try:
+            outcome, _ = keep_alive(
+                socket, stop,
+                interval=HEARTBEAT_INTERVAL_SECONDS,
+                ack_timeout=HEARTBEAT_ACK_TIMEOUT_SECONDS,
+                monotonic=clock,
+                on_message=_dispatch_to(socket, slot, say, acceptance),
+                each_turn=lambda: answer_decisions(acceptance, socket, slot, say))
+        finally:
+            acceptance.close()
         return outcome, backend, slot, lines
 
     def test_a_job_arriving_long_before_the_next_beat_is_accepted_then(self):
@@ -654,7 +691,13 @@ class TestHoldingOneJobAcrossConnections(unittest.TestCase):
         second = FakeBackend(REGISTER_ACK, At(1, self.assign("123")))
 
         supervisor = Supervisor(first, second)
-        supervisor.run(slot=slot)
+        # stay_connected would otherwise build the real decider, which refuses
+        # everything when no escrow is configured. The question here is whether
+        # the slot survives a reconnect, not what a chain said.
+        acceptance = JobAcceptance(lambda job: ACCEPTED_STUB,
+                                   operator_address=OPERATOR)
+        self.addCleanup(acceptance.close)
+        supervisor.run(slot=slot, acceptance=acceptance)
 
         self.assertEqual(slot.held.job_id, "123")
         self.assertEqual(len(second.registers), 1)
@@ -1048,10 +1091,19 @@ class TestWhatThisBuildDoesNotDo(unittest.TestCase):
 
         return code_only(worker_connection)
 
-    def test_no_job_is_handled(self):
-        for absent in ("JOB_ACCEPTED", "JOB_PROGRESS", "JOB_RESULT", "JOB_FAILED",
-                       "JOB_CANCEL"):
-            self.assertNotIn(absent, self.source())
+    def test_no_runtime_work_is_handled(self):
+        """The dispatch table has two entries and neither runs anything.
+
+        JOB_ASSIGN reserves and hands off to the chain; JOB_CANCEL gives a job
+        back on the chain. Neither starts a container, and the messages that
+        would report one are not here.
+        """
+        source = self.source()
+
+        for absent in ("JOB_PROGRESS", "JOB_RESULT", "JOB_FAILED",
+                       "subprocess", "Popen", "docker run"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, source)
 
     def test_job_assign_is_only_named_as_something_the_next_build_handles(self):
         # It arrives at the on_message seam. Nothing acts on it here.

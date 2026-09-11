@@ -23,23 +23,28 @@ from gshared_worker.worker_credentials import WorkerCredentials
 from gshared_worker.worker_registry import (
     AUTHENTICATE_PATH,
     REGISTER_PATH,
-    GpuUpdate,
+    BenchmarkUpdate,
     HttpWorkerRegistry,
     WorkerRegistrationRequest,
-    gpu_path,
+    benchmark_path,
+    operator_path,
 )
 
 BASE = "http://localhost:8080"
 
 STORED = WorkerCredentials("worker-001", "the-worker-token")
 
+OPERATOR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+
 OFFERED = WorkerRegistrationRequest(
-    device_name="DESKTOP-MR7IIH9",
+    operator_address=OPERATOR,
+    client_version="0.1.0",
     os_version="Windows 10.0.26200",
+    wsl_available=True,
     gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU",
     vram_mb=8188,
-    driver_version="596.36",
     benchmark_tokens_per_sec=41.5,
+    benchmark_version="gshared-benchmark-v1",
 )
 
 
@@ -90,18 +95,19 @@ class RegisteringThisMachineTest(unittest.TestCase):
         self.assertEqual(sent["url"], BASE + REGISTER_PATH)
         self.assertEqual(sent["method"], "POST")
 
-    def test_the_body_is_exactly_the_agreed_six_fields(self):
+    def test_the_body_is_exactly_the_agreed_shape(self):
         api, sent = registry(200, {"workerId": "w-1", "workerToken": "t-1"})
 
         api.register("user-jwt", OFFERED)
 
         self.assertEqual(sent["body"], {
-            "deviceName": "DESKTOP-MR7IIH9",
-            "osVersion": "Windows 10.0.26200",
-            "gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU",
-            "vramMb": 8188,
-            "driverVersion": "596.36",
-            "benchmarkTokensPerSec": 41.5,
+            "operatorAddress": OPERATOR,
+            "clientVersion": "0.1.0",
+            "system": {"os": "Windows 10.0.26200", "wslAvailable": True},
+            "gpu": {"gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU",
+                    "vramMb": 8188},
+            "benchmark": {"benchmarkTokensPerSec": 41.5,
+                          "benchmarkVersion": "gshared-benchmark-v1"},
         })
 
     def test_it_is_authorised_with_the_users_access_token(self):
@@ -159,15 +165,22 @@ class AuthenticatingAnExistingWorkerTest(unittest.TestCase):
 
         self.assertEqual(sent["url"], BASE + AUTHENTICATE_PATH)
         self.assertEqual(sent["method"], "POST")
-        self.assertEqual(sent["body"], {"workerId": "worker-001"})
+        self.assertEqual(sent["body"], {"workerId": "worker-001",
+                                        "workerToken": "the-worker-token"})
 
-    def test_it_is_authorised_with_the_worker_token(self):
+    def test_the_token_travels_in_the_body_and_not_a_header(self):
+        """The one endpoint where the Worker token is not an Authorization header.
+
+        Here the token is the thing being checked rather than the thing
+        authorising the request, so the Backend reads it from the body. Sending
+        it as a header instead answers a different question and fails.
+        """
         api, sent = registry(200, {"workerId": "worker-001"})
 
         api.verify(STORED)
 
-        self.assertEqual(
-            sent["headers"].get("Authorization"), "Bearer the-worker-token")
+        self.assertEqual(sent["body"]["workerToken"], "the-worker-token")
+        self.assertIsNone(sent["headers"].get("Authorization"))
 
     def test_200_is_registered(self):
         # No REGISTERED string is expected in the body. The status is the answer.
@@ -287,38 +300,57 @@ class WhenNothingAnswersTest(unittest.TestCase):
         self.assertIsNone(answered.credentials)
 
 
-class UpdatingTheGpuTest(unittest.TestCase):
-    UPDATE = GpuUpdate(
+class UpdatingTheBenchmarkTest(unittest.TestCase):
+    """``PUT .../benchmark``. The old ``PUT .../gpu`` is no longer used."""
+
+    UPDATE = BenchmarkUpdate(
         gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU",
         vram_mb=8188,
-        driver_version="596.36",
         benchmark_tokens_per_sec=52.25,
+        benchmark_version="gshared-benchmark-v1",
     )
 
-    def test_it_puts_to_the_workers_own_path(self):
+    def test_it_puts_to_the_benchmark_path(self):
         api, sent = registry(204)
 
-        api.update_gpu(STORED, self.UPDATE)
+        api.update_benchmark(STORED, self.UPDATE)
 
-        self.assertEqual(sent["url"], BASE + "/api/workers/worker-001/gpu")
+        self.assertEqual(sent["url"], BASE + "/api/workers/worker-001/benchmark")
         self.assertEqual(sent["method"], "PUT")
 
     def test_the_body_is_the_agreed_four_fields(self):
         api, sent = registry(204)
 
-        api.update_gpu(STORED, self.UPDATE)
+        api.update_benchmark(STORED, self.UPDATE)
 
         self.assertEqual(sent["body"], {
             "gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU",
             "vramMb": 8188,
-            "driverVersion": "596.36",
             "benchmarkTokensPerSec": 52.25,
+            "benchmarkVersion": "gshared-benchmark-v1",
         })
+
+    def test_the_driver_version_is_not_part_of_this_contract(self):
+        # It is not an input to anything the Scheduler does, and the Backend
+        # does not keep it.
+        api, sent = registry(204)
+
+        api.update_benchmark(STORED, self.UPDATE)
+
+        self.assertNotIn("driverVersion", sent["body"])
+
+    def test_the_benchmark_version_travels_with_the_number(self):
+        # Two benchmark versions produce numbers that are not comparable.
+        api, sent = registry(204)
+
+        api.update_benchmark(STORED, self.UPDATE)
+
+        self.assertIn("benchmarkVersion", sent["body"])
 
     def test_it_is_authorised_with_the_worker_token(self):
         api, sent = registry(204)
 
-        api.update_gpu(STORED, self.UPDATE)
+        api.update_benchmark(STORED, self.UPDATE)
 
         self.assertEqual(
             sent["headers"].get("Authorization"), "Bearer the-worker-token")
@@ -326,42 +358,125 @@ class UpdatingTheGpuTest(unittest.TestCase):
     def test_204_with_no_body_is_accepted(self):
         api, _ = registry(204)
 
-        self.assertIs(
-            api.update_gpu(STORED, self.UPDATE).state, WorkerAuthState.REGISTERED)
+        self.assertIs(api.update_benchmark(STORED, self.UPDATE).state,
+                      WorkerAuthState.REGISTERED)
 
-    def test_a_revoked_worker_cannot_update_its_gpu(self):
+    def test_a_revoked_worker_cannot_update_its_benchmark(self):
         api, _ = registry(403, {"code": "WORKER_REVOKED", "message": "removed"})
 
-        self.assertIs(
-            api.update_gpu(STORED, self.UPDATE).state, WorkerAuthState.REVOKED)
+        self.assertIs(api.update_benchmark(STORED, self.UPDATE).state,
+                      WorkerAuthState.REVOKED)
 
     def test_a_worker_id_is_escaped_into_the_path(self):
-        self.assertEqual(gpu_path("a/b c"), "/api/workers/a%2Fb%20c/gpu")
+        self.assertEqual(benchmark_path("a/b c"),
+                         "/api/workers/a%2Fb%20c/benchmark")
+
+
+class RegisteringAnOperatorAddressTest(unittest.TestCase):
+    """For installations that predate operator keys."""
+
+    def test_it_puts_to_the_operator_path(self):
+        api, sent = registry(204)
+
+        api.register_operator(STORED, OPERATOR)
+
+        self.assertEqual(sent["url"], BASE + "/api/workers/worker-001/operator")
+        self.assertEqual(sent["method"], "PUT")
+
+    def test_the_body_is_the_address_alone(self):
+        api, sent = registry(204)
+
+        api.register_operator(STORED, OPERATOR)
+
+        self.assertEqual(sent["body"], {"operatorAddress": OPERATOR})
+
+    def test_no_key_is_ever_sent(self):
+        # The address is public. The key behind it never leaves this PC.
+        api, sent = registry(204)
+
+        api.register_operator(STORED, OPERATOR)
+
+        raw = json.dumps(sent["body"])
+        for forbidden in ("privateKey", "private_key", "privateKeyProtected",
+                          "mnemonic", "seed"):
+            self.assertNotIn(forbidden, raw)
+
+    def test_it_is_authorised_with_the_worker_token(self):
+        api, sent = registry(204)
+
+        api.register_operator(STORED, OPERATOR)
+
+        self.assertEqual(
+            sent["headers"].get("Authorization"), "Bearer the-worker-token")
+
+    def test_a_worker_id_is_escaped_into_the_path(self):
+        self.assertEqual(operator_path("a/b c"), "/api/workers/a%2Fb%20c/operator")
 
 
 class TheFieldNameTest(unittest.TestCase):
     """``benchmarkScore`` is not part of this API. ``benchmarkTokensPerSec`` is."""
 
     def test_registration_uses_benchmark_tokens_per_sec(self):
-        self.assertIn("benchmarkTokensPerSec", OFFERED.as_payload())
+        self.assertIn("benchmarkTokensPerSec", OFFERED.as_payload()["benchmark"])
 
     def test_registration_never_uses_benchmark_score(self):
         self.assertNotIn("benchmarkScore", json.dumps(OFFERED.as_payload()))
 
-    def test_the_gpu_update_never_uses_benchmark_score(self):
-        payload = OFFERED.gpu_update().as_payload()
+    def test_the_benchmark_update_never_uses_benchmark_score(self):
+        payload = OFFERED.benchmark_update().as_payload()
 
         self.assertIn("benchmarkTokensPerSec", payload)
         self.assertNotIn("benchmarkScore", json.dumps(payload))
 
-    def test_the_gpu_update_carries_the_same_facts_as_the_registration(self):
-        update = OFFERED.gpu_update()
+    def test_the_benchmark_update_carries_the_same_facts(self):
+        update = OFFERED.benchmark_update()
 
         self.assertEqual(update.gpu_model, OFFERED.gpu_model)
         self.assertEqual(update.vram_mb, OFFERED.vram_mb)
-        self.assertEqual(update.driver_version, OFFERED.driver_version)
+        self.assertEqual(update.benchmark_version, OFFERED.benchmark_version)
         self.assertEqual(
             update.benchmark_tokens_per_sec, OFFERED.benchmark_tokens_per_sec)
+
+
+class TheRegistrationShapeTest(unittest.TestCase):
+    """The grouped payload the Backend settled on."""
+
+    def test_the_operator_address_is_at_the_top(self):
+        self.assertEqual(OFFERED.as_payload()["operatorAddress"], OPERATOR)
+
+    def test_the_client_version_is_sent(self):
+        self.assertEqual(OFFERED.as_payload()["clientVersion"], "0.1.0")
+
+    def test_the_system_group(self):
+        self.assertEqual(OFFERED.as_payload()["system"],
+                         {"os": "Windows 10.0.26200", "wslAvailable": True})
+
+    def test_the_gpu_group(self):
+        self.assertEqual(
+            OFFERED.as_payload()["gpu"],
+            {"gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU", "vramMb": 8188})
+
+    def test_the_benchmark_group(self):
+        self.assertEqual(
+            OFFERED.as_payload()["benchmark"],
+            {"benchmarkTokensPerSec": 41.5,
+             "benchmarkVersion": "gshared-benchmark-v1"})
+
+    def test_the_legacy_flat_fields_are_gone(self):
+        # deviceName and driverVersion are not in the Backend contract.
+        raw = json.dumps(OFFERED.as_payload())
+
+        for absent in ("deviceName", "driverVersion", "osVersion"):
+            with self.subTest(absent=absent):
+                self.assertNotIn(absent, raw)
+
+    def test_no_key_is_ever_in_a_registration(self):
+        raw = json.dumps(OFFERED.as_payload())
+
+        for forbidden in ("privateKey", "private_key", "mnemonic", "seed"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, raw)
+
 
 
 class NoTokenIsEverLoggedTest(unittest.TestCase):

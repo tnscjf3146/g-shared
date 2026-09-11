@@ -26,12 +26,14 @@ STORED = WorkerCredentials("worker-001", "the-token")
 #: What the machine is offering. This module decides states, not contracts, so
 #: it passes the request through untouched -- which is what is asserted below.
 OFFERED = WorkerRegistrationRequest(
-    device_name="DESKTOP-TEST",
-    os_version="Windows 10.0.26200",
+    operator_address="0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    client_version="0.1.0",
+    os_version="Windows 11",
+    wsl_available=True,
     gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU",
     vram_mb=8188,
-    driver_version="596.36",
-    benchmark_tokens_per_sec=41.5,
+    benchmark_tokens_per_sec=29048.535,
+    benchmark_version="gshared-benchmark-v1",
 )
 
 
