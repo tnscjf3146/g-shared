@@ -4,3 +4,6 @@
 
 # 환경변수 (비밀번호 등)
 .env
+
+# 오브젝트 스토리지 볼륨 (docker-compose backend → /app/storage)
+/storage/
