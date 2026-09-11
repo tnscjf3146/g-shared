@@ -239,10 +239,10 @@ class TestTheSocketHasOneOwner(unittest.TestCase):
         self.assertNotIn("threading.Thread", source)
 
     def test_the_pipeline_sends_no_terminal_message(self):
-        """JOB_RESULT and JOB_FAILED belong to task 9.
+        """The runtime returns a value; something else decides what to say.
 
-        This stage returns a value so task 9 has something to translate,
-        rather than a function that has already spoken.
+        Task 9 reads that value, settles the Job and hands an answer to the
+        connection loop. None of it happens in here.
         """
         from gshared_worker import job_runtime, runtime_pipeline
 
@@ -253,9 +253,26 @@ class TestTheSocketHasOneOwner(unittest.TestCase):
                 with self.subTest(module=module.__name__, absent=absent):
                     self.assertNotIn(absent, source)
 
+    def test_the_settlement_sends_nothing_either(self):
+        """Storage and the chain are its business. The socket is not.
+
+        This is the same rule one stage later: the settlement blocks for as
+        long as an upload and a transaction take, and a module that could
+        send would be a second writer on a connection that has one.
+        """
+        from gshared_worker import job_settlement, result_upload
+
+        for module in (job_settlement, result_upload):
+            source = code_only(module)
+            for absent in ("RegisteredSocket", "websocket", "socket.send",
+                           "JOB_RESULT", "JOB_FAILED", "job_result_message",
+                           "job_failed_message", "heartbeat"):
+                with self.subTest(module=module.__name__, absent=absent):
+                    self.assertNotIn(absent, source)
+
 
 class TestWhatTheSupplierIsTold(unittest.TestCase):
-    def settle(self, outcome):
+    def settle(self, outcome, acceptance=None):
         from gshared_worker.job_acceptance import Decision
         from gshared_worker.worker_connection import _settle_runtime
 
@@ -266,7 +283,8 @@ class TestWhatTheSupplierIsTold(unittest.TestCase):
         _settle_runtime(
             Decision(a_job(), AcceptResult(AcceptOutcome.ACCEPTED, "x"),
                      Work.RUN, outcome),
-            slot, lambda *p: lines.append(" ".join(str(x) for x in p)))
+            slot, lambda *p: lines.append(" ".join(str(x) for x in p)),
+            acceptance)
         return slot, lines
 
     def test_a_finished_run_is_reported(self):
@@ -280,23 +298,45 @@ class TestWhatTheSupplierIsTold(unittest.TestCase):
         self.assertTrue(any("CUDA_OOM" in line for line in lines))
 
     def test_the_job_is_kept_either_way(self):
-        """Task 9 uploads the output.
+        """The container stopping is not the end of the Job.
 
-        Giving the slot back now would let a second Job overwrite the
-        workspace before anybody had read it.
+        The result still has to be stored and the escrow settled, and the
+        slot is this Worker's claim on the Job while that happens. Giving it
+        back now would let a second Job overwrite the workspace before
+        anybody had read it.
         """
         for outcome in (FINISHED, FAILED):
             with self.subTest(outcome=outcome.state):
                 slot, _ = self.settle(outcome)
                 self.assertFalse(slot.is_idle)
 
-    def test_the_supplier_is_told_the_next_stage_is_missing(self):
-        # Silence here would look exactly like a successful upload.
+    def test_the_supplier_is_told_when_settlement_is_not_configured(self):
+        # Silence here would look exactly like a result that had been sent.
         for outcome in (FINISHED, FAILED):
             with self.subTest(outcome=outcome.state):
                 _, lines = self.settle(outcome)
                 self.assertTrue(
-                    any("not built yet" in line for line in lines))
+                    any("not running on this machine" in line
+                        for line in lines), lines)
+
+    def test_a_configured_settlement_is_started_instead(self):
+        started: list = []
+
+        class Acceptance:
+            def start_settlement(self, job, outcome):
+                started.append((job.job_id, outcome))
+                return True
+
+        for outcome in (FINISHED, FAILED):
+            with self.subTest(outcome=outcome.state):
+                started.clear()
+                slot, lines = self.settle(outcome, Acceptance())
+
+                self.assertEqual(len(started), 1)
+                self.assertFalse(slot.is_idle, "the slot was given up early")
+                self.assertFalse(
+                    any("not running on this machine" in line
+                        for line in lines), lines)
 
 
 if __name__ == "__main__":

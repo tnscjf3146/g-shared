@@ -49,6 +49,11 @@ class RejectCode(str, Enum):
     ESCROW_NOT_CONFIGURED = "ESCROW_NOT_CONFIGURED"
 
     # -- the chain, rather than the job -------------------------------
+    #: The chain already holds a result for this job, and it is not ours.
+    #: Never resolved by sending another transaction -- ``submitResult``
+    #: cannot overwrite, and a second attempt would only revert.
+    RESULT_HASH_CONFLICT = "RESULT_HASH_CONFLICT"
+
     BLOCKCHAIN_RPC_FAILED = "BLOCKCHAIN_RPC_FAILED"
     TRANSACTION_FAILED = "TRANSACTION_FAILED"
 

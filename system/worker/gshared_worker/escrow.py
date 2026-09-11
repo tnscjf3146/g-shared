@@ -163,6 +163,10 @@ class ReadsEscrow(Protocol):
     def send_accept(self, escrow_job_id: int) -> str:
         """Sign and broadcast ``acceptJob``. Returns the transaction hash."""
 
+    def send_submit_result(self, escrow_job_id: int, result_hash: str) -> str:
+        """``submitResult(jobId, bytes32)``. Requires ``msg.sender ==
+        job.operator``, like the other two."""
+
     def send_abort(self, escrow_job_id: int) -> str:
         """Sign and broadcast ``abortJob``. Returns the transaction hash."""
 
@@ -502,6 +506,96 @@ def abort_escrow_job(
         wanted=JobState.CANCELLED, what="abort")
 
 
+def submit_escrow_result(
+    chain: ReadsEscrow,
+    settings: EscrowSettings,
+    *,
+    escrow_job_id: int,
+    operator_address: str,
+    result_hash: str,
+    receipt_timeout: float = RECEIPT_TIMEOUT_SECONDS,
+) -> AcceptResult:
+    """Record the result on chain and release the client's deposit.
+
+    **Called only after the Backend has verified the uploaded object.** The
+    hash written here is the hash of bytes that are already in storage; doing
+    it the other way round would put a number on chain that nothing can be
+    checked against, and the contract has no way to take it back.
+
+    The preconditions are re-read rather than remembered. Between accepting
+    the job and finishing it there were minutes to hours of training, and what
+    was true then is a claim about the past: the state may have moved, and the
+    operator may no longer be us.
+
+    Reaching COMPLETED with this exact hash already -- because an earlier
+    attempt landed after its receipt was lost -- is a **success, with no
+    second transaction**. Reaching COMPLETED with a different hash is not
+    something to resolve by sending another one; it is reported and the job
+    stops here.
+    """
+    wanted_hash = _result_hash(result_hash)
+
+    try:
+        check_chain(chain, settings)
+        job = chain.read_job(escrow_job_id)
+    except JobRefused as refused:
+        return AcceptResult(
+            AcceptOutcome.REFUSED, refused.detail, code=refused.code)
+    except EscrowUnavailable as unavailable:
+        return AcceptResult(
+            AcceptOutcome.UNCERTAIN, str(unavailable),
+            code=RejectCode.BLOCKCHAIN_RPC_FAILED)
+    except Exception as error:
+        return AcceptResult(
+            AcceptOutcome.UNCERTAIN,
+            f"the job could not be read ({type(error).__name__})",
+            code=RejectCode.BLOCKCHAIN_RPC_FAILED)
+
+    if job.state is JobState.COMPLETED:
+        if _same_hex(job.result_hash, wanted_hash):
+            return AcceptResult(
+                AcceptOutcome.ACCEPTED,
+                "the result was already recorded on chain", state=job.state)
+        return AcceptResult(
+            AcceptOutcome.REFUSED,
+            f"escrow job {escrow_job_id} already holds a different result",
+            code=RejectCode.RESULT_HASH_CONFLICT, state=job.state)
+    if job.state is not JobState.ASSIGNED:
+        return AcceptResult(
+            AcceptOutcome.REFUSED,
+            f"escrow job {escrow_job_id} is {job.state.name}, not ASSIGNED",
+            code=RejectCode.INVALID_ESCROW_STATE, state=job.state)
+    if not _same_address(job.operator, operator_address):
+        return AcceptResult(
+            AcceptOutcome.REFUSED,
+            f"escrow job {escrow_job_id} was accepted by another operator and "
+            "cannot be completed by this machine",
+            code=RejectCode.OPERATOR_ADDRESS_MISMATCH, state=job.state)
+
+    return _send_and_confirm(
+        chain, escrow_job_id, operator_address,
+        send=lambda job_id: chain.send_submit_result(job_id, wanted_hash),
+        receipt_timeout=receipt_timeout,
+        wanted=JobState.COMPLETED, what="result",
+        result_hash=wanted_hash)
+
+
+def _result_hash(value: str) -> str:
+    """``0x`` and 64 lowercase hex digits, or a refusal.
+
+    ``bytes32`` is thirty-two bytes and nothing else. A short hash would be
+    left-padded by the encoder into a number that is not the file's digest,
+    and it would be written to a contract that cannot be corrected.
+    """
+    text = str(value or "").strip().lower()
+    if not text.startswith("0x"):
+        text = "0x" + text
+    digits = text[2:]
+    if len(digits) != 64 or any(c not in "0123456789abcdef" for c in digits):
+        raise ValueError("resultHash is not 32 bytes of hex")
+    return text
+
+
 def _send_and_confirm(
     chain: ReadsEscrow,
     escrow_job_id: int,
@@ -511,6 +605,7 @@ def _send_and_confirm(
     receipt_timeout: float,
     wanted: JobState,
     what: str,
+    result_hash: str | None = None,
 ) -> AcceptResult:
     """One transaction, and the chain's own answer about what it did.
 
@@ -529,7 +624,7 @@ def _send_and_confirm(
         return _what_the_chain_says(
             chain, escrow_job_id, operator_address, wanted,
             f"the {what} transaction could not be confirmed "
-            f"({type(error).__name__})")
+            f"({type(error).__name__})", result_hash=result_hash)
 
     _debug.info("escrow: %s sent for job %s, tx %s",
                 what, escrow_job_id, _short(transaction_hash))
@@ -540,7 +635,7 @@ def _send_and_confirm(
         return _what_the_chain_says(
             chain, escrow_job_id, operator_address, wanted,
             f"the receipt could not be read ({type(error).__name__})",
-            transaction_hash)
+            transaction_hash, result_hash=result_hash)
 
     if status == 0:
         # Reverted. The chain has decided; nothing is pending.
@@ -552,12 +647,12 @@ def _send_and_confirm(
         return _what_the_chain_says(
             chain, escrow_job_id, operator_address, wanted,
             f"the {what} transaction has not been confirmed yet",
-            transaction_hash)
+            transaction_hash, result_hash=result_hash)
 
     return _what_the_chain_says(
         chain, escrow_job_id, operator_address, wanted,
         f"the {what} transaction was confirmed but the job did not change",
-        transaction_hash)
+        transaction_hash, result_hash=result_hash)
 
 
 def _what_the_chain_says(
@@ -567,6 +662,7 @@ def _what_the_chain_says(
     wanted: JobState,
     otherwise: str,
     transaction_hash: str | None = None,
+    result_hash: str | None = None,
 ) -> AcceptResult:
     """Read the job back and let it settle the question.
 
@@ -585,6 +681,16 @@ def _what_the_chain_says(
             transaction_hash, code=RejectCode.BLOCKCHAIN_RPC_FAILED)
 
     ours = _same_address(job.operator, operator_address)
+    if (result_hash is not None and job.state is JobState.COMPLETED
+            and not _same_hex(job.result_hash, result_hash)):
+        # It completed, but holding somebody else's number. Never reported as
+        # success: the chain and the storage would then be pointing at two
+        # different files with one Job's name on them.
+        return AcceptResult(
+            AcceptOutcome.REFUSED,
+            f"escrow job {escrow_job_id} holds a different result hash",
+            transaction_hash, code=RejectCode.RESULT_HASH_CONFLICT,
+            state=job.state)
     if job.state is wanted and (ours or wanted is JobState.CANCELLED):
         # A cancelled job clears its operator in some paths, so ownership is
         # not re-asserted for the abort case -- reaching CANCELLED at all is
@@ -712,6 +818,17 @@ class Web3Escrow:
     def send_abort(self, escrow_job_id: int) -> str:
         return self._send(
             self._contract().functions.abortJob(int(escrow_job_id)))
+
+    def send_submit_result(self, escrow_job_id: int, result_hash: str) -> str:
+        """``submitResult``. The hash goes in as bytes, not as a string.
+
+        web3 will accept a ``0x`` string for a ``bytes32`` and encode it, but
+        converting here means the length is wrong *before* the transaction is
+        built rather than inside the encoder.
+        """
+        raw = bytes.fromhex(_result_hash(result_hash)[2:])
+        return self._send(
+            self._contract().functions.submitResult(int(escrow_job_id), raw))
 
     def _send(self, call: Any) -> str:
         """Build, sign and broadcast one transaction.

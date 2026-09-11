@@ -368,3 +368,70 @@ def _positive(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
     return value
+
+
+class TerminalChannel:
+    """The one terminal answer a Job gets, held until it has been sent.
+
+    **The opposite of :class:`ProgressChannel` in the one way that matters.**
+    Progress is a state and the newest reading replaces the last; a terminal
+    message is an event and losing it loses the Job -- the Backend would hold
+    it RUNNING for ever and the supplier would never be paid.
+
+    So this drops nothing. :meth:`take` does not consume; the value stays
+    until :meth:`done` is called, which happens only after the connection loop
+    has actually put it on the wire. A send that failed leaves it here for the
+    next connection.
+
+    It holds one, because a Job has one ending. A second :meth:`put` for the
+    same Job is ignored rather than overwriting -- that is what a duplicated
+    runtime callback or a repeated settlement would look like, and the first
+    answer is the one that was reasoned about.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._pending: Any = None
+        self._job_id: str | None = None
+
+    def put(self, terminal: Any) -> bool:
+        """Hold this answer. False when one is already held for this Job."""
+        with self._lock:
+            if self._pending is not None:
+                if self._job_id == getattr(terminal, "job_id", None):
+                    _debug.info("terminal: %s already has an answer",
+                                self._job_id)
+                    return False
+                # A different Job's answer while one is still unsent. The
+                # first is not discarded: one GPU runs one Job at a time, so
+                # this means the previous answer never reached the Backend.
+                _debug.info("terminal: %s is still unsent; %s is not taken",
+                            self._job_id, getattr(terminal, "job_id", None))
+                return False
+            self._pending = terminal
+            self._job_id = getattr(terminal, "job_id", None)
+            return True
+
+    def take(self) -> Any:
+        """The pending answer, **without** consuming it."""
+        with self._lock:
+            return self._pending
+
+    def done(self, terminal: Any) -> bool:
+        """It went out. Let it go -- but only the one that went out."""
+        with self._lock:
+            if self._pending is not terminal:
+                return False
+            self._pending = None
+            self._job_id = None
+            return True
+
+    @property
+    def job_id(self) -> str | None:
+        with self._lock:
+            return self._job_id
+
+    @property
+    def is_empty(self) -> bool:
+        with self._lock:
+            return self._pending is None
