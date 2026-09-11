@@ -1,6 +1,6 @@
 # GShared Blockchain — G Coin
 
-현재 구현 범위는 G Coin ERC-20 토큰, 단위 테스트, 로컬 및 SSAFY Ignition 배포 도구다. 2026-09-07 SSAFY 체인 배포와 온체인 검증, MetaMask 지갑 간 GSC 전송 확인을 완료했다. Escrow 구현은 다음 단계다.
+현재 구현 범위는 G Coin ERC-20 토큰, GPU 작업 에스크로(`GPUJobEscrow`), 단위·e2e 테스트, 로컬 개발 체인과 공급자·키퍼 참고 구현, 로컬 및 SSAFY Ignition 배포 도구다. 2026-09-07 GCoin 을 SSAFY 체인에 배포하고 온체인 검증과 MetaMask 지갑 간 GSC 전송을 확인했다. 에스크로는 로컬에서 105 passing(Solidity 88, Node.js 17)으로 검증했고 SSAFY 체인에는 아직 배포하지 않았다(생성자 체인 가드). 연동 규격은 `docs/03-에스크로-연동-규격.md` 와 `abi/GPUJobEscrow.json` 이 정본이다.
 
 ## 실제 배포 기록 (2026-09-07)
 
@@ -230,7 +230,10 @@ npm run verify:ssafy
 
 ## 다음 단계
 
-GSC를 `paymentToken`으로 사용하는 Escrow를 구현하고 예치·권한 검사·정산 테스트를 추가한다. Provider 선정 방식은 팀과 확정한 정책을 컨트랙트 권한 검사에 반영한다.
+- 에스크로 SSAFY 체인 배포. 체인 가드 해제 승인 뒤 진행한다 (`S15P21E204-155`)
+- 워커의 operator 키 생성·DPAPI 보관·`acceptJob` 서명. System 담당 (규격 2장)
+- 백엔드의 `jobs`·`workers` 온체인 컬럼과 `JOB_ASSIGN` 온체인 필드 (`S15P21E204-167`, 규격 6·9장)
+- 이의 제기·판정과 공급자 담보는 후속 과제 (`S15P21E204-157`, `-158`)
 
 ## 참고
 

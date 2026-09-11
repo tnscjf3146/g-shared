@@ -47,6 +47,7 @@ async function main() {
   console.log(`작업 1 ~ ${nextJobId - 1n} 검사\n`);
 
   let settled = 0;
+  let failed = 0;
 
   for (let id = 1n; id < nextJobId; id++) {
     const [client, state, deadline] = await escrow.read.jobs([id]);
@@ -64,17 +65,26 @@ async function main() {
       continue;
     }
 
-    const before = await token.read.balanceOf([client as `0x${string}`]);
-    await escrow.write.settleTimeout([id], { account: keeper.account });
-    const after = await token.read.balanceOf([client as `0x${string}`]);
+    // 한 건이 되돌려져도 다음 작업을 계속 본다. 공급자가 같은 순간에 제출하거나
+    // 다른 키퍼가 먼저 정산하면 이 호출은 되돌려지는데, 그건 정상이다.
+    // 되돌림 사유는 남겨 두고 넘어간다. 여기서 멈추면 뒤의 만료 작업이 방치된다.
+    try {
+      const before = await token.read.balanceOf([client as `0x${string}`]);
+      await escrow.write.settleTimeout([id], { account: keeper.account });
+      const after = await token.read.balanceOf([client as `0x${string}`]);
 
-    console.log(
-      `  ${id}  ${STATE_NAME[s]}  정산 완료 — 의뢰자 환불 ${formatUnits(after - before, 18)} GSC`,
-    );
-    settled++;
+      console.log(
+        `  ${id}  ${STATE_NAME[s]}  정산 완료 — 의뢰자 환불 ${formatUnits(after - before, 18)} GSC`,
+      );
+      settled++;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
+      console.log(`  ${id}  ${STATE_NAME[s]}  정산 실패 — ${reason}`);
+      failed++;
+    }
   }
 
-  console.log(`\n${settled}건 정산`);
+  console.log(`\n${settled}건 정산 · ${failed}건 실패`);
   console.log(`키퍼 잔액 ${formatUnits(await token.read.balanceOf([keeper.account.address]), 18)} GSC`);
   console.log(`에스크로  ${formatUnits(await token.read.balanceOf([escrow.address]), 18)} GSC`);
 
