@@ -4,3 +4,7 @@
 
 # 환경변수 (비밀번호 등)
 .env
+
+# Spec Kit 도구 (산출물인 blockchain/specs 는 커밋한다)
+blockchain/.specify/
+blockchain/.claude/
