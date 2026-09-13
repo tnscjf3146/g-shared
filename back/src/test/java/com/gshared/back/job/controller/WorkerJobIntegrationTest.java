@@ -105,7 +105,7 @@ class WorkerJobIntegrationTest {
         otherWorkerToken = workerService.register(provider.getId(),
                 registerRequest("0x" + "d".repeat(40))).workerToken();
 
-        BaseModel baseModel = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow();
+        BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
         Dataset dataset = datasetRepository.save(Dataset.create(
                 client, 52_428_800L, 10_000, 2_500_000L, 1_800_000L, 250.0, 1024,
                 "0x" + DATASET_HASH, "datasets/1/dataset.jsonl"));
@@ -149,7 +149,13 @@ class WorkerJobIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobId").value(String.valueOf(job.getId())))   // 규격: 문자열
                 .andExpect(jsonPath("$.assignedWorkerId").value(workerId))
-                .andExpect(jsonPath("$.model.modelRef").value("Qwen/Qwen2.5-7B"))
+                .andExpect(jsonPath("$.model.modelRef").value("Qwen/Qwen3-0.6B"))
+                // 커밋 SHA 40자. Worker 의 model_prep.check_revision 은 null 과
+                // "main" 을 모두 거절한다 -- 태그는 움직이고, 값이 매겨져 배정된
+                // Job 이 다음 주에 다른 가중치로 학습되면 안 되기 때문이다.
+                // 카탈로그가 revision 없이 다시 seed 되면 여기서 걸린다.
+                .andExpect(jsonPath("$.model.modelRevision")
+                        .value(org.hamcrest.Matchers.matchesPattern("[0-9a-f]{40}")))
                 .andExpect(jsonPath("$.runtimeImage.imageRef").value(org.hamcrest.Matchers.startsWith("gshared/qlora-sft-runtime@sha256:")))
                 .andExpect(jsonPath("$.runtimeImage.digest").value(org.hamcrest.Matchers.startsWith("sha256:")))
                 .andExpect(jsonPath("$.dataset.sha256").value(DATASET_HASH))          // 0x 벗긴 64자

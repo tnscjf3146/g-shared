@@ -27,6 +27,8 @@ import com.gshared.back.user.exception.UserErrorCode;
 import com.gshared.back.user.repository.UserRepository;
 import com.gshared.back.worker.repository.WorkerRepository;
 import com.gshared.back.worker.websocket.WorkerMessageSender;
+import com.gshared.back.global.blockchain.EscrowVerification;
+import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
 import com.gshared.back.worker.websocket.protocol.WorkerMessage;
 import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +56,7 @@ public class JobService {
     private static final int FAIL_REASON_MAX = 2000;   // 폭주 메시지 상한 (DB는 TEXT지만 무한 저장 방지)
 
     private final JobRepository jobRepository;
+    private final EscrowVerification escrow;
     private final UserRepository userRepository;
     private final WorkerRepository workerRepository;
     private final DatasetRepository datasetRepository;
@@ -98,6 +101,15 @@ public class JobService {
         var candidates = workerRepository.findAvailableWorkers().stream()
                 .filter(w -> w.getGpuModel() != null && w.getVramMb() != null
                         && w.getBenchmarkTokensPerSec() != null)
+                // 공급자가 이 operator 키를 온체인에서 승인했는가. 승인하지 않은
+                // 워커에게 배정하면 acceptJob 이 되돌려지고, 그 사이 고객의
+                // 예치금은 묶여 있다. 배정 전에 거르는 편이 싸다.
+                //
+                // 모를 때는 거르지 않는다 -- 체인이 설정되지 않았거나 노드가 잠깐
+                // 답하지 않는 동안 멀쩡한 공급자가 후보에서 조용히 빠지면 Job 은
+                // 배정되지 않고 아무도 이유를 모른다.
+                .filter(w -> !escrow.operatorApproved(
+                        w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
                 .map(w -> new SchedulerRecommendRequest.GpuCandidate(
                         w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec()))
                 .toList();
@@ -191,11 +203,26 @@ public class JobService {
         jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
+        // 체인이 이 예치에 붙인 번호를 정본으로 쓴다. 프런트가 준 값은 브라우저에서
+        // 온 숫자이고, JobFunded 로그의 jobId 는 컨트랙트가 붙인 것이다. 확인하지
+        // 못했으면(설정 없음·노드 무응답) 받은 값을 쓰되 그 사실을 남긴다.
+        String confirmed = escrow.escrowJobIdFor(externalRefOf(jobId)).orElse(null);
+        if (confirmed != null && !confirmed.equals(escrowJobId)) {
+            log.warn("[JOB] JobFunded 가 말하는 escrowJobId 로 교체한다 jobId={} 신고={} 온체인={}",
+                    jobId, escrowJobId, confirmed);
+        }
+        String authoritative = confirmed != null ? confirmed : escrowJobId;
+
         // 원자적 전이 — 0행이면 이미 FUNDED거나 취소/진행 중 (→ 409)
-        int updated = jobRepository.fundIfCreated(jobId, ownerId, escrowJobId);
+        int updated = jobRepository.fundIfCreated(jobId, ownerId, authoritative);
         if (updated == 0) {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
         }
+    }
+
+    /** 이 Job 의 externalRef. 아직 없으면 null -- 그러면 온체인 조회도 건너뛴다. */
+    private String externalRefOf(Long jobId) {
+        return jobRepository.findById(jobId).map(Job::getExternalRef).orElse(null);
     }
 
     /**
@@ -262,7 +289,14 @@ public class JobService {
         String expectedOperator = workerRepository.findById(workerId)
                 .map(worker -> worker.getOperatorAddress()).orElse(null);
 
-        String mismatch = acceptMismatch(job, expectedOperator, escrowJobId, operatorAddress);
+        String recorded = acceptMismatch(job, expectedOperator, escrowJobId, operatorAddress);
+        // Backend 기록끼리 맞았다면 이제 체인에 같은 것을 묻는다 -- 지금까지는 워커가
+        // 보낸 값을 Backend 가 저장해 둔 값과 대조한 것이고, 둘 다 워커에게서 온
+        // 것이라 "온체인에서 수락했다"는 주장 자체는 아직 아무것도 확인되지 않았다.
+        final String mismatch = recorded != null ? recorded
+                : escrow.acceptedOnChain(job.getEscrowJobId(), operatorAddress).isContradicted()
+                        ? "on-chain state does not show this job assigned to this operator"
+                        : null;
         if (mismatch != null) {
             log.error("[JOB] JOB_ACCEPTED 불일치 → fail closed jobId={} workerId={} {}", jobId, workerId, mismatch);
             boolean cancelling = jobRepository.markCancellingIfAssigned(jobId, workerId) > 0;
@@ -331,13 +365,24 @@ public class JobService {
      * sha256 에 0x 를 붙인 값과 <b>반드시 같아야</b> COMPLETED 로 전이한다.
      * 다르거나 §18 을 거치지 않았으면 fail closed — 상태를 바꾸지 않고 대조 사유만 남긴다
      * (온체인 submitResult 는 이미 됐을 수 있어 되돌릴 수 없다).
+     *
+     * <p><b>CANCELLING 도 받는다.</b> 사용자가 취소를 누른 순간 워커는 이미 결과를 올리고
+     * 온체인 submitResult 까지 끝냈을 수 있다. RUNNING 만 받으면 그 JOB_RESULT 는 버려지고,
+     * 에스크로는 COMPLETED 라 공급자는 정산을 받았는데 Job 은 CANCELLING 에 영원히 남는다.
+     * 취소 중에 들어온 경우에도 대조는 똑같이 거치며, reconciliationReason 에 그 사실을
+     * 남겨 나중에 사람이 "왜 취소 요청이 완료로 끝났는가"를 알 수 있게 한다.
+     *
      * TODO: BC 연동 후 온체인 resultHash 까지 같은지 확인. 정산 트리거는 BC 담당과 협의 후.
      */
     @Transactional
     public boolean completeJob(String workerId, Long jobId, String objectKey,
                                String resultHash, String submitTxHash, Double actualRuntimeSec) {
         Job job = jobRepository.findByIdAndAssignedWorkerId(jobId, workerId).orElse(null);
-        if (job == null || job.getStatus() != JobStatus.RUNNING) {
+        if (job == null) {
+            return false;
+        }
+        JobStatus status = job.getStatus();
+        if (status != JobStatus.RUNNING && status != JobStatus.CANCELLING) {
             return false;
         }
         String mismatch = resultMismatch(job, objectKey, resultHash);
@@ -347,13 +392,53 @@ public class JobService {
             return false;
         }
 
-        if (jobRepository.completeIfRunning(jobId, workerId,
-                objectKey, resultHash, submitTxHash, actualRuntimeSec, LocalDateTime.now()) == 0) {
+        // 체인이 정말 COMPLETED 이고, 기록된 resultHash 가 Backend 가 §18 에서 직접
+        // 계산한 것과 같은가. 워커가 보낸 resultHash 와 대조하는 것이 아니다 --
+        // 그러면 워커의 말을 워커의 말로 검증하는 셈이다.
+        String verified = job.getResultSha256() == null ? null : "0x" + job.getResultSha256();
+        Verdict onChain = escrow.resultOnChain(job.getEscrowJobId(),
+                job.getAcceptTxHash() == null ? null : operatorOf(workerId), verified);
+        if (onChain.isContradicted()) {
+            log.error("[JOB] JOB_RESULT 온체인 대조 실패 → fail closed jobId={} workerId={}", jobId, workerId);
+            job.flagReconciliation("JOB_RESULT on-chain mismatch (submitTxHash=" + submitTxHash + ")");
             return false;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        int updated = status == JobStatus.RUNNING
+                ? jobRepository.completeIfRunning(jobId, workerId,
+                        objectKey, resultHash, submitTxHash, actualRuntimeSec, now)
+                : jobRepository.completeIfCancelling(jobId, workerId,
+                        objectKey, resultHash, submitTxHash, actualRuntimeSec,
+                        CANCEL_LOST_TO_RESULT, now);
+        if (updated == 0) {
+            return false;
+        }
+        if (status == JobStatus.CANCELLING) {
+            log.warn("[JOB] 취소 요청과 겹친 JOB_RESULT → COMPLETED jobId={} workerId={}", jobId, workerId);
         }
         workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
         return true;
     }
+
+    /**
+     * 취소 요청이 결과보다 늦었다는 기록.
+     *
+     * <p>상태만 보고는 알 수 없는 사실이라 남긴다 — COMPLETED 인 Job 을 나중에 보면
+     * 사용자가 취소를 눌렀다는 흔적이 어디에도 없다.
+     */
+    private static final String CANCEL_LOST_TO_RESULT =
+            "사용자 취소 요청이 도착했을 때 결과가 이미 업로드·검증되고 온체인에 기록된 뒤였다. "
+            + "에스크로가 COMPLETED 이므로 취소가 아니라 완료로 확정했다.";
+
+    /**
+     * 취소 요청 중에 실행이 실패해 워커가 abortJob 으로 정리한 기록.
+     *
+     * <p>FAILED 가 아니라 CANCELLED 로 끝나는 이유가 여기 적혀 있다.
+     */
+    private static final String CANCEL_MET_FAILURE =
+            "사용자 취소 요청 중에 실행이 실패했고, 워커가 abortJob 으로 예치금을 돌려줬다. "
+            + "온체인 상태가 CANCELLED 이므로 CANCELLED 로 확정했다 (실패 사유는 failReason 에 남긴다).";
 
     /** JOB_RESULT 대조. §18 기록(objectKey·sha256)과 워커 보고값이 어긋난 항목을 문장으로, 전부 맞으면 null. */
     private static String resultMismatch(Job job, String objectKey, String resultHash) {
@@ -372,13 +457,38 @@ public class JobService {
 
     /**
      * JOB_FAILED 수신 (규격 §20): Job FAILED + 사유·abortJob() 해시·실측 시간 기록, Worker 는 다시 대기(ONLINE).
+     *
+     * <p><b>CANCELLING 이었으면 FAILED 가 아니라 CANCELLED 로 끝난다.</b> 워커가 실패를
+     * 보고했다는 것은 abortJob 으로 예치금을 돌려줬다는 뜻이고 — abortTxHash 가 그 증거다 —
+     * 체인은 CANCELLED 다. 사용자는 취소를 요청했고 돈은 돌아갔으므로 CANCELLED 가 양쪽과
+     * 맞는 유일한 종료 상태다. 실패 사유는 버리지 않고 failReason 에 그대로 남는다.
+     *
+     * <p>이것을 받지 않으면 Job 은 CANCELLING 에 영원히 남는다 — 컨테이너는 죽었고 예치금은
+     * 돌아갔는데 기록만 취소 중인 상태.
+     *
      * TODO: 환불(블록체인) 트리거 — abortJob() 이 환불까지 하므로 Backend 는 흔적만 남기면 될 수 있음. BC 담당과 확인
      */
     @Transactional
     public boolean failJob(String workerId, Long jobId, String code, String message,
                            String abortTxHash, Double actualRuntimeSec) {
-        int updated = jobRepository.failIfRunning(jobId, workerId,
-                failReason(code, message), abortTxHash, actualRuntimeSec, LocalDateTime.now());
+        // 실패 보고에는 abortJob 이 따라온다 -- 예치금이 돌아갔다는 주장이다.
+        // 체인이 CANCELLED 가 아니라고 말하면 그 주장은 거짓이고, Job 을 종료
+        // 상태로 확정하면 고객의 돈이 묶인 채로 기록만 끝난다.
+        if (abortTxHash != null && chainContradictsCancellation(jobId, workerId)) {
+            return false;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        String reason = failReason(code, message);
+        int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
+        if (updated == 0) {
+            updated = jobRepository.cancelIfFailedWhileCancelling(
+                    jobId, workerId, reason, abortTxHash, actualRuntimeSec, CANCEL_MET_FAILURE, now);
+            if (updated > 0) {
+                log.warn("[JOB] 취소 요청 중 실패 → CANCELLED jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+            }
+        }
         if (updated == 0) {
             return false;
         }
@@ -393,6 +503,9 @@ public class JobService {
      */
     @Transactional
     public boolean confirmCancelled(String workerId, Long jobId, String abortTxHash, Double actualRuntimeSec) {
+        if (chainContradictsCancellation(jobId, workerId)) {
+            return false;
+        }
         int updated = jobRepository.confirmCancelledIfCancelling(
                 jobId, workerId, abortTxHash, actualRuntimeSec, LocalDateTime.now());
         if (updated == 0) {
@@ -408,6 +521,36 @@ public class JobService {
         payload.put("reason", reason);
         messageSender.send(workerId, WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
                 String.valueOf(jobId), Instant.now().toString(), payload));
+    }
+
+    /**
+     * 체인이 "취소되지 않았다"고 명시적으로 말하는가.
+     *
+     * <p>모를 때는 막지 않는다. 아직 컨트랙트가 배포되지 않았거나 노드가 잠깐
+     * 답하지 않는 것을 근거로 워커의 종료 보고를 버리면, Job 은 CANCELLING 에
+     * 남고 워커는 이미 슬롯을 놓았다 -- 아무도 그 Job 을 끝낼 수 없게 된다.
+     */
+    private boolean chainContradictsCancellation(Long jobId, String workerId) {
+        String escrowJobId = jobRepository.findById(jobId)
+                .map(Job::getEscrowJobId).orElse(null);
+        if (escrowJobId == null) {
+            return false;
+        }
+        Verdict onChain = escrow.cancelledOnChain(escrowJobId);
+        if (onChain.isContradicted()) {
+            log.error("[JOB] 취소 보고가 온체인과 어긋난다 → 확정하지 않는다 jobId={} workerId={}",
+                    jobId, workerId);
+            jobRepository.findById(jobId).ifPresent(fresh ->
+                    fresh.flagReconciliation("cancellation reported but the escrow is not CANCELLED"));
+            return true;
+        }
+        return false;
+    }
+
+    /** 이 워커의 operator 주소. 없으면 null -- 온체인 대조에서 건너뛴다. */
+    private String operatorOf(String workerId) {
+        return workerRepository.findById(workerId)
+                .map(worker -> worker.getOperatorAddress()).orElse(null);
     }
 
     /** 사유 = "코드: 메시지" 형태로 합쳐 저장 (예: "CUDA_OOM: CUDA out of memory."). */

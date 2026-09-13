@@ -10,6 +10,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -71,6 +72,21 @@ public class GlobalExceptionHandler {
         log.warn("지원하지 않는 Content-Type: {}", e.getContentType());
 
         return toResponse(CommonErrorCode.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    /**
+     * 필수 쿼리 파라미터 누락. 클라이언트 잘못이므로 400 이다.
+     *
+     * <p>따로 잡지 않으면 맨 아래 catch-all 로 떨어져 500 이 나간다 — 서명 없이
+     * {@code /storage/**} 를 열어 본 요청이 "서버 오류"로 보이고, 로그에도
+     * "예상하지 못한 예외"로 스택이 통째로 남는다. 서명 URL 창구는 바깥에서
+     * 닿는 주소라 이런 요청이 정상적으로 들어온다.
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.warn("필수 파라미터 누락: {}", e.getParameterName());
+
+        return toResponse(CommonErrorCode.INVALID_INPUT);
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)

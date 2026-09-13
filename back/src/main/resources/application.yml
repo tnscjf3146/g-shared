@@ -68,3 +68,7 @@ storage:
 # chainId 는 wallet-auth.chain-id 를 같이 쓴다 (토큰·에스크로 모두 같은 체인).
 escrow:
   contract-address: ${ESCROW_CONTRACT_ADDRESS:}
+  # 온체인 값을 읽을 노드. 주소와 함께 둘 다 채워져야 Backend 가 워커의 말을
+  # 체인에 대고 확인한다. 비어 있으면 확인하지 않고 예전처럼 동작한다 --
+  # 대조할 대상이 없는데 통과했다고 기록하는 것이 확인하지 않는 것보다 나쁘다.
+  rpc-url: ${ESCROW_RPC_URL:}

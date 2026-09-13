@@ -85,7 +85,7 @@ class JobEstimateIntegrationTest {
                 "estimate-" + UUID.randomUUID() + "@gshared.io", "encoded", "의뢰자"));
         accessToken = jwtProvider.createAccessToken(user.getId(), user.getRole());
 
-        BaseModel baseModel = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow();
+        BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
         baseModelId = baseModel.getId();
         workloadId = baseModel.getWorkload().getId();
 

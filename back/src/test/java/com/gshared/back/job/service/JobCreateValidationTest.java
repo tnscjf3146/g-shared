@@ -28,7 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * Job 생성의 검증·오류 경로 테스트. (V8 seed 카탈로그 qlora-sft-v1 / qwen2.5-7b 를 slug 로 조회해 사용)
+ * Job 생성의 검증·오류 경로 테스트. (카탈로그 qlora-sft-v1 / qwen3-0.6b 를 slug 로 조회해 사용 — qwen2.5-7b 는 V12 에서 비활성화됐다)
  * SchedulerClient 는 목으로 대체 — 외부 AI 없이 오류 매핑을 검증한다.
  */
 @SpringBootTest
@@ -66,7 +66,7 @@ class JobCreateValidationTest {
         datasetId = datasetRepository.save(Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null)).getId();
         workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
-        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow().getId();
     }
 
     private CreateJobRequest customRequest(String configJson) {

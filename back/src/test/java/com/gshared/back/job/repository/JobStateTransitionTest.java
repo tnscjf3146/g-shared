@@ -63,7 +63,7 @@ class JobStateTransitionTest {
                 "transition-" + UUID.randomUUID() + "@gshared.io", "encoded", "전이테스터"));
         owner.linkWallet("0x" + "a".repeat(40));   // provider 정산 주소 — 없으면 워커가 후보에 오르지 못한다
         workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
-        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow().getId();
         dataset = datasetRepository.save(Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null));
         workerA = newWorker("a-" + UUID.randomUUID());
@@ -420,5 +420,129 @@ class JobStateTransitionTest {
 
         assertThat(ids).contains(ready.getId());
         assertThat(ids).doesNotContain(noOperator.getId(), noWallet.getId());
+    }
+
+    // ── CANCELLING 과 겹친 종료 메시지 ───────────────────────────
+    //
+    // 사용자가 취소를 누른 순간 워커는 이미 결과를 올리고 온체인 submitResult 까지
+    // 끝냈을 수 있다. RUNNING 만 받으면 그 JOB_RESULT 는 버려지고, 에스크로는
+    // COMPLETED 라 공급자는 정산을 받았는데 Job 은 CANCELLING 에 영원히 남는다 --
+    // 돈은 지불됐고 기록은 취소 중인 상태.
+
+    @Test
+    @DisplayName("취소 중에 도착한 JOB_RESULT 는 COMPLETED 로 확정된다")
+    void completeIfCancelling_transitions() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+
+        int updated = jobRepository.completeIfCancelling(job.getId(), workerA.getId(),
+                "jobs/1/result.tar", "0x" + "ab".repeat(32), "0x" + "cd".repeat(32),
+                982.4, "결과가 먼저 도착했다", NOW);
+
+        assertThat(updated).isEqualTo(1);
+        assertThat(statusOf(job.getId())).isEqualTo(JobStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("그 사실이 reconciliationReason 에 남는다 -- 상태만 보면 취소 흔적이 사라진다")
+    void completeIfCancelling_recordsWhy() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+
+        jobRepository.completeIfCancelling(job.getId(), workerA.getId(),
+                "jobs/1/result.tar", "0x" + "ab".repeat(32), "0x" + "cd".repeat(32),
+                982.4, "결과가 먼저 도착했다", NOW);
+
+        em.clear();
+        assertThat(jobRepository.findById(job.getId()).orElseThrow()
+                .getReconciliationReason()).isEqualTo("결과가 먼저 도착했다");
+    }
+
+    @Test
+    @DisplayName("RUNNING 인 Job 은 completeIfCancelling 으로 바뀌지 않는다")
+    void completeIfCancelling_ignoresRunning() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.RUNNING, workerA.getId());
+
+        int updated = jobRepository.completeIfCancelling(job.getId(), workerA.getId(),
+                "jobs/1/result.tar", "0x" + "ab".repeat(32), null, 1.0, "x", NOW);
+
+        assertThat(updated).isZero();
+        assertThat(statusOf(job.getId())).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    @DisplayName("남의 워커가 보낸 것은 취소 중이어도 무시된다")
+    void completeIfCancelling_ignoresOtherWorker() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+
+        int updated = jobRepository.completeIfCancelling(job.getId(), workerB.getId(),
+                "jobs/1/result.tar", "0x" + "ab".repeat(32), null, 1.0, "x", NOW);
+
+        assertThat(updated).isZero();
+        assertThat(statusOf(job.getId())).isEqualTo(JobStatus.CANCELLING);
+    }
+
+    @Test
+    @DisplayName("취소 중에 도착한 JOB_FAILED 는 FAILED 가 아니라 CANCELLED 다")
+    void cancelIfFailedWhileCancelling_transitions() {
+        // 워커가 실패를 보고했다는 것은 abortJob 으로 예치금을 돌려줬다는 뜻이고,
+        // 체인은 CANCELLED 다. 사용자는 취소를 요청했고 돈은 돌아갔으므로
+        // CANCELLED 가 양쪽과 맞는 유일한 종료 상태다.
+        Job job = newJob();
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+
+        int updated = jobRepository.cancelIfFailedWhileCancelling(job.getId(), workerA.getId(),
+                "CUDA_OOM: the GPU ran out of memory", "0x" + "ef".repeat(32),
+                41.2, "취소 중 실패", NOW);
+
+        assertThat(updated).isEqualTo(1);
+        assertThat(statusOf(job.getId())).isEqualTo(JobStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("실패 사유는 버리지 않는다 -- 취소로 끝난 것과 무엇이 잘못됐는지는 다른 정보다")
+    void cancelIfFailedWhileCancelling_keepsFailReason() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.CANCELLING, workerA.getId());
+
+        jobRepository.cancelIfFailedWhileCancelling(job.getId(), workerA.getId(),
+                "CUDA_OOM: the GPU ran out of memory", "0x" + "ef".repeat(32),
+                41.2, "취소 중 실패", NOW);
+
+        em.clear();
+        Job settled = jobRepository.findById(job.getId()).orElseThrow();
+        assertThat(settled.getFailReason()).contains("CUDA_OOM");
+        assertThat(settled.getAbortTxHash()).isEqualTo("0x" + "ef".repeat(32));
+        assertThat(settled.getActualRuntimeSec()).isEqualTo(41.2);
+    }
+
+    @Test
+    @DisplayName("RUNNING 인 Job 은 cancelIfFailedWhileCancelling 으로 바뀌지 않는다")
+    void cancelIfFailedWhileCancelling_ignoresRunning() {
+        Job job = newJob();
+        setState(job.getId(), JobStatus.RUNNING, workerA.getId());
+
+        int updated = jobRepository.cancelIfFailedWhileCancelling(job.getId(), workerA.getId(),
+                "X: y", null, 1.0, "x", NOW);
+
+        assertThat(updated).isZero();
+        assertThat(statusOf(job.getId())).isEqualTo(JobStatus.RUNNING);
+    }
+
+    @Test
+    @DisplayName("이미 끝난 Job 은 어느 쪽으로도 다시 바뀌지 않는다")
+    void terminalJobsStayTerminal() {
+        for (JobStatus done : List.of(JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)) {
+            Job job = newJob();
+            setState(job.getId(), done, workerA.getId());
+
+            assertThat(jobRepository.completeIfCancelling(job.getId(), workerA.getId(),
+                    "k", "0x" + "ab".repeat(32), null, 1.0, "x", NOW)).isZero();
+            assertThat(jobRepository.cancelIfFailedWhileCancelling(job.getId(), workerA.getId(),
+                    "X: y", null, 1.0, "x", NOW)).isZero();
+            assertThat(statusOf(job.getId())).isEqualTo(done);
+        }
     }
 }
