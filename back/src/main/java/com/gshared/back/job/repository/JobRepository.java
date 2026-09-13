@@ -178,6 +178,71 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                           @Param("submitTxHash") String submitTxHash,
                           @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
+    /**
+     * JOB_RESULT 가 <b>취소 요청과 겹쳐</b> 도착한 경우: CANCELLING → COMPLETED.
+     *
+     * <p>사용자가 취소를 누른 순간 워커는 이미 결과를 올리고 온체인 submitResult 까지
+     * 끝냈을 수 있다. 그러면 에스크로는 COMPLETED 이고 공급자는 이미 정산을 받았는데,
+     * {@link #completeIfRunning} 은 RUNNING 만 받으므로 그 JOB_RESULT 는 버려지고
+     * Job 은 CANCELLING 에 영원히 남는다 — 돈은 지불됐고 기록은 취소 중인 상태.
+     *
+     * <p><b>무조건 완료시키지 않는다.</b> 호출 전에 {@code JobService.completeJob} 이
+     * §18 업로드 검증 기록(objectKey · resultSha256)과 워커가 보고한 resultHash 를
+     * 대조하고, 하나라도 어긋나면 여기까지 오지 않는다. 즉 이 전이는 "워커가 그렇게
+     * 말했다"가 아니라 "Backend 가 직접 해시를 계산해 확인한 결과물이 있다"에 근거한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.COMPLETED,
+                   j.resultObjectKey = :resultObjectKey,
+                   j.resultHash = :resultHash,
+                   j.submitTxHash = :submitTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.reconciliationReason = :reconciliationReason,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+            """)
+    int completeIfCancelling(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                             @Param("resultObjectKey") String resultObjectKey, @Param("resultHash") String resultHash,
+                             @Param("submitTxHash") String submitTxHash,
+                             @Param("actualRuntimeSec") Double actualRuntimeSec,
+                             @Param("reconciliationReason") String reconciliationReason,
+                             @Param("now") LocalDateTime now);
+
+    /**
+     * JOB_FAILED 가 취소 요청과 겹쳐 도착한 경우: CANCELLING → <b>CANCELLED</b>.
+     *
+     * <p>FAILED 가 아니라 CANCELLED 인 이유는 온체인 결과가 그렇기 때문이다. 워커가
+     * 실패를 보고했다는 것은 abortJob 으로 예치금을 돌려줬다는 뜻이고 — 규격 §20 의
+     * abortTxHash 가 그 증거다 — 체인은 CANCELLED 다. 사용자는 취소를 요청했고 돈은
+     * 돌아갔으므로 CANCELLED 가 양쪽과 맞는 유일한 종료 상태다.
+     *
+     * <p>실패 사유는 버리지 않고 failReason 에 그대로 남긴다. 취소로 끝났다는 것과
+     * 그 전에 무엇이 잘못됐는지는 다른 정보다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
+                   j.failReason = :failReason,
+                   j.abortTxHash = :abortTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.reconciliationReason = :reconciliationReason,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+            """)
+    int cancelIfFailedWhileCancelling(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                                      @Param("failReason") String failReason,
+                                      @Param("abortTxHash") String abortTxHash,
+                                      @Param("actualRuntimeSec") Double actualRuntimeSec,
+                                      @Param("reconciliationReason") String reconciliationReason,
+                                      @Param("now") LocalDateTime now);
+
     /** JOB_FAILED: "이 워커의 RUNNING Job"일 때만 FAILED 전이 + 사유·abortJob() 해시 기록. */
     @Modifying(clearAutomatically = true)
     @Query("""

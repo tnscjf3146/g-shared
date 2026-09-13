@@ -63,7 +63,7 @@ class JobFundIntegrationTest {
         datasetId = datasetRepository.save(com.gshared.back.dataset.domain.Dataset.create(
                 owner, 52_428_800L, 10_000, 3_500_000L, 2_874_100L, 350.0, 1800, null, null)).getId();
         workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
-        baseModelId = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow().getId();
+        baseModelId = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow().getId();
     }
 
     private User saveUser(String prefix) {

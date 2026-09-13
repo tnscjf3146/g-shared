@@ -86,7 +86,7 @@ class JobServiceEscrowGuardTest {
                 "Windows 11", true, "RTX 4090", 24576, 42000.0, "transformer-bench-v1"));
         worker.goOnline(LocalDateTime.now());
 
-        BaseModel baseModel = baseModelRepository.findBySlug("qwen2.5-7b").orElseThrow();
+        BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
         Dataset dataset = datasetRepository.save(Dataset.create(
                 client, 52_428_800L, 10_000, 2_500_000L, 1_800_000L, 250.0, 1024, null, null));
         job = jobRepository.save(Job.create(client, baseModel.getWorkload().getId(), baseModel.getId(),
