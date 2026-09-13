@@ -29,6 +29,12 @@ REPO = "gshared/qlora-sft-runtime"
 DIGEST = "sha256:" + "ab" * 32
 REF = f"{REPO}@{DIGEST}"
 
+#: The runtime as published on Docker Hub -- the real 0.2.0 digest, read from
+#: the registry after the push, not a made-up value.
+HUB_REPO = "le3560/gshared-qlora-sft-runtime"
+HUB_DIGEST = "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"
+HUB_REF = f"{HUB_REPO}@{HUB_DIGEST}"
+
 
 class TestTheApprovedRepository(unittest.TestCase):
     def test_the_approved_runtime_is_accepted(self):
@@ -62,6 +68,38 @@ class TestTheApprovedRepository(unittest.TestCase):
         # Nothing in the call can extend it; it is a module constant passed by
         # keyword only so tests can narrow it, never widen it from a payload.
         self.assertIn(REPO, APPROVED_REPOSITORIES)
+
+    def test_the_published_docker_hub_runtime_is_accepted(self):
+        image = check_image(HUB_REF, HUB_DIGEST)
+
+        self.assertEqual(image.repository, HUB_REPO)
+        self.assertEqual(image.reference, HUB_REF)
+
+    def test_the_original_repository_is_still_approved(self):
+        # Adding the published name must not drop the old one.
+        self.assertIn(REPO, APPROVED_REPOSITORIES)
+        self.assertIn(HUB_REPO, APPROVED_REPOSITORIES)
+
+    def test_the_docker_hub_repository_still_needs_a_digest(self):
+        with self.assertRaises(ImageRefused):
+            check_image(f"{HUB_REPO}:0.2.0", HUB_DIGEST)
+
+    def test_the_docker_hub_repository_still_refuses_the_placeholder(self):
+        with self.assertRaises(ImageRefused) as caught:
+            check_image(f"{HUB_REPO}@{PLACEHOLDER_DIGEST}", PLACEHOLDER_DIGEST)
+
+        self.assertIn("placeholder", str(caught.exception))
+
+    def test_a_lookalike_of_the_docker_hub_repository_is_refused(self):
+        for other in (f"{HUB_REPO}-evil", "le3560/gpu-pytorch-poc",
+                      "attacker/gshared-qlora-sft-runtime"):
+            with self.subTest(other=other), self.assertRaises(ImageRefused):
+                check_image(f"{other}@{HUB_DIGEST}", HUB_DIGEST)
+
+    def test_the_docker_hub_image_passes_the_pull_check(self):
+        image = check_image(HUB_REF, HUB_DIGEST)
+
+        check_pulled(image, f'["{HUB_REF}"]')
 
     def test_an_explicitly_narrowed_list_is_honoured(self):
         with self.assertRaises(ImageRefused):
