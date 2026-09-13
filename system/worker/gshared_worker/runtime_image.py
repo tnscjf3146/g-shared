@@ -32,10 +32,20 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 #: A repository this machine will run. Configuration, not a message.
 #:
-#: One entry today. It is a tuple rather than a string because a second
-#: approved runtime is a foreseeable change and a mirror is a likely one, and
-#: both should be a line here rather than a rewrite.
-APPROVED_REPOSITORIES: tuple[str, ...] = ("gshared/qlora-sft-runtime",)
+#: A tuple rather than a string because a second approved runtime is a
+#: foreseeable change and a mirror is a likely one, and both should be a line
+#: here rather than a rewrite.
+#:
+#: ``le3560/gshared-qlora-sft-runtime`` is where the runtime is actually
+#: published on Docker Hub (0.2.0 is
+#: ``sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d``).
+#: The original name stays: removing it would refuse contexts that already
+#: carry it, and adding a name widens nothing else -- the digest rules below
+#: apply to both exactly the same.
+APPROVED_REPOSITORIES: tuple[str, ...] = (
+    "gshared/qlora-sft-runtime",
+    "le3560/gshared-qlora-sft-runtime",
+)
 
 #: The placeholder in the Backend's catalog seed. Named so the refusal can say
 #: what it actually is instead of "pull failed".

@@ -62,7 +62,7 @@ retry budget은 `execution_context.py` 상수 한 곳에 있다. stop signal이 
 
 | 규칙 | |
 |---|---|
-| approved repository | `gshared/qlora-sft-runtime` — **Worker 설정**, 메시지가 아님 |
+| approved repository | `gshared/qlora-sft-runtime`, `le3560/gshared-qlora-sft-runtime` (Docker Hub 배포본, 0.2.0 = `sha256:acda63bc…126d`) — **Worker 설정**, 메시지가 아님 |
 | immutable digest | `repository@sha256:<64 hex>` 만 |
 | tag | **거부** (오늘 맞는 이미지를 가리켜도) |
 | all-zero digest | **거부** — Backend 카탈로그 seed의 placeholder |
