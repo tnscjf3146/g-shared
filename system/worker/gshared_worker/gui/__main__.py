@@ -17,7 +17,7 @@ import os
 
 from ..auth_check import _http_origin_of
 from ..backend_client import BackendClient
-from ..config import resolve_backend_url, worker_directory
+from ..config import data_directory, resolve_backend_url
 from ..errors import WorkerConfigurationError
 from ..logging_setup import start_debug_log
 from .presenter import AuthPresenter
@@ -34,7 +34,7 @@ def main() -> int:
         return 2
 
     origin = _http_origin_of(backend_url)
-    log_path = start_debug_log(worker_directory())
+    log_path = start_debug_log(data_directory())
     print(f"Signing in against {origin}")
     print(f"  What happens is written to {log_path}.")
     print("  This window signs in only. It does not register this machine.")

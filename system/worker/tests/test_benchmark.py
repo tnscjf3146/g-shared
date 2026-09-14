@@ -96,7 +96,7 @@ class ReadingAGoodMeasurementTest(unittest.TestCase):
         summary = read_result(printed(a_result())).result.summary()
 
         self.assertIn("tokens/sec", summary)
-        self.assertIn("GPU time", summary)
+        self.assertIn("GPU 시간", summary)
 
 
 class NumbersThatAreNotMeasurementsTest(unittest.TestCase):

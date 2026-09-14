@@ -90,9 +90,7 @@ class BenchmarkResult:
     peak_vram_mb: int | None = None
 
     def summary(self) -> str:
-        return (f"{self.tokens_per_sec:,.0f} tokens/sec "
-                f"({self.processed_tokens:,} tokens in "
-                f"{self.elapsed_seconds:.2f}s of GPU time)")
+        return (f"{self.tokens_per_sec:,.0f} tokens/sec (GPU 시간 {self.elapsed_seconds:.2f}초 동안 {self.processed_tokens:,} tokens)")
 
 
 @dataclass(frozen=True)

@@ -290,7 +290,7 @@ class TestWhatTheSupplierIsTold(unittest.TestCase):
     def test_a_finished_run_is_reported(self):
         _, lines = self.settle(FINISHED)
 
-        self.assertTrue(any("finished training" in line for line in lines))
+        self.assertTrue(any("학습을 마쳤습니다" in line for line in lines))
 
     def test_a_failed_run_names_the_reason(self):
         _, lines = self.settle(FAILED)
@@ -316,7 +316,7 @@ class TestWhatTheSupplierIsTold(unittest.TestCase):
             with self.subTest(outcome=outcome.state):
                 _, lines = self.settle(outcome)
                 self.assertTrue(
-                    any("not running on this machine" in line
+                    any("동작하지 않습니다" in line
                         for line in lines), lines)
 
     def test_a_configured_settlement_is_started_instead(self):
@@ -335,7 +335,7 @@ class TestWhatTheSupplierIsTold(unittest.TestCase):
                 self.assertEqual(len(started), 1)
                 self.assertFalse(slot.is_idle, "the slot was given up early")
                 self.assertFalse(
-                    any("not running on this machine" in line
+                    any("동작하지 않습니다" in line
                         for line in lines), lines)
 
 

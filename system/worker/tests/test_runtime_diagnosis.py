@@ -103,13 +103,13 @@ class OurDistributionTest(DiagnosisTestCase):
             RuntimePrerequisite.GSHARED_DISTRO, distro=DistroState(exists=False))
 
         self.assertIs(check.finding, Finding.MISSING)
-        self.assertIn("does not exist", check.detail)
+        self.assertIn("배포판이 아직 없습니다", check.detail)
 
     async def test_the_remedy_promises_not_to_touch_anything_else(self):
         check = await self.check(
             RuntimePrerequisite.GSHARED_DISTRO, distro=DistroState(exists=False))
 
-        self.assertIn("installed for themselves is touched", check.remedy)
+        self.assertIn("직접 설치한 것은 건드리지 않습니다", check.remedy)
 
     async def test_a_stopped_wsl2_distribution_is_satisfied_not_inactive(self):
         # "not running" and "on version 1" are different things. Confusing them
@@ -135,7 +135,7 @@ class OurDistributionTest(DiagnosisTestCase):
             distro=DistroState(exists=True, version=1))
 
         self.assertIs(check.finding, Finding.INACTIVE)
-        self.assertIn("version 1", check.detail)
+        self.assertIn("WSL 버전 1", check.detail)
 
 
 class TheDockerEngineTest(DiagnosisTestCase):
@@ -183,7 +183,7 @@ class TheGpuInsideAContainerTest(DiagnosisTestCase):
             gpu=GpuVerification(GpuOutcome.GPU_UNAVAILABLE, "no GPU in the container"))
 
         self.assertIs(check.finding, Finding.BLOCKED)
-        self.assertIn("driver supports WSL", check.remedy)
+        self.assertIn("드라이버가 WSL을 지원하는지", check.remedy)
 
     async def test_a_failed_image_pull_is_not_blamed_on_the_gpu(self):
         check = await self.check(

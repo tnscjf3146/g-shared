@@ -15,6 +15,7 @@ here.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -45,10 +46,12 @@ DEFAULT_HOURLY_PRICE = 600
 #: or GSHARED_WORKER_BACKEND_URL, points a build somewhere else -- at a local
 #: Backend during development, say.
 #:
-#: The scheme is ``wss``, so the HTTP origin derived from it for signing in is
-#: ``https``. See ``_http_origin_of`` in :mod:`gshared_worker.auth_check`: one
-#: setting decides both, and they cannot drift apart.
-DEFAULT_BACKEND_URL = "wss://j15e204.p.ssafy.io/ws/workers"
+#: Written as the service's own address. Both addresses the Worker uses are
+#: derived from it and cannot drift apart: signing in goes to its HTTPS origin
+#: (``_http_origin_of`` in :mod:`gshared_worker.auth_check`), and the socket to
+#: ``wss://`` on the same host with the path the Backend registered
+#: (:func:`gshared_worker.worker_socket.websocket_url`).
+DEFAULT_BACKEND_URL = "https://j15e204.p.ssafy.io"
 
 #: What a machine offers to do, when nobody has said otherwise.
 #:
@@ -82,7 +85,10 @@ _KNOWN_KEYS = _STRING_KEYS + ("workerTokenProtected",) + _INTEGER_KEYS + _LIST_K
 @dataclass(frozen=True)
 class WorkerSettings:
     backend_url: str
-    worker_id: str
+    #: None on a machine that has never been registered. It is issued by
+    #: registration, so it cannot be asked for before it: that machine goes on
+    #: to the sign-in window rather than stopping here.
+    worker_id: str | None
     hourly_price: int
     gpu_index: int
     supported_workloads: tuple[str, ...]
@@ -103,9 +109,45 @@ def worker_directory() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+#: The per-user folder a packaged Worker keeps its files in, under
+#: %LOCALAPPDATA%. The same root the instance lock already uses.
+USER_DATA_DIRECTORY_NAME = "G-shared"
+
+
+def data_directory(env: Mapping[str, str] | None = None) -> Path:
+    """Where this Worker reads and writes its own files.
+
+    Settings, the sealed token, the sealed signing key and the debug log.
+
+    Run from source, that is :func:`worker_directory`, exactly as before.
+
+    Packaged, the executable may sit somewhere its user cannot write --
+    ``C:\\Program Files`` is the ordinary case -- and a Worker that tries to
+    open its log there dies before it can say why. So a packaged Worker keeps
+    its files in ``%LOCALAPPDATA%\\G-shared``, one folder per Windows account,
+    which is also the account DPAPI seals them to.
+
+    The one exception is a **portable** copy: if ``worker-config.json`` is
+    already beside the executable, that folder is used. A supplier who set a
+    machine up that way keeps the token and the signing key they already have
+    rather than the Worker quietly starting a second identity somewhere else.
+    """
+    program = worker_directory()
+    if not getattr(sys, "frozen", False):
+        return program
+    if (program / CONFIG_FILE_NAME).is_file():
+        return program
+    root = (os.environ if env is None else env).get("LOCALAPPDATA")
+    if not root:
+        # Nowhere per-user to go. Beside the program is still better than
+        # refusing to start; if it is not writable the log says so.
+        return program
+    return Path(root) / USER_DATA_DIRECTORY_NAME
+
+
 def config_file_path(directory: Path | None = None) -> Path:
     """Where the settings and the stored credentials live, in one file."""
-    return (directory or worker_directory()) / CONFIG_FILE_NAME
+    return (directory or data_directory()) / CONFIG_FILE_NAME
 
 
 def read_config_file(path: Path) -> dict[str, object]:
@@ -224,11 +266,13 @@ def resolve_settings(
         DEFAULT_SUPPORTED_WORKLOADS,
     )
 
+    # workerId is not on this list. It is what registration hands back, so a
+    # first run has none, and refusing to start without one was a machine that
+    # could never be registered from the executable at all.
     missing = [
         key
         for key, value in (
             ("backendUrl", backend_url),
-            ("workerId", worker_id),
             ("hourlyPrice", hourly_price),
         )
         if value is None
@@ -248,13 +292,6 @@ def resolve_settings(
 
 
 def _missing_message(missing: list[str], path: Path, config_path: Path | None) -> str:
-    if config_path is None and missing == ["workerId"]:
-        return (
-            "this machine is not enrolled yet, so it has no workerId. "
-            f"{CONFIG_FILE_NAME} was not found at {path}. Copy "
-            f"{EXAMPLE_FILE_NAME} to that name and fill it in; enrolling the "
-            "machine and writing that file for you is not part of this build."
-        )
     location = (
         f"Set them in {config_path}"
         if config_path is not None

@@ -180,19 +180,26 @@ class WhatTheBuildKnowsOnItsOwnTest(unittest.TestCase):
 
 
 class AMachineNobodyConfiguredTest(unittest.TestCase):
-    def test_it_is_told_it_is_not_enrolled_rather_than_given_a_key_name(self):
+    """A first run: no file, no workerId. It is registered later, not refused here.
+
+    The workerId is issued by registration, so requiring it before registration
+    meant the executable could never register a machine at all.
+    """
+
+    def test_it_is_not_refused_for_having_no_worker_id(self):
         with ConfiguredDirectory() as directory:
-            with self.assertRaises(WorkerConfigurationError) as refused:
-                resolve_settings(env={}, directory=directory.path)
+            settings = resolve_settings(env={}, directory=directory.path)
 
-        self.assertIn("not enrolled yet", str(refused.exception))
+        self.assertIsNone(settings.worker_id)
+        self.assertIsNone(settings.worker_token)
+        self.assertIsNone(settings.config_path)
 
-    def test_the_message_names_the_file_to_create(self):
+    def test_it_still_knows_where_to_connect_and_what_it_costs(self):
         with ConfiguredDirectory() as directory:
-            with self.assertRaises(WorkerConfigurationError) as refused:
-                resolve_settings(env={}, directory=directory.path)
+            settings = resolve_settings(env={}, directory=directory.path)
 
-        self.assertIn(str(directory.path / CONFIG_FILE_NAME), str(refused.exception))
+        self.assertEqual(settings.backend_url, DEFAULT_BACKEND_URL)
+        self.assertEqual(settings.hourly_price, DEFAULT_HOURLY_PRICE)
 
 
 class AFileThatIsThereAndWrongTest(unittest.TestCase):

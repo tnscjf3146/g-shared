@@ -95,12 +95,12 @@ class AReadyMachineTest(StageTestCase):
     def test_the_supplier_is_told_it_is_ready(self):
         self.run_stage(diagnosis())
 
-        self.assertIn("GPU environment ready", self.output)
+        self.assertIn("GPU 환경이 준비되었습니다", self.output)
 
     def test_nothing_is_asked_of_them(self):
         self.run_stage(diagnosis())
 
-        self.assertNotIn("not ready", self.output)
+        self.assertNotIn("준비가 되지 않았습니다", self.output)
 
 
 class AMachineThatIsNotReadyTest(StageTestCase):

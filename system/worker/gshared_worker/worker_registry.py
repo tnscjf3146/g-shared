@@ -295,8 +295,8 @@ def _refused(answered: BackendAnswer, subject: str) -> RegistryAnswer:
     if status is not None and status >= 500:
         return RegistryAnswer(
             WorkerAuthState.BACKEND_UNREACHABLE,
-            "The G-shared service had a problem and could not answer. "
-            "Nothing was changed. Try again when it is back.",
+            "G-shared 서비스에 문제가 생겨 응답하지 못했습니다. "
+            "아무것도 바뀌지 않았습니다. 서비스가 복구되면 다시 시도하세요.",
         )
     if status == 403:
         return RegistryAnswer(

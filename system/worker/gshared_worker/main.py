@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from .config import WorkerSettings, resolve_settings, worker_directory
+from .config import WorkerSettings, data_directory, resolve_settings
 from .environment_check import check_environment
 from .errors import WorkerAlreadyRunningError, WorkerConfigurationError, WorkerError
 from .exit_codes import WorkerExitCode
@@ -31,6 +31,13 @@ from .runtime_check import ensure_runtime
 from .worker_connection import connect_to_backend
 
 _debug = logging.getLogger(LOGGER_NAME)
+
+#: The single-instance identity of a machine that has no workerId yet.
+#:
+#: Registration is what issues a workerId, so a first run cannot be guarded by
+#: one. Every unregistered run on this account and GPU shares this name instead,
+#: which is what stops two first runs from registering the machine twice.
+UNREGISTERED_IDENTITY = "unregistered"
 
 #: What a stage is: it is given the settings and the one way to speak to the
 #: supplier, and it returns the code the launcher reads.
@@ -46,7 +53,7 @@ def run(
     guard_factory: Any = WorkerInstanceGuard,
 ) -> int:
     """Everything, in order. Returns the code the launcher reads."""
-    directory = directory or worker_directory()
+    directory = directory or data_directory()
     log_path = start_debug_log(directory)
     stamp_the_build()
     say = out or print
@@ -68,16 +75,16 @@ def run(
         # it reads as a crash they caused.
         _debug.info("stopped from the keyboard")
         say("")
-        say("Stopped.")
+        say("중지했습니다.")
         exit_code = int(WorkerExitCode.OK)
     except Exception:
         # The last place anything can be written down. Beyond here the console
         # is destroyed with the process and the log is all that is left.
         _debug.exception("unexpected fault")
         say("")
-        say("G-shared stopped because of a fault it did not expect.")
-        say(f"  What went wrong is written to {log_path}.")
-        say("  Sending that file is enough for someone to tell you why.")
+        say("예상하지 못한 오류로 G-shared가 멈췄습니다.")
+        say(f"  오류 내용은 {log_path} 에 기록했습니다.")
+        say("  이 파일을 보내 주시면 원인을 확인할 수 있습니다.")
         exit_code = int(WorkerExitCode.UNEXPECTED_FAULT)
 
     _pause_if_the_window_will_close(exit_code, out=say)
@@ -95,7 +102,7 @@ def _start(
 ) -> int:
     """The run itself, with the failures that were anticipated named."""
     say("")
-    say("Reading configuration...")
+    say("설정을 읽는 중...")
     try:
         settings = resolve_settings(env=env, directory=directory)
     except WorkerConfigurationError as error:
@@ -103,7 +110,7 @@ def _start(
         # in it. Both are for the supplier to fix, and neither is a fault.
         _debug.info("configuration refused: %s", error)
         say("")
-        say("G-shared cannot start with this configuration.")
+        say("이 설정으로는 G-shared를 시작할 수 없습니다.")
         say(f"  {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
 
@@ -115,14 +122,20 @@ def _start(
         settings.config_path or "environment and defaults",
         "present" if settings.worker_token else "absent",
     )
-    say(f"  Worker {settings.worker_id} on GPU {settings.gpu_index}")
-    say(f"  Backend {settings.backend_url}")
+    if settings.worker_id is None:
+        say(f"  이 PC는 아직 등록되지 않았습니다 (GPU {settings.gpu_index}).")
+        say("  점검이 끝나면 로그인 창이 열립니다.")
+    else:
+        say(f"  Worker {settings.worker_id} (GPU {settings.gpu_index})")
+    say(f"  서버 {settings.backend_url}")
 
     say("")
-    say("Claiming this GPU for one Worker...")
+    say("이 GPU를 이 Worker 전용으로 잡는 중...")
     try:
         guard = guard_factory(
-            settings.worker_id, settings.gpu_index, lock_directory=lock_directory
+            settings.worker_id or UNREGISTERED_IDENTITY,
+            settings.gpu_index,
+            lock_directory=lock_directory,
         )
         acquired = guard.acquire()
     except ValueError as error:
@@ -130,24 +143,24 @@ def _start(
         # a launcher would retry.
         _debug.info("identity refused: %s", error)
         say("")
-        say(f"G-shared cannot start: {error}")
+        say(f"G-shared를 시작할 수 없습니다: {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
     except OSError:
         # The message would carry the state directory path; the log has it.
         _debug.exception("the Worker identity could not be acquired")
         say("")
-        say("G-shared could not claim this GPU. The debug log says why.")
+        say("이 GPU를 잡지 못했습니다. 원인은 디버그 로그에 있습니다.")
         return int(WorkerExitCode.EXPECTED_FAILURE)
 
     if not acquired:
         _debug.info("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
         say("")
-        say("G-shared is already running on this machine.")
-        say("  Only one Worker may serve a GPU at a time.")
+        say("이 PC에서 G-shared가 이미 실행 중입니다.")
+        say("  GPU 하나에는 Worker 하나만 실행할 수 있습니다.")
         say(f"  [{WorkerExitCode.ALREADY_RUNNING.issue_code}]")
         return int(WorkerExitCode.ALREADY_RUNNING)
 
-    say("  This GPU is now served by this Worker only.")
+    say("  이제 이 GPU는 이 Worker만 사용합니다.")
     try:
         return _run_the_worker(say, run_worker, settings)
     finally:
@@ -168,13 +181,13 @@ def _run_the_worker(
         # Something deeper found the same answer the guard did. Not a fault.
         _debug.info("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
         say("")
-        say("G-shared is already running on this machine.")
+        say("이 PC에서 G-shared가 이미 실행 중입니다.")
         return int(WorkerExitCode.ALREADY_RUNNING)
     except WorkerError as error:
         # Anticipated and already explained by whoever raised it.
         _debug.info("expected failure: %s", error)
         say("")
-        say(f"G-shared stopped: {error}")
+        say(f"G-shared가 멈췄습니다: {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
     _debug.info("worker stopped with exit code %s", code)
     return code
@@ -242,7 +255,7 @@ def _pause_if_the_window_will_close(
         if not (owns_console or _this_process_owns_the_console)():
             return
         say("")
-        say("Press Enter to close this window.")
+        say("Enter 키를 누르면 창이 닫힙니다.")
         (wait or input)()
     except Exception:
         # Being unable to hold the window open is not worth failing over; the

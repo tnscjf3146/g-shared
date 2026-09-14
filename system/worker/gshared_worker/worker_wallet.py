@@ -34,7 +34,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from .config import worker_directory
+from . import config as _config
 from .credentials import protect_current_user, unprotect_current_user
 from .logging_setup import LOGGER_NAME
 
@@ -139,7 +139,9 @@ class EthAccounts:
 
 
 def wallet_file_path(directory: Path | None = None) -> Path:
-    return (directory or worker_directory()) / WALLET_FILE_NAME
+    # Through the module, so the directory is decided at call time -- the same
+    # folder the settings file is read from.
+    return (directory or _config.data_directory()) / WALLET_FILE_NAME
 
 
 def load_wallet(
@@ -270,12 +272,12 @@ def prepare_wallet(
 
     if loaded.is_present:
         _debug.info("wallet: loaded %s", _short(loaded.wallet.address))
-        say(f"  Worker wallet ready: {loaded.wallet.short}")
+        say(f"  Worker 지갑 준비 완료: {loaded.wallet.short}")
         return loaded.wallet
 
-    say("  Preparing this machine's wallet for the first time...")
+    say("  이 PC의 지갑을 처음 만드는 중...")
     wallet = create_wallet(directory, protector=protector, accounts=accounts)
-    say(f"  Worker wallet ready: {wallet.short}")
+    say(f"  Worker 지갑 준비 완료: {wallet.short}")
     return wallet
 
 

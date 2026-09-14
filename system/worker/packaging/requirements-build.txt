@@ -1,0 +1,10 @@
+# What goes into G-shared.exe, and the tool that puts it there. Nothing else.
+#
+# The build installs exactly this into a fresh virtual environment, so the
+# bundle cannot pick up whatever happens to be installed on the build machine
+# (torch, pandas, pytest...). The runtime lines mirror pyproject.toml's
+# dependencies; the versions are the ones G-shared.exe was verified with.
+pyinstaller==6.22.3
+websockets==16.1.1
+web3==8.0.0
+eth-account==0.14.0

@@ -243,7 +243,7 @@ def take_the_job(
         # it would take a working machine offline and the next one would carry
         # the same message. Said, and carried on.
         _debug.info("job: refused an assignment -- %s", refused)
-        say(f"  A job was offered but could not be read: {refused}")
+        say(f"  작업이 들어왔지만 내용을 읽을 수 없습니다: {refused}")
         return
 
     outcome = slot.offer(job)
@@ -255,8 +255,7 @@ def take_the_job(
         _debug.info(
             "job: %s offered while holding %s -- not accepted",
             job.job_id, slot.held.job_id)
-        say(f"  A second job ({job.job_id}) was offered while {slot.held.job_id}"
-            " is still held. It was not accepted.")
+        say(f"  작업 {job.job_id}: {slot.held.job_id} 작업을 처리 중이라 수락하지 않았습니다.")
         return
 
     if outcome is OfferOutcome.STILL_ACCEPTING:
@@ -275,7 +274,7 @@ def take_the_job(
                  acceptance.operator_address, clock)
         return
 
-    say(f"  Job {job.job_id} offered. Verifying it before accepting...")
+    say(f"  작업 {job.job_id}: 들어왔습니다. 수락 전에 확인하는 중...")
     if not acceptance.start(job):
         # Should not happen -- the slot was IDLE -- but a reservation with
         # nobody deciding on it would sit for ever. Given back rather than held.
@@ -308,7 +307,7 @@ def cancel_the_job(
         request = read_cancellation(message)
     except JobAssignmentError as refused:
         _debug.info("job: refused a cancellation -- %s", refused)
-        say(f"  A cancellation arrived that could not be read: {refused}")
+        say(f"  취소 요청이 왔지만 내용을 읽을 수 없습니다: {refused}")
         return
 
     if request.reason == USER_REQUEST:
@@ -322,8 +321,7 @@ def cancel_the_job(
         # work away on a guess.
         _debug.info("job: cancellation for %s with reason %s is not handled "
                     "by this build", request.job_id, request.reason)
-        say(f"  Job {request.job_id} was cancelled ({request.reason}). This "
-            "version does not act on that reason.")
+        say(f"  작업 {request.job_id}: 취소되었습니다 ({request.reason}). 이 버전은 해당 사유를 처리하지 않습니다.")
         return
 
     held = slot.held
@@ -331,26 +329,22 @@ def cancel_the_job(
         # Nothing to give back. Reaching for the chain here would mean acting
         # on a job this machine has no record of ever holding.
         _debug.info("job: cancellation for %s but no job is held", request.job_id)
-        say(f"  Job {request.job_id} was cancelled, but this machine is not "
-            "holding it.")
+        say(f"  작업 {request.job_id}: 취소되었지만 이 PC가 맡은 작업이 아닙니다.")
         return
 
     if held.job_id != request.job_id:
         _debug.info("job: cancellation for %s while holding %s -- ignored",
                     request.job_id, held.job_id)
-        say(f"  A cancellation arrived for {request.job_id}, but this machine "
-            f"is holding {held.job_id}. Nothing was changed.")
+        say(f"  작업 {request.job_id}: 취소 요청이 왔지만 이 PC는 {held.job_id} 작업을 처리 중입니다. 아무것도 바뀌지 않았습니다.")
         return
 
-    say(f"  Job {request.job_id} was refused by the service. Releasing it on "
-        "chain...")
+    say(f"  작업 {request.job_id}: 서비스가 거절했습니다. 체인에서 반환하는 중...")
     if not acceptance.start_cleanup(held):
         # Busy, or no escrow configured. Either way the slot is kept: giving it
         # up while the chain may still have this job assigned here would lose
         # track of a job this machine owes.
         _debug.info("job: cleanup for %s could not be started", request.job_id)
-        say("  It could not be released right now. It is being kept so it is "
-            "not lost.")
+        say("  지금은 반환하지 못했습니다. 작업을 잃지 않도록 보관해 둡니다.")
 
 
 def _cancel_for_the_customer(
@@ -376,15 +370,13 @@ def _cancel_for_the_customer(
         # machine is running, and reaching for Docker or the chain would be
         # acting on somebody else's.
         _debug.info("cancel: %s arrived but no job is held", request.job_id)
-        say(f"  Job {request.job_id} was cancelled, but this machine is not "
-            "holding it.")
+        say(f"  작업 {request.job_id}: 취소되었지만 이 PC가 맡은 작업이 아닙니다.")
         return
 
     if held.job_id != request.job_id:
         _debug.info("cancel: %s arrived while holding %s -- ignored",
                     request.job_id, held.job_id)
-        say(f"  A cancellation arrived for {request.job_id}, but this machine "
-            f"is holding {held.job_id}. Nothing was changed.")
+        say(f"  작업 {request.job_id}: 취소 요청이 왔지만 이 PC는 {held.job_id} 작업을 처리 중입니다. 아무것도 바뀌지 않았습니다.")
         return
 
     if not acceptance.start_cancellation(held, request.reason):
@@ -392,11 +384,10 @@ def _cancel_for_the_customer(
         # giving the slot up while the chain may still have it assigned here
         # would lose track of something this machine owes.
         _debug.info("cancel: %s could not be started", request.job_id)
-        say(f"  Job {request.job_id} was cancelled, but this machine has "
-            "nothing running for it yet. It is being kept.")
+        say(f"  작업 {request.job_id}: 취소되었지만 아직 실행 중인 것이 없습니다. 보관해 둡니다.")
         return
 
-    say(f"  Job {request.job_id} was cancelled by the customer. Stopping it...")
+    say(f"  작업 {request.job_id}: 고객이 취소했습니다. 중지하는 중...")
 
 
 def answer_decisions(
@@ -545,12 +536,12 @@ def _say_settled(terminal: Any, say: Callable[..., None] | None) -> None:
     if say is None:
         return
     if isinstance(terminal, JobResultReady):
-        say(f"  Job {terminal.job_id} is complete and the result has been sent.")
+        say(f"  작업 {terminal.job_id}: 완료했고 결과를 보냈습니다.")
         return
     if isinstance(terminal, JobCancelledReady):
-        say(f"  Job {terminal.job_id} was cancelled and the deposit returned.")
+        say(f"  작업 {terminal.job_id}: 취소되어 예치금이 반환되었습니다.")
         return
-    say(f"  Job {terminal.job_id} ended: {terminal.code}.")
+    say(f"  작업 {terminal.job_id}: 종료 ({terminal.code})")
 
 
 def _settle(
@@ -584,7 +575,7 @@ def _settle(
 
     if result.accepted:
         slot.confirm()
-        say(f"  Job {job.job_id} accepted.")
+        say(f"  작업 {job.job_id}: 수락했습니다.")
         _say_yes(socket, job, result, operator_address, clock)
         # Only now: the Backend moves the Job to RUNNING on hearing that
         # message, and the execution context is not readable before it does.
@@ -599,7 +590,7 @@ def _settle(
         # definite answer, either before anything was signed or after a
         # transaction that demonstrably did not take the job. UNCERTAIN below
         # is the case where something of ours may still land.
-        say(f"  Job {job.job_id} was not accepted: {result.detail}")
+        say(f"  작업 {job.job_id}: 수락하지 못했습니다: {result.detail}")
         _say_no(socket, job.job_id,
                 result.code.value if result.code else "TRANSACTION_FAILED",
                 result.detail, clock)
@@ -611,8 +602,8 @@ def _settle(
     # kept until somebody looks -- deliberately, and said out loud. No
     # JOB_REJECTED either: saying no to a Job we may yet hold on chain would be
     # worse than saying nothing.
-    say(f"  Job {job.job_id} could not be confirmed: {result.detail}")
-    say("  It is being held rather than given up, in case it still completes.")
+    say(f"  작업 {job.job_id}: 확인하지 못했습니다: {result.detail}")
+    say("  아직 완료될 수 있으므로 포기하지 않고 보관해 둡니다.")
 
 
 def _start_runtime(acceptance: Any, job: AssignedJob,
@@ -624,9 +615,9 @@ def _start_runtime(acceptance: Any, job: AssignedJob,
     would look exactly like a training run that had started.
     """
     if acceptance is None or not acceptance.start_runtime(job):
-        say("  The job execution stage is not running on this machine yet.")
+        say("  이 PC에서는 아직 작업 실행 단계가 동작하지 않습니다.")
         return
-    say(f"  Job {job.job_id} is being prepared for training...")
+    say(f"  작업 {job.job_id}: 학습을 준비하는 중...")
 
 
 def _settle_runtime(
@@ -652,18 +643,17 @@ def _settle_runtime(
         return
 
     if outcome.succeeded:
-        say(f"  Job {job.job_id} finished training.")
+        say(f"  작업 {job.job_id}: 학습을 마쳤습니다.")
     else:
         reason = outcome.failure.value if outcome.failure else "UNKNOWN"
-        say(f"  Job {job.job_id} did not finish: {outcome.detail} ({reason})")
+        say(f"  작업 {job.job_id}: 끝내지 못했습니다: {outcome.detail} ({reason})")
 
     if acceptance is None or not acceptance.start_settlement(job, outcome):
         # A Worker with no settlement configured holds the Job and says so.
         # Silence here would look exactly like a result that had been sent.
-        say("  Sending the outcome to the service is not running on this "
-            "machine yet.")
+        say("  이 PC에서는 아직 결과를 서비스로 보내는 단계가 동작하지 않습니다.")
         return
-    say("  Storing the result and settling the escrow...")
+    say("  결과를 저장하고 에스크로를 정산하는 중...")
 
 
 def _settle_cancellation(
@@ -697,13 +687,12 @@ def _settle_cancellation(
         # finished and paid on chain; the service has it as cancelling and
         # will not accept the JOB_RESULT that is true. Neither message is
         # sent, and a person has to reconcile the two.
-        say(f"  Job {job.job_id} finished on chain just as it was cancelled.")
-        say("  The service and the chain disagree, so nothing was reported "
-            "for it. It is being kept.")
+        say(f"  작업 {job.job_id}: 취소되는 순간 체인에서 완료되었습니다.")
+        say("  서비스와 체인의 상태가 달라 보고하지 않았습니다. 보관해 둡니다.")
         return
 
-    say(f"  Job {job.job_id} could not be cancelled cleanly: {detail}")
-    say("  It is being held rather than reported.")
+    say(f"  작업 {job.job_id}: 깔끔하게 취소하지 못했습니다: {detail}")
+    say("  보고하지 않고 보관해 둡니다.")
 
 
 def _settle_settlement(
@@ -723,9 +712,8 @@ def _settle_settlement(
     if settled is not None and not isinstance(settled, Unsettled):
         return
     detail = getattr(settled, "detail", "") or "the outcome could not be settled"
-    say(f"  Job {job.job_id} could not be settled: {detail}")
-    say("  It is being held rather than reported, because the chain and this "
-        "machine do not agree.")
+    say(f"  작업 {job.job_id}: 정산하지 못했습니다: {detail}")
+    say("  체인과 이 PC의 상태가 달라 보고하지 않고 보관해 둡니다.")
 
 
 def _settle_cleanup(
@@ -752,17 +740,14 @@ def _settle_cleanup(
     job, result = decision.job, decision.result
 
     if result.accepted:
-        say(f"  Job {job.job_id} was released on chain. The deposit goes back "
-            "to the client.")
+        say(f"  작업 {job.job_id}: 체인에서 반환되었습니다. 예치금은 고객에게 돌아갑니다.")
         _say_cancelled(socket, job, result, clock)
         slot.release()
         return
 
     if result.outcome is AcceptOutcome.UNCERTAIN:
-        say(f"  Job {job.job_id} could not be confirmed as released: "
-            f"{result.detail}")
-        say("  It is being held rather than given up, in case the transaction "
-            "still lands.")
+        say(f"  작업 {job.job_id}: 반환을 확인하지 못했습니다: {result.detail}")
+        say("  트랜잭션이 아직 처리될 수 있으므로 포기하지 않고 보관해 둡니다.")
         return
 
     if result.state is JobState.COMPLETED:
@@ -772,25 +757,23 @@ def _settle_cleanup(
         # place to decide which side is wrong.
         _debug.info("job: %s is COMPLETED on chain but the service cancelled it",
                     job.job_id)
-        say(f"  Job {job.job_id} is already completed on chain, but the "
-            "service asked to cancel it. Nothing was changed on either side.")
-        say("  This needs a person to look at it.")
+        say(f"  작업 {job.job_id}: 체인에서는 이미 완료되었는데 서비스가 취소를 요청했습니다. 양쪽 모두 아무것도 바꾸지 않았습니다.")
+        say("  담당자 확인이 필요합니다.")
         return
 
     if result.state in (JobState.FUNDED, JobState.NONE):
         # Never ours on chain, so there is nothing to give back and nothing to
         # report. The reservation is let go because holding it would block
         # real work over a job this machine never had.
-        say(f"  Job {job.job_id} was never accepted on chain, so there is "
-            "nothing to release.")
+        say(f"  작업 {job.job_id}: 체인에서 수락된 적이 없어 반환할 것이 없습니다.")
         slot.release()
         return
 
     # Assigned to a different operator, or a transaction that reverted. The
     # slot is kept: this machine cannot act on the job and cannot prove it is
     # free of it either.
-    say(f"  Job {job.job_id} could not be released: {result.detail}")
-    say("  It is being held rather than given up.")
+    say(f"  작업 {job.job_id}: 반환하지 못했습니다: {result.detail}")
+    say("  포기하지 않고 보관해 둡니다.")
 
 
 def _say_cancelled(
@@ -995,29 +978,28 @@ def _worth_retrying(result: SocketResult) -> bool:
 #: :mod:`gshared_worker.auth_check`.
 _IN_PLAIN_WORDS = {
     SocketOutcome.HANDSHAKE_REFUSED: (
-        "The G-shared service would not accept this machine's connection.",
-        "Its credentials were accepted a moment ago, so this is worth reporting "
-        "rather than retrying.",
+        "G-shared 서비스가 이 PC의 연결을 받아들이지 않았습니다.",
+        "방금 인증은 통과했으므로 재시도보다 문의가 필요한 상황입니다.",
     ),
     SocketOutcome.UNREACHABLE: (
-        "The G-shared service could not be reached.",
-        "Nothing was changed. Try again when it is back.",
+        "G-shared 서비스에 연결할 수 없습니다.",
+        "아무것도 바뀌지 않았습니다. 서비스가 복구되면 다시 시도하세요.",
     ),
     SocketOutcome.REGISTRATION_TIMED_OUT: (
-        "The G-shared service accepted the connection but never confirmed this machine.",
-        "Nothing was changed here. Try again in a moment.",
+        "G-shared 서비스가 연결은 받았지만 이 PC를 확인해 주지 않았습니다.",
+        "이 PC에서는 아무것도 바뀌지 않았습니다. 잠시 후 다시 시도하세요.",
     ),
     SocketOutcome.MALFORMED_ACK: (
-        "The G-shared service answered with something this version does not understand.",
-        "This is a problem with the service rather than with this machine.",
+        "G-shared 서비스가 이 버전이 이해하지 못하는 응답을 보냈습니다.",
+        "이 PC가 아니라 서비스 쪽 문제입니다.",
     ),
     SocketOutcome.WRONG_WORKER: (
-        "The G-shared service confirmed a different machine.",
-        "This machine was not registered. Nothing was changed here.",
+        "G-shared 서비스가 다른 PC를 확인했습니다.",
+        "이 PC는 등록되지 않았습니다. 이 PC에서는 아무것도 바뀌지 않았습니다.",
     ),
     SocketOutcome.CLOSED_BEFORE_ACK: (
-        "The connection to the G-shared service ended before this machine was confirmed.",
-        "Nothing was changed here. Try again in a moment.",
+        "이 PC가 확인되기 전에 G-shared 서비스와의 연결이 끊겼습니다.",
+        "이 PC에서는 아무것도 바뀌지 않았습니다. 잠시 후 다시 시도하세요.",
     ),
 }
 
@@ -1097,7 +1079,7 @@ def _connect_until_stopped(
             delay = next(delays)
             _debug.info(
                 "websocket: %s -- retrying in %gs", result.outcome.value, delay)
-            say(f"  Not connected ({result.detail}). Retrying in {delay:g}s...")
+            say(f"  연결되지 않았습니다 ({result.detail}). {delay:g}초 후 다시 시도합니다...")
             if stop.wait(delay):
                 break
             continue
@@ -1105,7 +1087,7 @@ def _connect_until_stopped(
         # Registered. Whatever it took to get here is not held against the
         # next failure, so the next one starts from one second again.
         delays = backoff_delays()
-        say("  Connected. This machine is registered with the service.")
+        say("  연결되었습니다. 이 PC가 서비스에 등록되어 있습니다.")
         _debug.info("websocket: registered as %s", socket.worker_id)
         # A training run carried on while the line was down. The Backend's
         # view of it stopped at whatever last got through, so the newest
@@ -1128,10 +1110,10 @@ def _connect_until_stopped(
             _debug.info("websocket: closed on request")
             break
         _debug.info("websocket: connection lost -- %s", detail)
-        say(f"  Connection lost ({detail}). Reconnecting...")
+        say(f"  연결이 끊겼습니다 ({detail}). 다시 연결하는 중...")
 
     say("")
-    say("Disconnected from the G-shared service.")
+    say("G-shared 서비스와 연결이 끊겼습니다.")
     return int(WorkerExitCode.OK)
 
 
@@ -1222,7 +1204,7 @@ def connect_to_backend(
     below and :func:`gshared_worker.main.run` turns that into a clean stop.
     """
     say("")
-    say("Connecting to the G-shared service...")
+    say("G-shared 서비스에 연결하는 중...")
 
     if credentials is None:
         loaded = load_credentials()
@@ -1232,7 +1214,7 @@ def connect_to_backend(
             # because the alternative is an AttributeError three lines down.
             _debug.info("websocket: no credentials after a successful auth stage")
             say("")
-            say("G-shared cannot connect: this machine's credentials are no longer readable.")
+            say("G-shared에 연결할 수 없습니다: 이 PC의 인증 정보를 더 이상 읽을 수 없습니다.")
             return int(WorkerExitCode.CREDENTIAL_MISMATCH)
         credentials = loaded.credentials
 

@@ -553,7 +553,7 @@ class TestAJobArrivingOnTheConnection(unittest.TestCase):
     def test_the_supplier_is_told(self):
         _, _, _, lines = self.run_with(At(5, self.assign()))
 
-        self.assertTrue(any("accepted" in line for line in lines))
+        self.assertTrue(any("수락했습니다" in line for line in lines))
 
     def test_the_reply_carries_no_credential(self):
         _, backend, _, _ = self.run_with(At(5, self.assign()))
@@ -681,7 +681,7 @@ class TestHoldingOneJobAcrossConnections(unittest.TestCase):
         _, _, _, lines = self.offer(self.assign("456"), slot)
 
         self.assertTrue(
-            any("456" in line and "not accepted" in line for line in lines))
+            any("456" in line and "수락하지" in line for line in lines))
 
     def test_the_supervisor_keeps_one_slot_across_a_reconnect(self):
         # A reconnect does not forget: the Backend still has it assigned here.
@@ -1058,7 +1058,7 @@ class TestTheStage(unittest.TestCase):
         code, lines = self.stage(registering(HEARTBEAT_ACK))
 
         self.assertEqual(code, int(WorkerExitCode.OK))
-        self.assertTrue(any("registered with the service" in line for line in lines))
+        self.assertTrue(any("서비스에 등록되어 있습니다" in line for line in lines))
 
     def test_a_refused_token_ends_with_a_credential_code(self):
         code, _ = self.stage(HandshakeRefused(401), stop=Stop(stop_after=99))
@@ -1068,14 +1068,14 @@ class TestTheStage(unittest.TestCase):
     def test_a_service_that_is_down_says_when_it_will_try_again(self):
         _, lines = self.stage(TransportUnavailable("down"), stop=Stop(stop_after=1))
 
-        self.assertTrue(any("Retrying in 1s" in line for line in lines))
+        self.assertTrue(any("1초 후 다시 시도합니다" in line for line in lines))
 
     def test_a_lost_connection_says_it_is_reconnecting(self):
         _, lines = self.stage(
             FakeTransport(REGISTER_ACK, ConnectionWentAway("gone")),
             registering(HEARTBEAT_ACK), stop=Stop(stop_after=2))
 
-        self.assertTrue(any("Reconnecting" in line for line in lines))
+        self.assertTrue(any("다시 연결하는 중" in line for line in lines))
 
     def test_nothing_it_prints_is_the_token(self):
         for attempt in (registering(HEARTBEAT_ACK), HandshakeRefused(401),

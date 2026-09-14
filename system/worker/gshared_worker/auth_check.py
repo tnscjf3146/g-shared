@@ -61,31 +61,28 @@ DescribeMachine = Callable[[], "MachineFacts | None"]
 #: What each state means to the person reading the console.
 _IN_PLAIN_WORDS = {
     WorkerAuthState.CREDENTIAL_ERROR: (
-        "The stored G-shared credentials cannot be read on this Windows account.",
-        "Sign in on the account that registered this machine, or delete "
-        "worker-config.json to register it afresh.",
+        "저장된 G-shared 인증 정보를 이 Windows 계정에서 읽을 수 없습니다.",
+        "이 PC를 등록한 Windows 계정으로 실행하거나, worker-config.json을 지운 뒤 다시 등록하세요.",
     ),
     WorkerAuthState.REVOKED: (
-        "This machine is no longer registered to a G-shared account.",
-        "Register it again to start earning from it.",
+        "이 PC는 더 이상 G-shared 계정에 등록되어 있지 않습니다.",
+        "수익을 받으려면 다시 등록하세요.",
     ),
     WorkerAuthState.AUTH_FAILED: (
-        "The G-shared service refused this machine's credentials.",
-        "Register it again to start earning from it.",
+        "G-shared 서비스가 이 PC의 인증 정보를 거부했습니다.",
+        "수익을 받으려면 다시 등록하세요.",
     ),
     WorkerAuthState.WORKER_NOT_FOUND: (
-        "The G-shared service has no record of this machine.",
-        "Nothing was changed here. If it was removed from your account, "
-        "register it again to start earning from it.",
+        "G-shared 서비스에 이 PC의 등록 기록이 없습니다.",
+        "이 PC에서는 아무것도 바뀌지 않았습니다. 계정에서 삭제했다면 다시 등록하세요.",
     ),
     WorkerAuthState.BACKEND_CONTRACT_ERROR: (
-        "The G-shared service did not answer that request.",
-        "Nothing was changed. This is a problem with the service rather than "
-        "with this machine, so registering it again would not help.",
+        "G-shared 서비스가 그 요청에 응답하지 않았습니다.",
+        "아무것도 바뀌지 않았습니다. 이 PC가 아니라 서비스 쪽 문제라서 다시 등록해도 해결되지 않습니다.",
     ),
     WorkerAuthState.BACKEND_UNREACHABLE: (
-        "The G-shared service could not be reached.",
-        "Nothing was changed. Try again when it is back.",
+        "G-shared 서비스에 연결할 수 없습니다.",
+        "아무것도 바뀌지 않았습니다. 서비스가 복구되면 다시 시도하세요.",
     ),
 }
 
@@ -102,7 +99,7 @@ def authenticate_worker(
 ) -> int:
     """Establish who this machine belongs to, or say what is in the way."""
     say("")
-    say("Checking this machine's G-shared registration...")
+    say("이 PC의 G-shared 등록 상태를 확인하는 중...")
 
     loaded = load_credentials()
     _debug.info("credentials: %s -- %s", loaded.state.value, loaded.detail)
@@ -135,10 +132,10 @@ def _describe_this_machine(
     if facts is None:
         _debug.info("enrolment stopped: this machine could not be described")
         say("")
-        say("G-shared cannot register this machine yet.")
-        say("  Its GPU could not be described, so there is nothing to offer.")
+        say("아직 이 PC를 등록할 수 없습니다.")
+        say("  GPU 정보를 읽지 못해 등록할 내용이 없습니다.")
         return None
-    say(f"  This machine offers {facts.gpu_model} ({facts.vram_mb} MB).")
+    say(f"  이 PC의 GPU: {facts.gpu_model} ({facts.vram_mb} MB)")
     return facts
 
 
@@ -151,8 +148,8 @@ def _measure_this_gpu(
     is a machine the scheduler sends work to on false pretences.
     """
     say("")
-    say("Measuring what this GPU can do...")
-    say("  It runs a short fine-tuning workload. This takes about a minute.")
+    say("GPU 성능을 측정하는 중...")
+    say("  짧은 파인튜닝 작업을 실행합니다. 약 1분 걸립니다.")
 
     report = (benchmark or _run_the_benchmark)()
     if report.succeeded:
@@ -161,9 +158,9 @@ def _measure_this_gpu(
 
     _debug.info("benchmark refused: %s -- %s", report.outcome.value, report.detail)
     say("")
-    say("G-shared could not measure this GPU, so it was not registered.")
+    say("GPU 성능을 측정하지 못해 등록하지 않았습니다.")
     say(f"  {report.detail}")
-    say("  Nothing was changed here.")
+    say("  이 PC에서는 아무것도 바뀌지 않았습니다.")
     return None
 
 
@@ -184,7 +181,7 @@ def _enrol(
     make_wallet: Callable[..., Any] | None = None,
 ) -> WorkerAuthResult:
     """Sign a person in, measure the GPU, and attach the machine to them."""
-    say("  This machine is not registered yet. Sign in to attach it to your account.")
+    say("  이 PC는 아직 등록되지 않았습니다. 로그인하면 계정에 연결됩니다.")
 
     ask = ask_to_sign_in or _open_sign_in_window(settings)
     access_token = ask()
@@ -193,7 +190,7 @@ def _enrol(
         # time was spent on a machine nobody is registering.
         return WorkerAuthResult(
             WorkerAuthState.NEEDS_ENROLLMENT,
-            "Sign-in was cancelled, so this machine is still unregistered.",
+            "로그인을 취소해 이 PC는 아직 등록되지 않았습니다.",
         )
 
     measured = _measure_this_gpu(say, benchmark)
@@ -201,7 +198,7 @@ def _enrol(
         del access_token
         return WorkerAuthResult(
             WorkerAuthState.NEEDS_ENROLLMENT,
-            "This GPU could not be measured, so this machine is still unregistered.",
+            "GPU 성능을 측정하지 못해 이 PC는 아직 등록되지 않았습니다.",
         )
     # The signing key comes before registration, because the address it
     # derives is a required registration field now. A Worker registered
@@ -216,7 +213,7 @@ def _enrol(
         del access_token
         return WorkerAuthResult(
             WorkerAuthState.CREDENTIAL_ERROR,
-            f"This machine's signing key could not be prepared: {refused}")
+            f"이 PC의 서명 키를 준비하지 못했습니다: {refused}")
     registration = WorkerRegistrationRequest.describing(
         facts, measured.result.tokens_per_sec,
         operator_address=wallet.address,
@@ -224,15 +221,20 @@ def _enrol(
         benchmark_version=BENCHMARK_VERSION)
 
     say("")
-    say("  Registering this machine...")
+    say("  이 PC를 등록하는 중...")
     result, credentials = service.register(access_token, registration)
     # The access token has done its one job. It is not written anywhere and
     # nothing below this line can reach it.
     del access_token
 
-    if credentials is not None:
-        store_credentials(credentials.worker_id, credentials.worker_token)
-    return result
+    if credentials is None:
+        return result
+    store_credentials(credentials.worker_id, credentials.worker_token)
+    # Read back what was just sealed and ask the Backend about it, the same way
+    # every later start does. A token that cannot be unsealed on this account,
+    # or that the Backend does not accept, is found here -- before connecting
+    # -- rather than on the next start after the window has gone.
+    return service.authenticate(load_credentials())
 
 
 def _open_sign_in_window(settings: WorkerSettings) -> Callable[[], str | None]:
@@ -282,9 +284,9 @@ def _report(say: Callable[..., None], result: WorkerAuthResult) -> int:
     _debug.info("worker auth: %s -- %s", result.state.value, result.detail)
 
     if result.is_authenticated:
-        say(f"  Registered as {result.worker_id}.")
+        say(f"  등록되었습니다: {result.worker_id}")
         say("")
-        say("AUTH READY.")
+        say("등록 확인 완료.")
         return int(WorkerExitCode.OK)
 
     said, remedy = _IN_PLAIN_WORDS.get(

@@ -93,23 +93,23 @@ class AuthPresenter:
         self.screen = Screen.LOGIN
         return Shown(
             Screen.LOGIN,
-            notice="Account created. Sign in with it now.",
+            notice="계정을 만들었습니다. 이제 로그인하세요.",
         )
 
 
 def _missing_login(email: str, password: str) -> str:
     if not email.strip():
-        return "Enter your email."
+        return "이메일을 입력하세요."
     if not password:
-        return "Enter your password."
+        return "비밀번호를 입력하세요."
     return ""
 
 
 def _missing_signup(email: str, password: str, nickname: str) -> str:
     if not email.strip():
-        return "Enter your email."
+        return "이메일을 입력하세요."
     if not password:
-        return "Enter a password."
+        return "비밀번호를 입력하세요."
     if not nickname.strip():
-        return "Enter a nickname."
+        return "닉네임을 입력하세요."
     return ""
