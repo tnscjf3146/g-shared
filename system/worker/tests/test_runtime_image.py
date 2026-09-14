@@ -6,9 +6,10 @@ Worker that ran what it was sent would give anyone who could write that field
 execution on every supplier's PC, with a GPU attached and a customer's dataset
 mounted.
 
-So two rules, and every test here is one of them seen from a different angle:
-the repository is configuration on this machine, and the image is named by a
-digest that cannot move.
+So three rules, and every test here is one of them seen from a different
+angle: the repository is configuration on this machine, the image is named by
+a digest that cannot move, and that digest is the one runtime this Worker was
+verified with.
 """
 
 from __future__ import annotations
@@ -16,7 +17,12 @@ from __future__ import annotations
 import unittest
 
 from gshared_worker.runtime_image import (
+    APPROVED_DIGESTS,
     APPROVED_REPOSITORIES,
+    CANONICAL_RUNTIME_DIGEST,
+    CANONICAL_RUNTIME_REFERENCE,
+    CANONICAL_RUNTIME_REPOSITORY,
+    CANONICAL_RUNTIME_TAG,
     PLACEHOLDER_DIGEST,
     ImageRefused,
     check_image,
@@ -26,14 +32,91 @@ from gshared_worker.runtime_image import (
 )
 
 REPO = "gshared/qlora-sft-runtime"
-DIGEST = "sha256:" + "ab" * 32
+#: The approved image, by content. Read from the module, never retyped, so a
+#: runtime bump cannot leave a test asserting the old value.
+DIGEST = CANONICAL_RUNTIME_DIGEST
 REF = f"{REPO}@{DIGEST}"
 
+#: A digest of the right shape that is not the approved runtime.
+UNKNOWN_DIGEST = "sha256:" + "ab" * 32
+
 #: The runtime as published on Docker Hub -- the real 0.2.0 digest, read from
-#: the registry after the push, not a made-up value.
+#: the registry after the push, not a made-up value. Written out here once on
+#: purpose: if the module constant changes, this test is the one that says so.
 HUB_REPO = "le3560/gshared-qlora-sft-runtime"
 HUB_DIGEST = "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"
 HUB_REF = f"{HUB_REPO}@{HUB_DIGEST}"
+
+
+class TestTheCanonicalRuntime(unittest.TestCase):
+    """One value for the whole of System, and the value is the published one."""
+
+    def test_it_is_the_published_docker_hub_image(self):
+        self.assertEqual(CANONICAL_RUNTIME_REPOSITORY, HUB_REPO)
+        self.assertEqual(CANONICAL_RUNTIME_DIGEST, HUB_DIGEST)
+        self.assertEqual(CANONICAL_RUNTIME_TAG, "0.2.0")
+
+    def test_the_reference_is_repository_at_digest(self):
+        self.assertEqual(CANONICAL_RUNTIME_REFERENCE, HUB_REF)
+        self.assertNotIn(":0.2.0", CANONICAL_RUNTIME_REFERENCE)
+
+    def test_it_is_accepted(self):
+        image = check_image(CANONICAL_RUNTIME_REFERENCE, CANONICAL_RUNTIME_DIGEST)
+
+        self.assertEqual(image.reference, CANONICAL_RUNTIME_REFERENCE)
+
+    def test_it_is_the_only_approved_digest(self):
+        self.assertEqual(APPROVED_DIGESTS, (CANONICAL_RUNTIME_DIGEST,))
+
+    def test_its_repository_is_approved(self):
+        self.assertIn(CANONICAL_RUNTIME_REPOSITORY, APPROVED_REPOSITORIES)
+
+    def test_the_backend_seed_value_is_refused(self):
+        # What production's workloads row carries today.
+        seed = f"gshared/qlora-sft-runtime@{PLACEHOLDER_DIGEST}"
+
+        with self.assertRaises(ImageRefused) as caught:
+            check_image(seed, PLACEHOLDER_DIGEST)
+
+        self.assertIn("placeholder", str(caught.exception))
+
+
+class TestTheApprovedDigest(unittest.TestCase):
+    """A well-formed digest in an approved repository is still not enough."""
+
+    def test_an_unknown_digest_in_the_canonical_repository_is_refused(self):
+        with self.assertRaises(ImageRefused) as caught:
+            check_image(f"{HUB_REPO}@{UNKNOWN_DIGEST}", UNKNOWN_DIGEST)
+
+        self.assertIn("not an approved G-shared runtime digest", str(caught.exception))
+
+    def test_an_unknown_digest_in_the_original_repository_is_refused(self):
+        with self.assertRaises(ImageRefused):
+            check_image(f"{REPO}@{UNKNOWN_DIGEST}", UNKNOWN_DIGEST)
+
+    def test_the_refusal_names_the_image_this_worker_runs(self):
+        with self.assertRaises(ImageRefused) as caught:
+            check_image(f"{HUB_REPO}@{UNKNOWN_DIGEST}", UNKNOWN_DIGEST)
+
+        self.assertIn(CANONICAL_RUNTIME_REFERENCE, str(caught.exception))
+
+    def test_a_missing_digest_is_refused(self):
+        for missing in ("", None, "   "):
+            with self.subTest(digest=missing), self.assertRaises(ImageRefused):
+                check_image(HUB_REF, missing)
+
+    def test_a_missing_reference_is_refused(self):
+        for missing in ("", None):
+            with self.subTest(reference=missing), self.assertRaises(ImageRefused):
+                check_image(missing, HUB_DIGEST)
+
+    def test_the_right_digest_under_the_wrong_repository_is_refused(self):
+        with self.assertRaises(ImageRefused):
+            check_image(f"attacker/gshared-qlora-sft-runtime@{HUB_DIGEST}", HUB_DIGEST)
+
+    def test_an_explicitly_narrowed_digest_list_is_honoured(self):
+        with self.assertRaises(ImageRefused):
+            check_image(HUB_REF, HUB_DIGEST, approved_digests=())
 
 
 class TestTheApprovedRepository(unittest.TestCase):
@@ -154,7 +237,7 @@ class TestTheDigestMustBeImmutable(unittest.TestCase):
             check_image(f"{REPO}@{bad}", bad)
 
     def test_uppercase_hex_is_normalised_rather_than_refused(self):
-        upper = "sha256:" + "AB" * 32
+        upper = "sha256:" + DIGEST.removeprefix("sha256:").upper()
 
         self.assertEqual(check_image(f"{REPO}@{upper}", upper).digest, DIGEST)
 
@@ -183,6 +266,9 @@ class TestThePlaceholderDigest(unittest.TestCase):
         # If the seed value ever changes shape this test fails rather than the
         # refusal silently stopping working.
         self.assertEqual(PLACEHOLDER_DIGEST, "sha256:" + "0" * 64)
+
+    def test_it_is_never_an_approved_digest(self):
+        self.assertNotIn(PLACEHOLDER_DIGEST, APPROVED_DIGESTS)
 
 
 class TestTheCommands(unittest.TestCase):

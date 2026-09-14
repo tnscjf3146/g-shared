@@ -1,6 +1,6 @@
 """Which container this machine is willing to run, and how it is named.
 
-Two rules, and the second is the one that does the work.
+Three rules, and the last is the one that does the work.
 
 **Only the approved repository.** The Backend sends an image reference. If the
 Worker ran whatever it was sent, then anyone who could write to that field --
@@ -15,11 +15,31 @@ be reviewed. ``repository@sha256:…`` names exactly one image for ever. A tag i
 refused in production even when it points at the right image today, because
 the point is that nobody has to check.
 
+**Only the approved digest.** A well-formed digest in an approved repository is
+still whatever somebody pushed there. The runtime this Worker was verified
+against is one exact image, named below, and nothing else is run. A new runtime
+version is a new Worker release, not a new catalog row.
+
 The all-zero digest gets its own refusal. It is not a hypothetical: the
 Backend's catalog seed carries
 ``sha256:0000…0000`` as a placeholder, with a TODO to replace it. It is
 well-formed, it would pass a regular-expression check, and pulling it fails in
 a way that looks like a network problem.
+
+**The canonical runtime** -- the one value every other place in System reads:
+
+========== ==========================================================================
+repository ``le3560/gshared-qlora-sft-runtime``
+tag        ``0.2.0`` (for people; never used to pull)
+digest     ``sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d``
+reference  ``le3560/gshared-qlora-sft-runtime@sha256:acda63bc…126d``
+========== ==========================================================================
+
+The digest was read from Docker Hub after the push, and this image ran the
+Qwen3-0.6B QLoRA job end to end on an RTX 4070 Laptop GPU through the Worker.
+The Backend's ``workloads`` catalog must carry exactly this repository and
+digest; its seed value ``gshared/qlora-sft-runtime@sha256:0000…0000`` is an
+invalid placeholder and is refused.
 """
 
 from __future__ import annotations
@@ -30,22 +50,35 @@ from dataclasses import dataclass
 #: ``sha256:`` and sixty-four lowercase hex digits. Nothing else is a digest.
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
+#: Where the verified runtime is published.
+CANONICAL_RUNTIME_REPOSITORY = "le3560/gshared-qlora-sft-runtime"
+
+#: The human name of that image. Documentation only: pulls are by digest.
+CANONICAL_RUNTIME_TAG = "0.2.0"
+
+#: The exact image the Worker was verified with, read from the registry.
+CANONICAL_RUNTIME_DIGEST = (
+    "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d")
+
+#: What the Backend's execution context should carry as ``imageRef``.
+CANONICAL_RUNTIME_REFERENCE = f"{CANONICAL_RUNTIME_REPOSITORY}@{CANONICAL_RUNTIME_DIGEST}"
+
 #: A repository this machine will run. Configuration, not a message.
 #:
 #: A tuple rather than a string because a second approved runtime is a
 #: foreseeable change and a mirror is a likely one, and both should be a line
 #: here rather than a rewrite.
 #:
-#: ``le3560/gshared-qlora-sft-runtime`` is where the runtime is actually
-#: published on Docker Hub (0.2.0 is
-#: ``sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d``).
 #: The original name stays: removing it would refuse contexts that already
 #: carry it, and adding a name widens nothing else -- the digest rules below
-#: apply to both exactly the same.
+#: apply to both exactly the same, and :data:`APPROVED_DIGESTS` pins the image.
 APPROVED_REPOSITORIES: tuple[str, ...] = (
     "gshared/qlora-sft-runtime",
-    "le3560/gshared-qlora-sft-runtime",
+    CANONICAL_RUNTIME_REPOSITORY,
 )
+
+#: The images this machine will run, by content. Only the canonical runtime.
+APPROVED_DIGESTS: tuple[str, ...] = (CANONICAL_RUNTIME_DIGEST,)
 
 #: The placeholder in the Backend's catalog seed. Named so the refusal can say
 #: what it actually is instead of "pull failed".
@@ -74,6 +107,7 @@ def check_image(
     digest: str,
     *,
     approved: tuple[str, ...] = APPROVED_REPOSITORIES,
+    approved_digests: tuple[str, ...] = APPROVED_DIGESTS,
 ) -> RuntimeImage:
     """The image to run, or a refusal. Both arguments come from the Backend.
 
@@ -117,6 +151,13 @@ def check_image(
     if repository not in approved:
         raise ImageRefused(
             f"{repository!r} is not an approved G-shared runtime repository")
+
+    if wanted not in approved_digests:
+        # Right repository, right shape, and still not the image this Worker
+        # was verified with. Whatever else was pushed there is not reviewed.
+        raise ImageRefused(
+            f"{wanted} is not an approved G-shared runtime digest; this Worker "
+            f"runs {CANONICAL_RUNTIME_REFERENCE}")
 
     return RuntimeImage(repository=repository, digest=wanted)
 
