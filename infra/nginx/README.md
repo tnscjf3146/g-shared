@@ -16,6 +16,8 @@ G-shared 배포 서버(EC2)의 nginx 리버스 프록시 설정 기록본입니�
    └─ /    → localhost:3000 (프론트 컨테이너)
 ```
 
+워커 실행파일 `/downloads/G-shared.exe` 는 nginx 에 별도 location 이 없다. `/` 를 타고 프론트 컨테이너가 이미지 안의 `public/downloads/G-shared.exe` 를 내려준다(원본은 저장소 `system/G-shared/G-shared.exe`, `docker-compose.yml` 의 `additional_contexts` 로 빌드 때 복사).
+
 ## 서버에 반영하는 법
 
 서버에서:

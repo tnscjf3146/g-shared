@@ -153,7 +153,7 @@ src/
 
 ## 8. 결정 필요
 
-- [ ] **다운로드 URL** — 후보: (a) 저장소 `system/G-shared/G-shared.exe` 의 GitLab raw 링크(지금 바로 가능, 빌드마다 커밋 필요, 3MB 바이너리가 git 에 계속 쌓임) (b) nginx 정적 경로 `/downloads/G-shared.exe`(infra 에 location 1개 추가, CI 가 빌드 산출물 복사) (c) GitLab Release 자산. **추천 (b)**, 시스템 담당이 exe 를 어디에 올릴지에 달림. 프론트는 `NEXT_PUBLIC_WORKER_DOWNLOAD_URL` 한 개만 읽고, 없으면 (a) 로.
+- [x] **다운로드 URL** — 같은 오리진 `/downloads/G-shared.exe` 로 결정. (a) GitLab raw 링크는 저장소가 비공개라 비로그인 사용자가 로그인 페이지(HTML)를 받게 되어 폐기. 원본은 저장소 `system/G-shared/G-shared.exe` 하나이고, 프론트 이미지 빌드 때 `docker-compose.yml` 의 `additional_contexts`(worker)로 `public/downloads/` 에 복사된다. nginx 는 기존 `/ → :3000` 그대로라 수정이 없다. 프론트는 `NEXT_PUBLIC_WORKER_DOWNLOAD_URL` 이 있으면 그 값을, 없으면 `/downloads/G-shared.exe` 를 쓴다.
 - [ ] **`GET /api/workers/me` · `DELETE /api/workers/{id}`** — 백엔드 요청(§1-2). 직접 넣을지 요청할지는 사용자 결정(지갑 GET 때와 동일).
 - [ ] **경로 이름** — `/workers` vs `/gpus`. 백엔드·워커 프로그램·랜딩 문구가 전부 "워커/Worker" 라 `/workers` 로 간다.
 - [ ] **벤치마크가 없는 워커** — 현재 워커 프로그램은 벤치마크 미구현이면 **등록을 중단**한다(auth_check "cannot register this machine yet"). `sys-feature/gpu-benchmark` 머지 전까지는 실기기 E2E 불가 → 목업으로 개발. 화면은 `benchmarkTokensPerSec: null` 도 "측정 전" 으로 그려 둔다.

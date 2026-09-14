@@ -40,7 +40,10 @@ services:
       - redis-data:/data      # 재시작해도 토큰 유지
 
   frontend:
-    build: ./frontend        # Next.js SSR (standalone) 컨테이너
+    build:                   # Next.js SSR (standalone) 컨테이너
+      context: ./frontend
+      additional_contexts:
+        worker: ./system/G-shared   # G-shared.exe 를 /downloads 로 제공 (Dockerfile 의 COPY --from=worker)
     container_name: gshared-frontend
     ports:
       - "3000:3000"          # 서버 3000 → 컨테이너 3000 (Next.js SSR은 내부 3000에서 node 실행)
