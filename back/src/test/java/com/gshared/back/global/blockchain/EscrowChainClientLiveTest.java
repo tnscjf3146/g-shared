@@ -60,9 +60,10 @@ class EscrowChainClientLiveTest {
 
     @BeforeAll
     static void connect() {
-        chain = new EscrowChainClient(new EscrowProperties(
-                System.getenv("ESCROW_CONTRACT_ADDRESS"), System.getenv("ESCROW_RPC_URL")));
-        escrow = new EscrowVerification(chain);
+        EscrowProperties properties = new EscrowProperties(
+                System.getenv("ESCROW_CONTRACT_ADDRESS"), System.getenv("ESCROW_RPC_URL"), null, false, null);
+        chain = new EscrowChainClient(properties);
+        escrow = new EscrowVerification(chain, properties);
         operator = System.getenv("ESCROW_LIVE_OPERATOR");
         provider = System.getenv("ESCROW_LIVE_PROVIDER");
         resultHash = System.getenv("ESCROW_LIVE_RESULT_HASH");
@@ -119,8 +120,8 @@ class EscrowChainClientLiveTest {
     @Test
     @DisplayName("JobFunded 로그에서 체인이 붙인 jobId 를 찾는다")
     void findsFundedJobByExternalRef() {
-        Optional<EscrowChainClient.FundedJob> found = chain.findFundedJob(fundedRef);
-        assertThat(found).get().extracting(EscrowChainClient.FundedJob::escrowJobId)
+        Optional<EscrowChainClient.JobFundedEvent> found = chain.findFundedJob(fundedRef);
+        assertThat(found).get().extracting(EscrowChainClient.JobFundedEvent::escrowJobId)
                 .isEqualTo(FUNDED);
         assertThat(found.orElseThrow().provider()).isEqualToIgnoringCase(provider);
         assertThat(escrow.escrowJobIdFor(fundedRef)).contains(FUNDED);
@@ -138,21 +139,21 @@ class EscrowChainClientLiveTest {
     @DisplayName("세 판정이 실제 체인 상태와 맞아떨어진다")
     void verdictsMatchTheChain() {
         // 수락: ASSIGNED + 그 operator 여야 CONFIRMED
-        assertThat(escrow.acceptedOnChain(ASSIGNED, operator)).isEqualTo(Verdict.CONFIRMED);
-        assertThat(escrow.acceptedOnChain(FUNDED, operator)).isEqualTo(Verdict.CONTRADICTED);
-        assertThat(escrow.acceptedOnChain(ASSIGNED,
+        assertThat(escrow.acceptedOnChain(null, ASSIGNED, operator)).isEqualTo(Verdict.CONFIRMED);
+        assertThat(escrow.acceptedOnChain(null, FUNDED, operator)).isEqualTo(Verdict.CONTRADICTED);
+        assertThat(escrow.acceptedOnChain(null, ASSIGNED,
                 "0x000000000000000000000000000000000000dEaD")).isEqualTo(Verdict.CONTRADICTED);
 
         // 결과: COMPLETED + 해시 일치
-        assertThat(escrow.resultOnChain(COMPLETED, operator, resultHash)).isEqualTo(Verdict.CONFIRMED);
-        assertThat(escrow.resultOnChain(COMPLETED, operator,
+        assertThat(escrow.resultOnChain(null, COMPLETED, operator, resultHash)).isEqualTo(Verdict.CONFIRMED);
+        assertThat(escrow.resultOnChain(null, COMPLETED, operator,
                 "0x2222222222222222222222222222222222222222222222222222222222222222"))
                 .isEqualTo(Verdict.CONTRADICTED);
-        assertThat(escrow.resultOnChain(ASSIGNED, operator, resultHash)).isEqualTo(Verdict.CONTRADICTED);
+        assertThat(escrow.resultOnChain(null, ASSIGNED, operator, resultHash)).isEqualTo(Verdict.CONTRADICTED);
 
         // 취소: CANCELLED 여야 CONFIRMED
-        assertThat(escrow.cancelledOnChain(CANCELLED)).isEqualTo(Verdict.CONFIRMED);
-        assertThat(escrow.cancelledOnChain(ASSIGNED)).isEqualTo(Verdict.CONTRADICTED);
+        assertThat(escrow.cancelledOnChain(null, CANCELLED)).isEqualTo(Verdict.CONFIRMED);
+        assertThat(escrow.cancelledOnChain(null, ASSIGNED)).isEqualTo(Verdict.CONTRADICTED);
 
         // 승인
         assertThat(escrow.operatorApproved(provider, operator)).isEqualTo(Verdict.CONFIRMED);
@@ -164,11 +165,11 @@ class EscrowChainClientLiveTest {
     @DisplayName("노드가 없으면 UNKNOWN — CONTRADICTED 로 접지 않는다")
     void unreachableNodeIsUnknown() {
         // 닫힌 포트. '틀렸다'가 아니라 '못 물어봤다'여야 한다.
-        EscrowVerification blind = new EscrowVerification(new EscrowChainClient(
-                new EscrowProperties(System.getenv("ESCROW_CONTRACT_ADDRESS"),
-                        "http://127.0.0.1:9")));
-        assertThat(blind.acceptedOnChain(ASSIGNED, operator)).isEqualTo(Verdict.UNKNOWN);
-        assertThat(blind.cancelledOnChain(CANCELLED)).isEqualTo(Verdict.UNKNOWN);
+        EscrowProperties blindProperties = new EscrowProperties(
+                System.getenv("ESCROW_CONTRACT_ADDRESS"), "http://127.0.0.1:9", null, false, null);
+        EscrowVerification blind = new EscrowVerification(new EscrowChainClient(blindProperties), blindProperties);
+        assertThat(blind.acceptedOnChain(null, ASSIGNED, operator)).isEqualTo(Verdict.UNKNOWN);
+        assertThat(blind.cancelledOnChain(null, CANCELLED)).isEqualTo(Verdict.UNKNOWN);
         assertThat(blind.operatorApproved(provider, operator)).isEqualTo(Verdict.UNKNOWN);
         assertThat(blind.escrowJobIdFor(fundedRef)).isEmpty();
     }

@@ -25,6 +25,9 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     // 워커 전용 창구용: "이 워커에게 배정된" Job 단건. 남의 Job 은 애초에 안 잡힌다.
     Optional<Job> findByIdAndAssignedWorkerId(Long id, String assignedWorkerId);
 
+    // 예치 트랜잭션 재사용 검사용. fund_tx_hash 는 UNIQUE 라 최대 한 건이다.
+    Optional<Job> findByFundTxHash(String fundTxHash);
+
     /**
      * 매칭 순찰용: 배정 대기(FUNDED) Job을 오래된 순(선착순)으로.
      * owner 를 함께 읽는 이유는 JOB_ASSIGN 에 의뢰자 지갑(clientWallet)이 실리기 때문이다 —
@@ -291,21 +294,82 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     int unassignIfAssigned(@Param("jobId") Long jobId, @Param("workerId") String workerId);
 
     /**
-     * 원자적 예치 확인: "본인 Job이면서 아직 CREATED 일 때만" FUNDED 전이 + 온체인 jobId 기록.
+     * 원자적 예치 확인: "아직 CREATED 일 때만" FUNDED 전이 + 온체인 위치(chain·contract·jobId)·txHash 기록.
+     * 호출 전에 체인 대조(JobFunded 이벤트·현재 상태)가 끝나 있어야 한다 — 여기는 기록만 한다.
      * 중복 호출·동시 호출은 조건 불일치(0행)로 한쪽만 성공한다.
      *
-     * TODO: 블록체인 Escrow 연동 후 온체인 예치(JobFunded 이벤트) 확인으로 교체
+     * <p>ownerId 조건이 없는 이유: 예치 확인 API 는 소유 확인을 먼저 하고, reconciliation 은 주인 없이 돈다.
      * @return 영향받은 행 수 (1=전이 성공, 0=상태가 CREATED가 아님)
      */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.FUNDED,
-                   j.escrowJobId = :escrowJobId
+                   j.escrowChainId = :chainId,
+                   j.escrowContractAddress = :contractAddress,
+                   j.escrowJobId = :escrowJobId,
+                   j.fundTxHash = :fundTxHash
              WHERE j.id = :jobId
-               AND j.owner.id = :ownerId
                AND j.status = com.gshared.back.job.domain.JobStatus.CREATED
             """)
-    int fundIfCreated(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId,
-                      @Param("escrowJobId") String escrowJobId);
+    int fundIfCreated(@Param("jobId") Long jobId,
+                      @Param("chainId") Long chainId, @Param("contractAddress") String contractAddress,
+                      @Param("escrowJobId") String escrowJobId, @Param("fundTxHash") String fundTxHash);
+
+    // ── keeper · reconciliation 순찰 ───────────────────────────
+
+    /** 예치 확인 보류: txHash 는 받았는데 체인 확인을 못 한 Job. reconciliation 이 다시 확인한다. */
+    @Query("""
+            SELECT j FROM Job j
+              JOIN FETCH j.owner
+             WHERE j.status = com.gshared.back.job.domain.JobStatus.CREATED
+               AND j.fundTxHash IS NOT NULL
+             ORDER BY j.id ASC
+            """)
+    java.util.List<Job> findFundingPending();
+
+    /**
+     * 온체인에 살아 있는 Job — keeper 가 만료를 살피고, reconciliation 이 체인과 대조하는 대상.
+     * CREATED(예치 전)·종료 상태는 온체인에 볼 것이 없거나 이미 끝났다.
+     */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.escrowJobId IS NOT NULL
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.FUNDED,
+                                com.gshared.back.job.domain.JobStatus.ASSIGNED,
+                                com.gshared.back.job.domain.JobStatus.RUNNING,
+                                com.gshared.back.job.domain.JobStatus.CANCELLING)
+             ORDER BY j.id ASC
+            """)
+    java.util.List<Job> findOpenOnChain();
+
+    /** 대조 필요 표시가 남은 Job. 자동 진행은 멈춰 있고 reconciliation 이 체인을 다시 본다. */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.reconciliationReason IS NOT NULL
+               AND j.escrowJobId IS NOT NULL
+             ORDER BY j.id ASC
+            """)
+    java.util.List<Job> findFlaggedForReconciliation();
+
+    /**
+     * 온체인 만료 정리(settleTimeout) 확인 후: 아직 살아 있는 상태면 CANCELLED 로 확정.
+     * 예치금은 체인이 이미 돌려줬다 — 이 UPDATE 는 그 사실을 DB 에 옮길 뿐이다.
+     * 워커 손에 있던 Job(ASSIGNED·RUNNING·CANCELLING)도 포함한다: 체인이 CANCELLED 면 더 진행할 수 없다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
+                   j.abortTxHash = :txHash,
+                   j.failReason = :reason,
+                   j.finishedAt = :now
+             WHERE j.id = :jobId
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.FUNDED,
+                                com.gshared.back.job.domain.JobStatus.ASSIGNED,
+                                com.gshared.back.job.domain.JobStatus.RUNNING,
+                                com.gshared.back.job.domain.JobStatus.CANCELLING)
+            """)
+    int cancelByChainIfOpen(@Param("jobId") Long jobId, @Param("txHash") String txHash,
+                            @Param("reason") String reason, @Param("now") LocalDateTime now);
 }

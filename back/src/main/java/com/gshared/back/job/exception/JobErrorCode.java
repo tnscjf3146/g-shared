@@ -15,6 +15,14 @@ public enum JobErrorCode implements ErrorCode {
     NO_AVAILABLE_WORKER(HttpStatus.CONFLICT, "현재 사용 가능한 워커가 없습니다. 잠시 후 다시 시도해주세요."),
     INVALID_TRAINING_CONFIG(HttpStatus.BAD_REQUEST, "trainingConfig가 올바르지 않습니다. (epochs·batchSize·learningRate·maxLength 필수)"),
     INVALID_ESCROW_JOB_ID(HttpStatus.BAD_REQUEST, "escrowJobId는 0 이상의 정수 문자열이어야 합니다."),
+    // 예치 확인 — 422: 영수증은 있는데 이 Job 의 예치가 아니다(되돌려짐·다른 externalRef·다른 provider·다른 가격 등)
+    ESCROW_FUNDING_REJECTED(HttpStatus.UNPROCESSABLE_CONTENT, "트랜잭션이 이 작업의 예치로 확인되지 않습니다."),
+    // 409: 이 txHash 는 이미 다른 Job 의 예치로 기록됐다
+    FUND_TX_ALREADY_USED(HttpStatus.CONFLICT, "이미 다른 작업의 예치로 사용된 트랜잭션입니다."),
+    // 503: 운영(fail closed)인데 체인에 물어볼 수 없다 — 프런트는 같은 txHash 로 다시 시도한다
+    ESCROW_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "블록체인 노드에 확인할 수 없습니다. 잠시 후 다시 시도해주세요."),
+    // 422: 견적에 provider 지갑이 없어 예치 트랜잭션을 만들 수 없다(공급자 지갑 미등록)
+    PROVIDER_WALLET_MISSING(HttpStatus.UNPROCESSABLE_CONTENT, "추천된 공급자의 정산 지갑이 등록되어 있지 않습니다."),
     // 결과물 업로드 완료 검증 — 404: 올라온 파일이 없다 / 422: 파일은 있는데 신고한 크기·해시와 다르다
     RESULT_OBJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "업로드된 결과물을 찾을 수 없습니다."),
     RESULT_UPLOAD_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "업로드된 결과물의 크기 또는 해시가 신고값과 다릅니다."),

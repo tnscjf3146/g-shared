@@ -29,6 +29,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 
 /**
@@ -104,7 +106,7 @@ class JobCancelReconciliationTest {
                 worker.getId(), 9L));
 
         em.flush();
-        jobRepository.fundIfCreated(job.getId(), client.getId(), ESCROW_JOB_ID);
+        jobRepository.fundIfCreated(job.getId(), 31221L, null, ESCROW_JOB_ID, null);
         jobRepository.assignIfFunded(job.getId(), worker.getId());
         jobRepository.startIfAssigned(job.getId(), worker.getId(), "0xaccept", LocalDateTime.now());
         em.clear();
@@ -114,9 +116,9 @@ class JobCancelReconciliationTest {
 
         when(messageSender.send(any(), any())).thenReturn(true);
         // 기본값: 아무것도 확인되지 않은 상태. 각 테스트가 필요한 것만 바꾼다.
-        when(escrow.acceptedOnChain(any(), any())).thenReturn(Verdict.UNKNOWN);
-        when(escrow.resultOnChain(any(), any(), any())).thenReturn(Verdict.UNKNOWN);
-        when(escrow.cancelledOnChain(any())).thenReturn(Verdict.UNKNOWN);
+        when(escrow.acceptedOnChain(any(), any(), any())).thenReturn(Verdict.UNKNOWN);
+        when(escrow.resultOnChain(any(), any(), any(), any())).thenReturn(Verdict.UNKNOWN);
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.UNKNOWN);
     }
 
     // ── 준비 ────────────────────────────────────────────────────
@@ -157,7 +159,7 @@ class JobCancelReconciliationTest {
     void cancellingButChainCompleted() {
         recordVerifiedUpload();
         userCancels();
-        when(escrow.resultOnChain(ESCROW_JOB_ID, OPERATOR, "0x" + SHA256))
+        when(escrow.resultOnChain(isNull(), eq(ESCROW_JOB_ID), eq(OPERATOR), eq("0x" + SHA256)))
                 .thenReturn(Verdict.CONFIRMED);
 
         boolean completed = jobService.completeJob(worker.getId(), job.getId(),
@@ -191,7 +193,7 @@ class JobCancelReconciliationTest {
     void cancellingWithContradictedResultStaysCancelling() {
         recordVerifiedUpload();
         userCancels();
-        when(escrow.resultOnChain(any(), any(), any())).thenReturn(Verdict.CONTRADICTED);
+        when(escrow.resultOnChain(any(), any(), any(), any())).thenReturn(Verdict.CONTRADICTED);
 
         assertThat(jobService.completeJob(worker.getId(), job.getId(),
                 objectKey(), "0x" + SHA256, "0xsubmit", 982.4)).isFalse();
@@ -208,7 +210,7 @@ class JobCancelReconciliationTest {
     @DisplayName("CANCELLING + 체인 CANCELLED + JOB_CANCELLED → CANCELLED 로 확정")
     void cancellingAndChainCancelled() {
         userCancels();
-        when(escrow.cancelledOnChain(ESCROW_JOB_ID)).thenReturn(Verdict.CONFIRMED);
+        when(escrow.cancelledOnChain(isNull(), eq(ESCROW_JOB_ID))).thenReturn(Verdict.CONFIRMED);
 
         assertThat(jobService.confirmCancelled(worker.getId(), job.getId(), "0xabort", 512.3)).isTrue();
 
@@ -222,7 +224,7 @@ class JobCancelReconciliationTest {
     @DisplayName("CANCELLING 중 JOB_FAILED + 체인 CANCELLED → FAILED 가 아니라 CANCELLED (사유는 남는다)")
     void failureDuringCancellingBecomesCancelled() {
         userCancels();
-        when(escrow.cancelledOnChain(ESCROW_JOB_ID)).thenReturn(Verdict.CONFIRMED);
+        when(escrow.cancelledOnChain(isNull(), eq(ESCROW_JOB_ID))).thenReturn(Verdict.CONFIRMED);
 
         assertThat(jobService.failJob(worker.getId(), job.getId(),
                 "CUDA_OOM", "CUDA out of memory.", "0xabort", 301.5)).isTrue();
@@ -240,7 +242,7 @@ class JobCancelReconciliationTest {
     @DisplayName("체인이 여전히 ASSIGNED 면 JOB_CANCELLED 를 받아도 CANCELLED 로 확정하지 않는다")
     void chainStillAssignedBlocksFalseCancel() {
         userCancels();
-        when(escrow.cancelledOnChain(ESCROW_JOB_ID)).thenReturn(Verdict.CONTRADICTED);
+        when(escrow.cancelledOnChain(isNull(), eq(ESCROW_JOB_ID))).thenReturn(Verdict.CONTRADICTED);
 
         assertThat(jobService.confirmCancelled(worker.getId(), job.getId(), "0xabort", 512.3)).isFalse();
 
@@ -255,7 +257,7 @@ class JobCancelReconciliationTest {
     @DisplayName("체인이 ASSIGNED 면 abortTxHash 를 단 JOB_FAILED 도 받지 않는다 — 예치금이 묶인 채로 종료되지 않게")
     void chainStillAssignedBlocksFalseFailure() {
         userCancels();
-        when(escrow.cancelledOnChain(ESCROW_JOB_ID)).thenReturn(Verdict.CONTRADICTED);
+        when(escrow.cancelledOnChain(isNull(), eq(ESCROW_JOB_ID))).thenReturn(Verdict.CONTRADICTED);
 
         assertThat(jobService.failJob(worker.getId(), job.getId(),
                 "CUDA_OOM", "CUDA out of memory.", "0xabort", 301.5)).isFalse();
@@ -277,7 +279,7 @@ class JobCancelReconciliationTest {
     @Test
     @DisplayName("abortTxHash 가 없는 JOB_FAILED 는 체인에 묻지 않는다 — 환불을 주장하지 않았다")
     void failureWithoutAbortIsNotChecked() {
-        when(escrow.cancelledOnChain(any())).thenReturn(Verdict.CONTRADICTED);
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
 
         assertThat(jobService.failJob(worker.getId(), job.getId(),
                 "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
@@ -291,7 +293,7 @@ class JobCancelReconciliationTest {
     @DisplayName("취소가 없었던 RUNNING → COMPLETED 정상 경로는 그대로다 — 대조 사유도 남지 않는다")
     void plainRunningToCompletedUnchanged() {
         recordVerifiedUpload();
-        when(escrow.resultOnChain(ESCROW_JOB_ID, OPERATOR, "0x" + SHA256))
+        when(escrow.resultOnChain(isNull(), eq(ESCROW_JOB_ID), eq(OPERATOR), eq("0x" + SHA256)))
                 .thenReturn(Verdict.CONFIRMED);
 
         assertThat(jobService.completeJob(worker.getId(), job.getId(),
@@ -306,7 +308,7 @@ class JobCancelReconciliationTest {
     @Test
     @DisplayName("RUNNING 중 JOB_FAILED 정상 경로도 그대로 FAILED 다")
     void plainRunningToFailedUnchanged() {
-        when(escrow.cancelledOnChain(ESCROW_JOB_ID)).thenReturn(Verdict.CONFIRMED);
+        when(escrow.cancelledOnChain(isNull(), eq(ESCROW_JOB_ID))).thenReturn(Verdict.CONFIRMED);
 
         assertThat(jobService.failJob(worker.getId(), job.getId(),
                 "CUDA_OOM", "CUDA out of memory.", "0xabort", 301.5)).isTrue();

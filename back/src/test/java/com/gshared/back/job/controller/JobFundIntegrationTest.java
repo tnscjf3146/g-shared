@@ -21,6 +21,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -77,8 +78,14 @@ class JobFundIntegrationTest {
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
     }
 
-    /** 개발용 예치 확인은 온체인 jobId 를 반드시 실어야 한다 — 없으면 JOB_ASSIGN 을 만들 수 없다. */
-    private static final String ESCROW_BODY = "{\"escrowJobId\":\"17\"}";
+    /**
+     * 이 테스트는 체인 없이 돈다(escrow.* 비어 있음 · verification-required=false). 그 모드에서는 대조할 체인이
+     * 없으므로 txHash 와 함께 받은 escrowJobId 를 그대로 기록한다 — JOB_ASSIGN 에 실을 온체인 jobId 가 필요하다.
+     * 체인이 있을 때의 영수증 대조는 EscrowChainClientLiveTest · JobFundVerificationTest 가 본다.
+     */
+    private static final String TX = "0x" + "ab".repeat(32);
+    private static final String OTHER_TX = "0x" + "cd".repeat(32);
+    private static final String ESCROW_BODY = "{\"txHash\":\"" + TX + "\",\"escrowJobId\":\"17\"}";
 
     private String fundUrl(Long jobId) {
         return "/api/jobs/" + jobId + "/fund";
@@ -93,21 +100,67 @@ class JobFundIntegrationTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                         .content(ESCROW_BODY))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FUNDED"))
+                .andExpect(jsonPath("$.escrowJobId").value("17"));
 
         Job funded = jobRepository.findById(job.getId()).orElseThrow();
         assertThat(funded.getStatus()).isEqualTo(JobStatus.FUNDED);
         assertThat(funded.getEscrowJobId()).isEqualTo("17");   // 온체인 jobId 기록
+        assertThat(funded.getFundTxHash()).isEqualTo(TX);
+        assertThat(funded.getEscrowChainId()).isEqualTo(31221L);
     }
 
     @Test
-    @DisplayName("escrowJobId 가 없으면 400 — JOB_ASSIGN 에 실을 온체인 jobId 없이는 FUNDED 로 두지 않는다")
+    @DisplayName("같은 txHash 재전송은 같은 답(200 FUNDED) — 멱등")
+    void fund_same_tx_twice_is_idempotent() throws Exception {
+        Job job = saveJob(owner);
+        fund(job.getId(), ESCROW_BODY).andExpect(status().isOk());
+
+        fund(job.getId(), ESCROW_BODY)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FUNDED"))
+                .andExpect(jsonPath("$.txHash").value(TX));
+    }
+
+    @Test
+    @DisplayName("다른 Job 이 이미 쓴 txHash 는 409 — 한 예치로 두 작업을 돌릴 수 없다")
+    void fund_with_reused_tx_returns_409() throws Exception {
+        Job first = saveJob(owner);
+        Job second = saveJob(owner);
+        fund(first.getId(), ESCROW_BODY).andExpect(status().isOk());
+
+        fund(second.getId(), "{\"txHash\":\"" + TX + "\",\"escrowJobId\":\"18\"}")
+                .andExpect(status().isConflict());
+        assertThat(jobRepository.findById(second.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
+    }
+
+    @Test
+    @DisplayName("txHash 가 없거나 형식이 틀리면 400")
+    void fund_without_tx_hash() throws Exception {
+        Job job = saveJob(owner);
+
+        fund(job.getId(), "{\"escrowJobId\":\"17\"}").andExpect(status().isBadRequest());
+        fund(job.getId(), "{\"txHash\":\"0x1234\",\"escrowJobId\":\"17\"}").andExpect(status().isBadRequest());
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions fund(Long jobId, String body) throws Exception {
+        return mockMvc.perform(post(fundUrl(jobId))
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content(body));
+    }
+
+    @Test
+    @DisplayName("체인 없는 모드에서 escrowJobId 가 없으면 400 — JOB_ASSIGN 에 실을 온체인 jobId 없이는 FUNDED 로 두지 않는다")
     void fund_without_escrow_job_id() throws Exception {
         Job job = saveJob(owner);
 
         mockMvc.perform(post(fundUrl(job.getId()))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
                 .andExpect(status().isBadRequest());
+        fund(job.getId(), "{\"txHash\":\"" + TX + "\"}").andExpect(status().isBadRequest());
 
         assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
     }
@@ -120,7 +173,7 @@ class JobFundIntegrationTest {
         mockMvc.perform(post(fundUrl(job.getId()))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
                         .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                        .content("{\"escrowJobId\":\"0xabc\"}"))
+                        .content("{\"txHash\":\"" + TX + "\",\"escrowJobId\":\"0xabc\"}"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -140,10 +193,10 @@ class JobFundIntegrationTest {
     }
 
     @Test
-    @DisplayName("이미 FUNDED 인 Job 재호출은 409")
+    @DisplayName("이미 다른 txHash 로 FUNDED 인 Job 재호출은 409")
     void fund_twice_returns_409() throws Exception {
         Job job = saveJob(owner);
-        jobRepository.fundIfCreated(job.getId(), owner.getId(), "16");   // 1차 전이
+        jobRepository.fundIfCreated(job.getId(), 31221L, null, "16", OTHER_TX);   // 1차 전이
 
         mockMvc.perform(post(fundUrl(job.getId()))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)

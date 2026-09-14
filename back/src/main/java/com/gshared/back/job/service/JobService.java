@@ -27,8 +27,13 @@ import com.gshared.back.user.exception.UserErrorCode;
 import com.gshared.back.user.repository.UserRepository;
 import com.gshared.back.worker.repository.WorkerRepository;
 import com.gshared.back.worker.websocket.WorkerMessageSender;
+import com.gshared.back.global.blockchain.EscrowProperties;
 import com.gshared.back.global.blockchain.EscrowVerification;
 import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
+import com.gshared.back.global.blockchain.TokenUnits;
+import com.gshared.back.global.wallet.WalletAuthProperties;
+import com.gshared.back.job.dto.response.FundJobResponse;
+import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.websocket.protocol.WorkerMessage;
 import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
 import lombok.RequiredArgsConstructor;
@@ -57,6 +62,8 @@ public class JobService {
 
     private final JobRepository jobRepository;
     private final EscrowVerification escrow;
+    private final EscrowProperties escrowProperties;
+    private final WalletAuthProperties walletAuthProperties;
     private final UserRepository userRepository;
     private final WorkerRepository workerRepository;
     private final DatasetRepository datasetRepository;
@@ -125,17 +132,27 @@ public class JobService {
             throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);
         }
 
-        // ⑤ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
+        // ⑤ 공급자 정산 지갑 확정 — 온체인 createAndFundJob 의 provider. 예치 뒤에는 체인이 이 값을 잠그므로
+        //    견적에 박아 두고, 예치 확인·매칭이 전부 이 값과 대조한다. 후보 쿼리가 지갑 없는 워커를 걸렀지만
+        //    그 사이 지워졌을 수 있어 다시 확인한다.
+        String providerWallet = workerRepository.findById(rec.recommendedWorkerId())
+                .map(Worker::getOwner).map(User::getWalletAddress).orElse(null);
+        if (providerWallet == null) {
+            throw new BusinessException(JobErrorCode.PROVIDER_WALLET_MISSING);
+        }
+
+        // ⑥ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
         Job job = Job.create(
                 owner, request.workloadId(), request.baseModelId(), request.datasetId(),
                 request.trainingMode(),
                 config.epochs(), config.batchSize(), config.learningRate(), config.maxLength(),
                 recommendedRuntime(rec), rec.schedulerModelVersion(), rec.recommendedWorkerId(),
-                estimateCost(dataset, config)
+                providerWallet, estimateCost(dataset, config)
         );
         jobRepository.save(job);
 
-        return CreateJobResponse.from(job);
+        return CreateJobResponse.of(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
     }
 
     /**
@@ -190,41 +207,93 @@ public class JobService {
     }
 
     /**
-     * 예치 확인 → 매칭 대기(FUNDED)로 전이. 본인 Job이면서 CREATED 상태일 때만 가능.
-     * escrowJobId(온체인 jobId)를 함께 기록해 두면 JOB_ASSIGN·execution-context 로 워커에게 전달된다.
+     * 예치 확인 → 매칭 대기(FUNDED)로 전이.
      *
-     * TODO: 개발용 수동 전이. 최종 구조에서는 FE 가 준 escrowJobId 를 정본으로 쓰지 않고,
-     *       Backend 가 JobFunded 이벤트의 externalRef 를 대조해 escrowJobId 를 직접 확정한다.
-     * ⚠️ 운영 배포 전 반드시 교체 — 실제 예치 없이 FUNDED 가능한 개발용 API.
+     * <p>프런트가 주는 것은 트랜잭션 해시뿐이다. Backend 는 영수증을 직접 읽어
+     * <ol>
+     *   <li>트랜잭션이 성공했고 목적지가 우리 에스크로인지,
+     *   <li>그 안의 JobFunded 가 externalRef·client(로그인 사용자 지갑)·provider(견적의 공급자 지갑)·price 를 맞추는지,
+     *   <li>지금 온체인 상태가 FUNDED 인지
+     * </ol>
+     * 확인하고, 전부 맞을 때만 이벤트의 jobId 를 escrowJobId 로 기록하며 FUNDED 로 바꾼다.
+     *
+     * <p><b>모르는 것은 확정하지 않는다.</b> 영수증이 아직 없거나 노드가 답하지 않으면 txHash 만 남기고
+     * CREATED 에 둔다(PENDING). reconciliation 이 다시 확인하고, 프런트도 같은 txHash 로 다시 물을 수 있다.
+     * 운영이 아닌 로컬(체인 미설정·verification-required=false)에서만 받은 escrowJobId 를 그대로 기록한다.
+     *
+     * <p>같은 txHash 재전송은 같은 답이다(멱등). 다른 Job 이 이미 쓴 txHash 는 거부한다.
      */
     @Transactional
-    public void fundJob(Long ownerId, Long jobId, String escrowJobId) {
-        // 존재/소유 확인 (없거나 남의 것 → 404)
-        jobRepository.findByIdAndOwnerId(jobId, ownerId)
+    public FundJobResponse fundJob(Long ownerId, Long jobId, String txHash, String devEscrowJobId) {
+        String hash = txHash.toLowerCase();
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
-        // 체인이 이 예치에 붙인 번호를 정본으로 쓴다. 프런트가 준 값은 브라우저에서
-        // 온 숫자이고, JobFunded 로그의 jobId 는 컨트랙트가 붙인 것이다. 확인하지
-        // 못했으면(설정 없음·노드 무응답) 받은 값을 쓰되 그 사실을 남긴다.
-        String confirmed = escrow.escrowJobIdFor(externalRefOf(jobId)).orElse(null);
-        if (confirmed != null && !confirmed.equals(escrowJobId)) {
-            log.warn("[JOB] JobFunded 가 말하는 escrowJobId 로 교체한다 jobId={} 신고={} 온체인={}",
-                    jobId, escrowJobId, confirmed);
-        }
-        String authoritative = confirmed != null ? confirmed : escrowJobId;
-
-        // 원자적 전이 — 0행이면 이미 FUNDED거나 취소/진행 중 (→ 409)
-        int updated = jobRepository.fundIfCreated(jobId, ownerId, authoritative);
-        if (updated == 0) {
+        // 멱등: 이미 이 txHash 로 확정됐으면 같은 답. 다른 txHash 로 이미 확정됐거나 진행·종료 중이면 409.
+        if (job.getStatus() != JobStatus.CREATED) {
+            if (hash.equals(job.getFundTxHash())) {
+                return FundJobResponse.funded(job);
+            }
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
         }
+        // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
+        jobRepository.findByFundTxHash(hash)
+                .filter(other -> !other.getId().equals(jobId))
+                .ifPresent(other -> {
+                    throw new BusinessException(JobErrorCode.FUND_TX_ALREADY_USED);
+                });
+
+        if (!escrow.isConfigured()) {
+            if (escrow.isRequired()) {
+                throw new BusinessException(JobErrorCode.ESCROW_UNAVAILABLE);
+            }
+            // 로컬 개발: 대조할 체인이 없다. 받은 값을 기록하되 그 사실을 남긴다.
+            if (devEscrowJobId == null) {
+                throw new BusinessException(JobErrorCode.INVALID_ESCROW_JOB_ID);
+            }
+            log.warn("[JOB] 체인 미설정 — 프런트가 준 escrowJobId 를 그대로 기록한다 jobId={} escrowJobId={}",
+                    jobId, devEscrowJobId);
+            return fundConfirmed(jobId, walletAuthProperties.chainId(), null, devEscrowJobId, hash);
+        }
+
+        EscrowVerification.FundingCheck check = escrow.fundingOnChain(
+                hash, job.getExternalRef(), job.getOwner().getWalletAddress(),
+                job.getProviderWallet(), TokenUnits.toWei(job.getEstimatedCost()));
+        switch (check.verdict()) {
+            case CONTRADICTED -> {
+                log.warn("[JOB] 예치 확인 거부 jobId={} txHash={} {}", jobId, hash, check.reason());
+                throw new BusinessException(JobErrorCode.ESCROW_FUNDING_REJECTED);
+            }
+            case UNKNOWN -> {
+                if (!escrow.isRequired()) {
+                    // 로컬: 체인은 설정됐는데 답이 없다. 확정할 근거가 없으니 역시 보류한다 —
+                    // 여기서 통과시키면 RPC 장애가 검증 통과처럼 처리된다.
+                    log.warn("[JOB] 예치 확인 보류(체인 미확인) jobId={} txHash={} {}", jobId, hash, check.reason());
+                }
+                job.holdFunding(hash);
+                return FundJobResponse.pending(jobId, hash);
+            }
+            default -> { }
+        }
+        return fundConfirmed(jobId, walletAuthProperties.chainId(), escrowProperties.contractAddressOrNull(),
+                check.event().escrowJobId(), hash);
     }
 
-    /** 이 Job 의 externalRef. 아직 없으면 null -- 그러면 온체인 조회도 건너뛴다. */
-    private String externalRefOf(Long jobId) {
-        return jobRepository.findById(jobId).map(Job::getExternalRef).orElse(null);
+    /** 체인 대조가 끝난 뒤의 기록. 0행이면 그 사이 취소됐거나 다른 요청이 먼저 확정했다. */
+    private FundJobResponse fundConfirmed(Long jobId, Long chainId, String contractAddress,
+                                          String escrowJobId, String txHash) {
+        int updated = jobRepository.fundIfCreated(jobId, chainId, contractAddress, escrowJobId, txHash);
+        Job fresh = jobRepository.findById(jobId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        if (updated == 0) {
+            if (txHash.equals(fresh.getFundTxHash()) && fresh.getStatus() == JobStatus.FUNDED) {
+                return FundJobResponse.funded(fresh);   // 동시 요청이 먼저 확정 — 같은 답
+            }
+            throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+        log.info("[JOB] 예치 확인 jobId={} escrowJobId={} txHash={}", jobId, escrowJobId, txHash);
+        return FundJobResponse.funded(fresh);
     }
-
     /**
      * Job 취소. 본인 Job이면서 종료 전이면 가능하되, 워커 손에 갔는지에 따라 갈린다.
      * <ul>
@@ -293,8 +362,17 @@ public class JobService {
         // Backend 기록끼리 맞았다면 이제 체인에 같은 것을 묻는다 -- 지금까지는 워커가
         // 보낸 값을 Backend 가 저장해 둔 값과 대조한 것이고, 둘 다 워커에게서 온
         // 것이라 "온체인에서 수락했다"는 주장 자체는 아직 아무것도 확인되지 않았다.
+        Verdict onChain = recorded != null ? Verdict.CONTRADICTED
+                : escrow.acceptedOnChain(job.getEscrowContractAddress(), job.getEscrowJobId(), operatorAddress);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            // 운영: 확인 못 한 수락을 RUNNING 으로 올리지 않는다. 그렇다고 취소하지도 않는다 --
+            // RPC 가 잠깐 죽은 것을 근거로 워커를 되돌리면 멀쩡한 작업이 죽는다.
+            // ASSIGNED 에 남겨 두면 reconciliation 이 체인을 다시 읽어 RUNNING 으로 올린다.
+            log.warn("[JOB] JOB_ACCEPTED 체인 미확인 → 보류 jobId={} workerId={} txHash={}", jobId, workerId, acceptTxHash);
+            return false;
+        }
         final String mismatch = recorded != null ? recorded
-                : escrow.acceptedOnChain(job.getEscrowJobId(), operatorAddress).isContradicted()
+                : onChain.isContradicted()
                         ? "on-chain state does not show this job assigned to this operator"
                         : null;
         if (mismatch != null) {
@@ -396,8 +474,15 @@ public class JobService {
         // 계산한 것과 같은가. 워커가 보낸 resultHash 와 대조하는 것이 아니다 --
         // 그러면 워커의 말을 워커의 말로 검증하는 셈이다.
         String verified = job.getResultSha256() == null ? null : "0x" + job.getResultSha256();
-        Verdict onChain = escrow.resultOnChain(job.getEscrowJobId(),
+        Verdict onChain = escrow.resultOnChain(job.getEscrowContractAddress(), job.getEscrowJobId(),
                 job.getAcceptTxHash() == null ? null : operatorOf(workerId), verified);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            // 운영: 확인 못 한 결과를 COMPLETED 로 확정하지 않는다. RUNNING 에 남겨 두면
+            // reconciliation 이 체인(COMPLETED · resultHash)을 다시 읽어 확정한다.
+            log.warn("[JOB] JOB_RESULT 체인 미확인 → 보류 jobId={} workerId={} submitTxHash={}", jobId, workerId, submitTxHash);
+            job.flagReconciliation("JOB_RESULT held: chain unverified (submitTxHash=" + submitTxHash + ")");
+            return false;
+        }
         if (onChain.isContradicted()) {
             log.error("[JOB] JOB_RESULT 온체인 대조 실패 → fail closed jobId={} workerId={}", jobId, workerId);
             job.flagReconciliation("JOB_RESULT on-chain mismatch (submitTxHash=" + submitTxHash + ")");
@@ -515,8 +600,8 @@ public class JobService {
         return true;
     }
 
-    /** 워커에게 JOB_CANCEL (규격 §21). payload.reason 은 USER_REQUEST 또는 Backend 가 멈춘 사유. */
-    private void sendCancel(String workerId, Long jobId, String reason) {
+    /** 워커에게 JOB_CANCEL (규격 §21). payload.reason 은 USER_REQUEST 또는 Backend 가 멈춘 사유. keeper·reconciliation 도 쓴다. */
+    void sendCancel(String workerId, Long jobId, String reason) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("reason", reason);
         messageSender.send(workerId, WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
@@ -524,19 +609,25 @@ public class JobService {
     }
 
     /**
-     * 체인이 "취소되지 않았다"고 명시적으로 말하는가.
+     * 체인이 이 취소·환불 보고의 확정을 막는가.
      *
-     * <p>모를 때는 막지 않는다. 아직 컨트랙트가 배포되지 않았거나 노드가 잠깐
-     * 답하지 않는 것을 근거로 워커의 종료 보고를 버리면, Job 은 CANCELLING 에
-     * 남고 워커는 이미 슬롯을 놓았다 -- 아무도 그 Job 을 끝낼 수 없게 된다.
+     * <p>체인이 "취소되지 않았다"고 명시적으로 말하면 언제나 막고 대조 사유를 남긴다.
+     * 모를 때는 정책을 따른다: 로컬은 막지 않는다 -- 컨트랙트도 없는데 워커의 종료 보고를
+     * 버리면 Job 은 CANCELLING 에 남고 워커는 이미 슬롯을 놓았다. 운영은 막는다 --
+     * 예치금이 돌아갔다는 것을 확인하지 못한 채 종료 상태로 확정하면, 고객의 돈이 묶인 채
+     * 기록만 끝난다. 그때는 상태를 두고 reconciliation 이 체인을 다시 읽어 확정한다.
      */
     private boolean chainContradictsCancellation(Long jobId, String workerId) {
-        String escrowJobId = jobRepository.findById(jobId)
-                .map(Job::getEscrowJobId).orElse(null);
+        Job current = jobRepository.findById(jobId).orElse(null);
+        String escrowJobId = current == null ? null : current.getEscrowJobId();
         if (escrowJobId == null) {
             return false;
         }
-        Verdict onChain = escrow.cancelledOnChain(escrowJobId);
+        Verdict onChain = escrow.cancelledOnChain(current.getEscrowContractAddress(), escrowJobId);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            log.warn("[JOB] 취소·환불 보고 체인 미확인 → 보류 jobId={} workerId={}", jobId, workerId);
+            return true;
+        }
         if (onChain.isContradicted()) {
             log.error("[JOB] 취소 보고가 온체인과 어긋난다 → 확정하지 않는다 jobId={} workerId={}",
                     jobId, workerId);

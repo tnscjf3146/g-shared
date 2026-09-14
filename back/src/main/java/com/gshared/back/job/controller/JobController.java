@@ -8,6 +8,7 @@ import com.gshared.back.job.dto.request.JobSpecRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.job.dto.response.EstimateResponse;
+import com.gshared.back.job.dto.response.FundJobResponse;
 import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.dto.response.JobDetailResponse;
 import com.gshared.back.job.dto.response.JobPageResponse;
@@ -84,17 +85,19 @@ public class JobController {
     }
 
     /**
-     * 예치 확인 (개발용). 온체인 예치를 마친 뒤 받은 escrowJobId 를 실어 보내면 기록해 두고,
-     * 매칭이 JOB_ASSIGN 에 실어 워커가 acceptJob 사전 검증에 쓴다.
+     * 예치 확인. 의뢰자가 createAndFundJob() 을 보낸 트랜잭션 해시를 실어 보내면 Backend 가 영수증을 읽어
+     * JobFunded 이벤트를 자기 기록(externalRef·client·provider·price)과 대조하고, 맞을 때만 FUNDED 로 바꾼다.
+     * 영수증이 아직 없거나 노드가 답하지 않으면 202 + PENDING — 프런트는 같은 txHash 로 다시 물으면 된다.
      */
     @PostMapping("/{jobId}/fund")
-    public ResponseEntity<Void> fundJob(
+    public ResponseEntity<FundJobResponse> fundJob(
             @PathVariable Long jobId,
             @Valid @RequestBody FundJobRequest request,
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
-        jobService.fundJob(userDetails.getId(), jobId, request.escrowJobId());
-        return ResponseEntity.ok().build();
+        FundJobResponse response = jobService.fundJob(userDetails.getId(), jobId, request.txHash(), request.escrowJobId());
+        HttpStatus status = FundJobResponse.PENDING.equals(response.status()) ? HttpStatus.ACCEPTED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(response);
     }
 
     @PostMapping("/{jobId}/cancel")

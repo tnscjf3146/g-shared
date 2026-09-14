@@ -354,8 +354,8 @@ class JobStateTransitionTest {
     void fund_records_escrow_job_id() {
         Job job = newJob();
 
-        assertThat(jobRepository.fundIfCreated(job.getId(), owner.getId(), "17")).isEqualTo(1);
-        assertThat(jobRepository.fundIfCreated(job.getId(), owner.getId(), "18")).as("중복").isZero();
+        assertThat(jobRepository.fundIfCreated(job.getId(), 31221L, null, "17", null)).isEqualTo(1);
+        assertThat(jobRepository.fundIfCreated(job.getId(), 31221L, null, "18", null)).as("중복").isZero();
 
         em.clear();
         Job funded = jobRepository.findById(job.getId()).orElseThrow();
