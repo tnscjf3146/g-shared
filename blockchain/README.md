@@ -254,7 +254,7 @@ GCoin 이 먼저 배포되어 있어야 한다. 에스크로는 결제 토큰 �
 | --- | --- | --- |
 | `paymentToken` | `0xaCe3c977A539C16668528619F9417589f12C7B22` | SSAFY 체인에 배포된 GCoin 주소 |
 | `acceptTimeout` | `600` | 예치 후 수락까지 10분 |
-| `executionTimeout` | `86400` | 수락 후 제출까지 24시간 |
+| `executionTimeout` | `108000` | 수락 후 제출까지 30시간 |
 
 ### 2. 로컬 예행
 

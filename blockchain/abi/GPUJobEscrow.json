@@ -1,9 +1,9 @@
 {
   "contractName": "GPUJobEscrow",
-  "sourceCommit": "87055d6",
+  "sourceCommit": "3312bc2",
   "solcVersion": "0.8.28",
   "evmVersion": "paris",
-  "generatedAt": "2026-09-11T01:46:26.917Z",
+  "generatedAt": "2026-09-14T03:40:50.580Z",
   "deployed": false,
   "note": "아직 배포하지 않았습니다. 배포 후 주소는 deployments/ 에 따로 기록합니다.",
   "stateEnum": {
@@ -46,8 +46,29 @@
       "type": "error"
     },
     {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "externalRef",
+          "type": "bytes32"
+        }
+      ],
+      "name": "ExternalRefAlreadyUsed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidExternalRef",
+      "type": "error"
+    },
+    {
       "inputs": [],
       "name": "InvalidOperator",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidPaymentToken",
       "type": "error"
     },
     {
@@ -401,6 +422,30 @@
           "internalType": "bool",
           "name": "",
           "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "name": "jobIdByClientRef",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
         }
       ],
       "stateMutability": "view",

@@ -66,7 +66,9 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 ///
 /// @dev 온체인에는 정산 정보만 보관하며, workloadId·imageDigest·datasetHash 등
 /// 작업 상세는 오프체인 DB 를 원본으로 삼습니다. `externalRef` 는 그 DB 작업을
-/// 가리키는 조회용 참조값이며 인증 수단이 아닙니다.
+/// 가리키는 조회용 참조값이며 인증 수단이 아닙니다. 같은 의뢰자가 같은 참조값으로
+/// 두 번 예치하는 것은 막지만, 다른 지갑이 참조값을 선점할 수 없도록 전역 유일성은
+/// 강제하지 않습니다.
 contract GPUJobEscrow is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -104,6 +106,10 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @notice Job ID와 작업 상세 정보 매핑
     mapping(uint256 => Job) public jobs;
 
+    /// @notice 의뢰자와 오프체인 참조값으로 온체인 Job ID를 찾습니다.
+    /// @dev 0은 등록되지 않았다는 뜻입니다. Job ID가 1부터 시작하므로 구분할 수 있습니다.
+    mapping(address => mapping(bytes32 => uint256)) public jobIdByClientRef;
+
     /// @notice 정산 주소가 승인한 서명 대행자. provider => operator => 허용
     /// @dev 백엔드와 프론트가 승인 여부를 조회할 수 있도록 public 으로 둔다.
     mapping(address => mapping(address => bool)) public isOperator;
@@ -132,6 +138,15 @@ contract GPUJobEscrow is ReentrancyGuard {
 
     /// @notice 대행자로 쓸 수 없는 값을 승인하려 할 때 되돌립니다.
     error InvalidOperator();
+
+    /// @notice 결제 토큰이 영주소이거나 배포된 컨트랙트가 아닐 때 되돌립니다.
+    error InvalidPaymentToken();
+
+    /// @notice 오프체인 작업 참조값이 비어 있을 때 되돌립니다.
+    error InvalidExternalRef();
+
+    /// @notice 같은 의뢰자가 이미 사용한 오프체인 작업 참조값을 다시 사용할 때 되돌립니다.
+    error ExternalRefAlreadyUsed(bytes32 externalRef);
 
     // ─────────────────────────────────────────────────────────────
     // 이벤트(Events)
@@ -172,7 +187,9 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @param acceptTimeout_ 예치 후 수락까지의 기한(초)
     /// @param executionTimeout_ 수락 후 제출까지의 기한(초)
     constructor(address paymentToken_, uint64 acceptTimeout_, uint64 executionTimeout_) {
-        require(paymentToken_ != address(0), "Escrow: token is zero");
+        if (paymentToken_ == address(0) || paymentToken_.code.length == 0) {
+            revert InvalidPaymentToken();
+        }
         require(acceptTimeout_ > 0 && executionTimeout_ > 0, "Escrow: deadline is zero");
         paymentToken     = IERC20(paymentToken_);
         acceptTimeout    = acceptTimeout_;
@@ -186,7 +203,10 @@ contract GPUJobEscrow is ReentrancyGuard {
     /// @notice 작업을 만들고 대금을 예치하면서 작업을 맡을 공급자를 지정합니다.
     /// @dev 호출 전에 반드시 paymentToken.approve 로 컨트랙트가 대금을 출금할 수 있게 해야 합니다.
     ///      생성과 예치를 한 트랜잭션에 묶어, 대금 없는 작업이 스토리지에 남지 않습니다.
-    ///      토큰 전송이 실패하면 작업 생성과 nextJobId 증가까지 함께 되돌아갑니다.
+    ///      같은 의뢰자가 같은 externalRef 로 두 번 예치할 수 없습니다. 다른 주소까지
+    ///      전역으로 막으면 공개 트랜잭션을 복사한 제3자가 참조값을 선점할 수 있어
+    ///      의뢰자별로만 유일성을 검사합니다. 토큰 전송이 실패하면 참조값 등록과 작업
+    ///      생성, nextJobId 증가까지 함께 되돌아갑니다.
     /// @param externalRef 오프체인 작업을 가리키는 참조값. 백엔드가 발급하며 인증 수단이 아니다
     /// @param price 지급할 작업 대금 (결제 토큰 최소 단위)
     /// @param provider 이 작업을 맡을 공급자의 정산 주소. 대금이 여기로 갑니다.
@@ -199,9 +219,15 @@ contract GPUJobEscrow is ReentrancyGuard {
     {
         require(price > 0, "Escrow: price is zero");
         if (provider == address(0) || provider == msg.sender) revert InvalidProvider();
+        if (externalRef == bytes32(0)) revert InvalidExternalRef();
+        if (jobIdByClientRef[msg.sender][externalRef] != 0) {
+            revert ExternalRefAlreadyUsed(externalRef);
+        }
 
         jobId = nextJobId++;
         uint64 deadline = uint64(block.timestamp) + acceptTimeout;
+
+        jobIdByClientRef[msg.sender][externalRef] = jobId;
 
         jobs[jobId] = Job({
             client:     msg.sender,
