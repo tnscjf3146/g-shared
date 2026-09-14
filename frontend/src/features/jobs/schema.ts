@@ -166,4 +166,5 @@ export const escrowTermsSchema = z.object({
   chainId: z.number(),
   tokenAddress: hexAddress,
   escrowAddress: hexAddress,
+  escrowJobId: z.nullable(z.string().check(z.regex(/^[0-9]{1,78}$/))), // FUNDED 취소용 온체인 번호 — CREATED(예치 전)면 null
 })

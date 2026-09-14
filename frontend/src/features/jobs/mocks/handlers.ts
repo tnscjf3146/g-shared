@@ -248,9 +248,10 @@ export const jobHandlers = [
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
     const job = find(Number(params.jobId))
     if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
-    if (job.status !== 'CREATED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.') // CREATED=예치용, FUNDED=온체인 취소용
     return HttpResponse.json({
       jobId: job.jobId,
+      escrowJobId: job.status === 'FUNDED' ? String(job.jobId) : null,
       externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
       priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
       providerWallet: '0x1111111111111111111111111111111111111111',
