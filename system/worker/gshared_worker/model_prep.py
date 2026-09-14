@@ -128,6 +128,14 @@ def fetch_command(image_reference: str, host_directory: Path,
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m,uid=10001,gid=10001,mode=0700",
         "-e", "HF_HUB_OFFLINE=0",
         "-e", "HOME=/tmp",
+        # The runtime image points every cache at /job/cache, which --read-only
+        # makes unwritable here. Xet keeps a chunk cache of its own there and
+        # fails the download on it, so it is switched off: the weights come
+        # over plain HTTPS straight into the mount, and whatever else the hub
+        # writes lands in the tmpfs.
+        "-e", "HF_HOME=/tmp/huggingface",
+        "-e", "XDG_CACHE_HOME=/tmp/cache",
+        "-e", "HF_HUB_DISABLE_XET=1",
         "-v", f"{host_directory}:{CONTAINER_CACHE_PATH}",
         "--entrypoint", "python",
         image_reference, "-c", FETCH_PROGRAM,

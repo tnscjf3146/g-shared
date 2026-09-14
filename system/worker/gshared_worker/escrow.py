@@ -451,7 +451,7 @@ def abort_escrow_job(
 
     It exists now because the alternative during development is worse. A test
     job accepted against a local chain holds the client's deposit for the full
-    execution timeout -- twenty-four hours -- before ``settleTimeout`` can
+    execution timeout -- thirty hours -- before ``settleTimeout`` can
     refund it. ``abortJob`` returns it in one transaction, and the signing code
     is the same code ``acceptJob`` uses.
 

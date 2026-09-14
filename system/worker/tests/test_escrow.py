@@ -732,7 +732,7 @@ class TestTheRefusalSaysWhy(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestAborting(unittest.TestCase):
-    """A capability, so a test job does not hold a deposit for 24 hours."""
+    """A capability, so a test job does not hold a deposit for 30 hours."""
 
     def abort(self, chain):
         return abort_escrow_job(

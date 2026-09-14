@@ -123,7 +123,7 @@ def escrow_cleaner(chain, settings, operator_address: str) -> DecideOnJob:
     Used when the Backend refuses our JOB_ACCEPTED. The escrow job is ASSIGNED
     to this machine at that moment and nothing is going to run it, so leaving
     it would lock the client's deposit until the execution timeout expires --
-    twenty-four hours on the deployed settings.
+    thirty hours on the deployed settings.
     """
     from .escrow import abort_escrow_job
 

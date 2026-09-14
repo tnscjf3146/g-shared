@@ -78,10 +78,13 @@ def code_only(module) -> str:
 
 
 def settings() -> WorkerSettings:
+    # No contract: these tests are about the connection, not jobs. With the
+    # SSAFY escrow as the default, leaving it implicit would let a developer's
+    # own worker-wallet.json turn this into a real chain client.
     return WorkerSettings(
         backend_url="wss://gpu.example.com/ws/workers", worker_id="worker-001",
         hourly_price=600, gpu_index=0, supported_workloads=(),
-        worker_token=None, config_path=None)
+        worker_token=None, config_path=None, escrow_address=None)
 
 
 def envelope(kind: str, **payload) -> str:
