@@ -50,8 +50,9 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
       await fundJob(job.jobId, escrowJobId)
       setPhase({ s: 'done' })
       onFunded()
-    } catch {
-      // 체인은 성공 — 새 트랜잭션을 만들면 이중 예치가 되므로, 같은 escrowJobId 로 확인만 다시
+    } catch (e) {
+      console.error('예치 서버 확인 실패', e) // 체인은 성공 — 원인 파악용 로그(사용자 흐름은 재시도로 복구)
+      // 새 트랜잭션을 만들면 이중 예치가 되므로, 같은 escrowJobId 로 확인만 다시
       setPhase({ s: 'reportFailed', escrowJobId, txHash: hash })
     }
   }
