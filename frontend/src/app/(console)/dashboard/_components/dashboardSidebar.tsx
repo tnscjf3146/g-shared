@@ -164,12 +164,12 @@ export function DashboardSidebar() {
       </div>
 
       <div className="flex flex-col gap-0.5 border-t border-hairline px-2 py-2">
-        <div className={item} title="내 계정">
+        <Link href="/account" title="내 계정" aria-current={pathname === '/account' ? 'page' : undefined} className={`${item} ${pathname === '/account' ? 'bg-primary/10 font-semibold text-dark' : ''}`}>
           <span className="grid size-5 flex-none place-items-center">
             <Image src="/logo-icon.png" alt="" width={20} height={20} unoptimized className="size-5 object-contain" />
           </span>
           {label('내 계정')}
-        </div>
+        </Link>
         <button
           type="button"
           title="로그아웃"

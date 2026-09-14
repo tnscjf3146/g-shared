@@ -1,9 +1,9 @@
 import { ApiError, fetcher } from '@/lib/fetcher'
 import { RETRYABLE_401 } from './errors'
-import { tokenResponseSchema } from './schema'
+import { USERS_ME_PATH, meSchema, tokenResponseSchema } from './schema'
 import { authStore } from './store'
 import { safeNextPath } from './next-path'
-import type { LoginInput, SignupRequest } from './types'
+import type { LoginInput, Me, SignupRequest } from './types'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -110,4 +110,14 @@ function toLogin(): never {
     location.assign(new URL(`/login?next=${next}&reason=expired`, location.origin).href) // React 밖(API 계층)이라 라우터를 못 쓴다 → 전체 URL 로 하드 이동
   }
   throw new ApiError(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+}
+
+/** GET /users/me — 내 프로필. 백엔드 미구현: 계약만 확정(schema.ts meSchema), MSW 목업이 응답 */
+export async function getMe(): Promise<Me> {
+  return meSchema.parse(await authFetch<unknown>(USERS_ME_PATH))
+}
+
+/** PATCH /users/me { nickname } → 204. 백엔드 미구현 — 목업 응답 */
+export function updateNickname(nickname: string): Promise<void> {
+  return authFetch<void>(USERS_ME_PATH, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ nickname }) })
 }

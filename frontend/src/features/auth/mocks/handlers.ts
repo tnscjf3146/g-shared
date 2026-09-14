@@ -1,7 +1,10 @@
 import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
-import { emailSchema, nicknameSchema, passwordSchema } from '../schema'
+import { USERS_ME_PATH, emailSchema, nicknameSchema, passwordSchema } from '../schema'
 import { MOCK_ACCESS_TOKEN, MOCK_REFRESH_COOKIE, MOCK_USER } from './data'
+
+// 내 계정 목업 상태 — 닉네임 변경이 화면에 반영되게 모듈 변수(새로고침하면 초기값)
+let nickname = MOCK_USER.nickname
 
 // 백엔드 에러 포맷 그대로: { code, message }
 const error = (status: number, code: string, message: string) => HttpResponse.json({ code, message }, { status })
@@ -14,6 +17,22 @@ const tokenJson = (setCookie: boolean) =>
   )
 
 export const authHandlers = [
+  // 내 계정 — 백엔드 미구현 stub(계약: schema.ts meSchema). 구현되면 이 두 핸들러만 삭제
+  http.get(`${API_BASE_URL}${USERS_ME_PATH}`, async ({ request }) => {
+    await delay()
+    if (!request.headers.get('Authorization')?.startsWith('Bearer ')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    return HttpResponse.json({ email: MOCK_USER.email, nickname })
+  }),
+  http.patch(`${API_BASE_URL}${USERS_ME_PATH}`, async ({ request }) => {
+    await delay()
+    if (!request.headers.get('Authorization')?.startsWith('Bearer ')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const body = (await request.json().catch(() => null)) as { nickname?: string } | null
+    const r = nicknameSchema.safeParse(body?.nickname ?? '')
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0].message)
+    nickname = r.data
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   http.post(`${API_BASE_URL}/auth/signup`, async ({ request }) => {
     await delay()
     const body = (await request.json().catch(() => null)) as { email?: string; password?: string; nickname?: string } | null
