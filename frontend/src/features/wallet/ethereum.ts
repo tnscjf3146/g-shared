@@ -70,6 +70,14 @@ export async function getGscBalance(address: string): Promise<bigint> {
   return BigInt(await rpc('eth_call', [{ to: GSC_TOKEN.address, data }, 'latest']))
 }
 
+/** MetaMask 자산 목록에 GSC 등록 제안 — 정책상 사용자 승인 팝업이 뜬다(강제 등록 불가). 거절해도 앱 동작엔 영향 없음 */
+export async function watchGsc(p: Eip1193Provider): Promise<void> {
+  await p.request({
+    method: 'wallet_watchAsset',
+    params: { type: 'ERC20', options: { address: GSC_TOKEN.address, symbol: GSC_TOKEN.symbol, decimals: GSC_TOKEN.decimals } },
+  })
+}
+
 /** 0x1234…abcd */
 export function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`
