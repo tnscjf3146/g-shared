@@ -5,10 +5,9 @@ export const WORKERS_PATH = '/workers'
 // 네트워크 전체 워커 현황(대시보드 지표) — 백엔드 미구현, 계약 먼저 고정(MSW 목업이 응답). 구현되면 목업 핸들러만 지우면 된다
 export const NETWORK_STATS_PATH = '/network/stats'
 
-// 다운로드는 시스템 담당이 exe 를 올리는 곳에 따라 바뀐다(worker.md §8). 서버 컴포넌트(안내 카드)도 쓰므로 인증 스토어를 끌고 오는 api.ts 가 아니라 여기 → env 하나, 없으면 저장소 raw 파일
-export const WORKER_DOWNLOAD_URL =
-  process.env.NEXT_PUBLIC_WORKER_DOWNLOAD_URL ??
-  'https://lab.ssafy.com/s15-blochain-sub1/S15P21E204/-/raw/develop/system/G-shared/G-shared.exe?inline=false'
+// 다운로드는 같은 오리진 /downloads/G-shared.exe(worker.md §8) — 프론트 이미지가 저장소 system/G-shared/G-shared.exe 를 public/downloads 로 담아 내려준다.
+// 서버 컴포넌트(안내 카드)도 쓰므로 인증 스토어를 끌고 오는 api.ts 가 아니라 여기 → env 가 있으면 그 값, 없으면 서비스 경로
+export const WORKER_DOWNLOAD_URL = process.env.NEXT_PUBLIC_WORKER_DOWNLOAD_URL || '/downloads/G-shared.exe'
 
 /** back WorkerStatus: OFFLINE(미연결·하트비트 90초 초과) / ONLINE(대기) / RUNNING(작업 중) */
 export const workerStatusSchema = z.enum(['OFFLINE', 'ONLINE', 'RUNNING'])

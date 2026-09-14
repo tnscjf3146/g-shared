@@ -7,6 +7,19 @@ const nextConfig: NextConfig = {
     const origin = process.env.BACKEND_ORIGIN ?? "http://localhost:8080";
     return [{ source: "/api/:path*", destination: `${origin}/api/:path*` }];
   },
+  // 워커 실행파일(public/downloads/G-shared.exe, Dockerfile 이 이미지에 넣는다) — 브라우저가 열지 않고 파일로 저장하게
+  async headers() {
+    return [
+      {
+        source: "/downloads/G-shared.exe",
+        headers: [
+          { key: "Content-Type", value: "application/octet-stream" },
+          { key: "Content-Disposition", value: 'attachment; filename="G-shared.exe"' },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

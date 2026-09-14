@@ -28,5 +28,11 @@ COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
 
+# 워커 실행파일 — 원본은 저장소 system/G-shared/G-shared.exe 하나뿐이다.
+# 빌드 컨텍스트(./frontend) 밖에 있으므로 docker-compose.yml 의 additional_contexts(worker)로
+# 받아 이미지에만 넣는다(git 에 사본을 두지 않는다). nginx 의 / → :3000 을 그대로 타고
+# https://<도메인>/downloads/G-shared.exe 로 내려간다.
+COPY --from=worker G-shared.exe ./public/downloads/G-shared.exe
+
 EXPOSE 3000
 CMD ["node", "server.js"]
