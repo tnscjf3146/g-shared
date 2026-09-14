@@ -460,6 +460,21 @@ class TestTheFetchContainer(unittest.TestCase):
         self.assertIn("--cap-drop", command)
         self.assertIn("no-new-privileges", command)
 
+    def test_the_hub_writes_only_where_the_read_only_container_can(self):
+        """The runtime image aims every cache at /job/cache, which --read-only
+        freezes. Xet's chunk cache there failed a real Qwen3-0.6B fetch with
+        "Read-only file system", so Xet is off and the hub's own homes are on
+        the tmpfs."""
+        command = self.command()
+        env = [command[i + 1] for i, part in enumerate(command) if part == "-e"]
+
+        self.assertIn("HF_HUB_DISABLE_XET=1", env)
+        for name in ("HOME", "HF_HOME", "XDG_CACHE_HOME"):
+            with self.subTest(name=name):
+                value = next(e.split("=", 1)[1] for e in env if e.startswith(name + "="))
+                self.assertTrue(value.startswith("/tmp"), value)
+        self.assertNotIn("/job/cache", " ".join(env))
+
     def test_it_carries_no_credential(self):
         joined = " ".join(self.command()).lower()
 

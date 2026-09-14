@@ -40,6 +40,7 @@ from .escrow import AcceptOutcome, AcceptResult, JobState
 from .job_cancellation import JobCancelledReady
 from .job_settlement import JobResultReady, Unsettled
 from .job_acceptance import Decision, JobAcceptance, Work
+from .job_wiring import build_job_acceptance
 from .worker_job import (
     ACCEPT_VALIDATION_FAILED,
     JOB_ASSIGN,
@@ -1044,7 +1045,11 @@ def stay_connected(
     # does not stop being decided on because a socket closed, and a second
     # decider would be a second acceptJob for the same Job.
     owned_acceptance = acceptance is None
-    acceptance = acceptance if acceptance is not None else JobAcceptance()
+    # The real pipeline: escrow, runtime, settlement and cancellation, built
+    # from this Worker's own settings. Without an escrow contract or a usable
+    # signing key it is the refusing acceptance every earlier build had.
+    acceptance = (acceptance if acceptance is not None
+                  else build_job_acceptance(settings, credentials))
 
     try:
         return _connect_until_stopped(

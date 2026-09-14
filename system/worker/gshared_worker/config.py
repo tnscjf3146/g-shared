@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -53,6 +54,24 @@ DEFAULT_HOURLY_PRICE = 600
 #: (:func:`gshared_worker.worker_socket.websocket_url`).
 DEFAULT_BACKEND_URL = "https://j15e204.p.ssafy.io"
 
+#: The node the Worker reads the escrow from and sends its transactions to,
+#: when nobody has said otherwise. The SSAFY chain's public RPC.
+DEFAULT_ESCROW_RPC_URL = "https://rpc.ssafy-blockchain.com"
+
+#: The chain every escrow acceptance must be on. The SSAFY chain; the same
+#: number as ``escrow.SSAFY_CHAIN_ID``.
+DEFAULT_CHAIN_ID = 31221
+
+#: The GPUJobEscrow the Blockchain team deployed on the SSAFY chain, as recorded
+#: in ``blockchain/deployments/ssafy-31221/GPUJobEscrow.json``. Not typed from
+#: memory: a test compares it with that record, so a redeployment that is not
+#: carried here fails the build instead of shipping a Worker that signs against
+#: the old contract. A local chain overrides it like the Backend address.
+DEFAULT_ESCROW_ADDRESS = "0x66178DF08F5938d2ABC17496b6A98F7d776D3c56"
+
+#: An Ethereum address: ``0x`` and forty hex digits.
+_ADDRESS = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
 #: What a machine offers to do, when nobody has said otherwise.
 #:
 #: Empty on purpose. In the PoC this was taken from the container image
@@ -75,9 +94,12 @@ ENV_WORKER_TOKEN = "GSHARED_WORKER_TOKEN"
 ENV_HOURLY_PRICE = "GSHARED_WORKER_HOURLY_PRICE"
 ENV_GPU_INDEX = "GSHARED_WORKER_GPU_INDEX"
 ENV_SUPPORTED_WORKLOADS = "GSHARED_WORKER_SUPPORTED_WORKLOADS"
+ENV_ESCROW_RPC_URL = "GSHARED_WORKER_ESCROW_RPC_URL"
+ENV_ESCROW_ADDRESS = "GSHARED_WORKER_ESCROW_ADDRESS"
+ENV_CHAIN_ID = "GSHARED_WORKER_CHAIN_ID"
 
-_STRING_KEYS = ("backendUrl", "workerId", "workerToken")
-_INTEGER_KEYS = ("hourlyPrice", "gpuIndex")
+_STRING_KEYS = ("backendUrl", "workerId", "workerToken", "escrowRpcUrl", "escrowAddress")
+_INTEGER_KEYS = ("hourlyPrice", "gpuIndex", "chainId")
 _LIST_KEYS = ("supportedWorkloads",)
 _KNOWN_KEYS = _STRING_KEYS + ("workerTokenProtected",) + _INTEGER_KEYS + _LIST_KEYS
 
@@ -94,6 +116,12 @@ class WorkerSettings:
     supported_workloads: tuple[str, ...]
     worker_token: str | None
     config_path: Path | None
+    #: Where on-chain work is checked and signed. Defaulted to the SSAFY chain
+    #: and its deployed escrow. ``escrow_address=None`` is a Worker with no
+    #: contract, which refuses every assignment.
+    escrow_rpc_url: str = DEFAULT_ESCROW_RPC_URL
+    escrow_address: str | None = DEFAULT_ESCROW_ADDRESS
+    chain_id: int = DEFAULT_CHAIN_ID
 
 
 def worker_directory() -> Path:
@@ -253,6 +281,27 @@ def resolve_settings(
         DEFAULT_SUPPORTED_WORKLOADS,
     )
 
+    escrow_rpc_url = _first(
+        _clean(env.get(ENV_ESCROW_RPC_URL)),
+        _clean(file_values.get("escrowRpcUrl")),
+        DEFAULT_ESCROW_RPC_URL,
+    )
+    escrow_address = _first(
+        _clean(env.get(ENV_ESCROW_ADDRESS)),
+        _clean(file_values.get("escrowAddress")),
+        DEFAULT_ESCROW_ADDRESS,
+    )
+    if escrow_address is not None and not _ADDRESS.match(escrow_address):
+        # A typo here is a contract nobody deployed. Refused now, rather than
+        # found when the first Job's deposit is waiting on it.
+        raise WorkerConfigurationError(
+            f"escrowAddress must be 0x and forty hex digits, found {escrow_address!r}")
+    chain_id = _first(
+        _env_integer(env, ENV_CHAIN_ID),
+        file_values.get("chainId"),
+        DEFAULT_CHAIN_ID,
+    )
+
     # workerId is not on this list. It is what registration hands back, so a
     # first run has none, and refusing to start without one was a machine that
     # could never be registered from the executable at all.
@@ -275,6 +324,9 @@ def resolve_settings(
         supported_workloads=supported_workloads,
         worker_token=worker_token,
         config_path=config_path,
+        escrow_rpc_url=escrow_rpc_url,
+        escrow_address=escrow_address,
+        chain_id=chain_id,
     )
 
 

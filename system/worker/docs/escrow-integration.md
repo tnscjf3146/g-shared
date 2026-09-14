@@ -206,7 +206,7 @@ client, state, deadline, provider, operator, price, resultHash
 
 전제: `state == ASSIGNED` **AND** `operator == 로컬`. 성공 후 `state == CANCELLED` 재확인.
 
-**자동 호출은 없다.** Runtime failure·JOB_FAILED·JOB_CANCEL·사용자 취소 어디에도 연결되지 않았다. 개발 중 테스트 Job이 예치금을 24시간 묶지 않도록 하는 용도이고, 7번·9번이 재사용한다.
+**자동 호출은 없다.** Runtime failure·JOB_FAILED·JOB_CANCEL·사용자 취소 어디에도 연결되지 않았다. 개발 중 테스트 Job이 예치금을 30시간 묶지 않도록 하는 용도이고, 7번·9번이 재사용한다.
 
 ---
 
