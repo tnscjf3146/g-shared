@@ -278,6 +278,20 @@ class TestFeasibility:
 
         assert response.status_code == 409
 
+    def test_an_8_gib_laptop_gpu_reporting_8188_runs_an_8192_job(self, client):
+        # RTX 4070 Laptop은 8 GiB 카드인데 드라이버가 8188로 보고한다. 이 GPU에서
+        # QLoRA Runtime E2E가 끝까지 돌았으므로, 8192(8 GiB) 요구에서 떨어지면 안 된다.
+        answer = client.post(PATH, json=body(
+            requirements={"minVramMb": 8192}, gpuCandidates=[MIDDLE])).json()
+
+        assert answer["recommendedWorkerId"] == "worker-4070"
+
+    def test_the_8188_gpu_still_is_not_a_12_gib_gpu(self, client):
+        response = client.post(PATH, json=body(
+            requirements={"minVramMb": 12288}, gpuCandidates=[MIDDLE]))
+
+        assert response.status_code == 409
+
     def test_the_recommendation_still_comes_from_the_prediction(self, client):
         # 걸러내기는 실행 가능 여부만 정한다. 남은 것 중 1위는 예측이 정한다.
         answer = client.post(PATH, json=body(requirements={"minVramMb": 12000})).json()

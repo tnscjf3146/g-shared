@@ -1,0 +1,35 @@
+{
+  "modelId": 3,
+  "dockerImageId": 1,
+  "dataset": {
+    "datasetSizeBytes": 462148,
+    "sampleCount": 1440,
+    "totalTokens": 171480,
+    "effectiveTokens": 171480,
+    "avgSeqLength": 119.083,
+    "maxSeqLength": 256
+  },
+  "trainingConfig": {
+    "epochs": 3,
+    "batchSize": 8,
+    "learningRate": 0.0002,
+    "maxLength": 512
+  },
+  "requirements": {
+    "minVramMb": 8192
+  },
+  "gpuCandidates": [
+    {
+      "workerId": "worker-4070-laptop",
+      "gpuModel": "NVIDIA GeForce RTX 4070 Laptop GPU",
+      "vramMb": 8188,
+      "benchmarkTokensPerSec": 37088.0
+    },
+    {
+      "workerId": "worker-3060",
+      "gpuModel": "NVIDIA GeForce RTX 3060",
+      "vramMb": 12288,
+      "benchmarkTokensPerSec": 17000.0
+    }
+  ]
+}

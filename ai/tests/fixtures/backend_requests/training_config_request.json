@@ -1,0 +1,10 @@
+{
+  "dataset": {
+    "datasetSizeBytes": 462148,
+    "sampleCount": 1440,
+    "totalTokens": 171480,
+    "avgSeqLength": 119.083,
+    "maxSeqLength": 256
+  },
+  "mode": "BALANCED"
+}
