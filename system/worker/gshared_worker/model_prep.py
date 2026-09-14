@@ -43,10 +43,6 @@ MUTABLE_REFERENCES = frozenset({"main", "master", "latest", "head", "HEAD"})
 
 _REVISION = re.compile(r"^[0-9a-f]{40}$")
 
-#: Weights, config and tokenizer. Not the GGUF conversions or ONNX exports --
-#: gigabytes this runtime will never open.
-WANTED_PATTERNS = ("*.json", "*.safetensors", "*.txt", "*.py")
-
 MODEL_FETCH_TIMEOUT_SECONDS = 3600
 
 #: Where the fetch container writes. Mounted from the host cache directory.
@@ -54,7 +50,9 @@ CONTAINER_CACHE_PATH = "/cache/model"
 
 #: The download program. Ours, not a shell line: it runs in the container's
 #: interpreter with the reference and revision passed as **arguments**, so
-#: nothing from the Backend is ever interpolated into code.
+#: nothing from the Backend is ever interpolated into code. ``allow_patterns``
+#: fetches weights, config and tokenizer only -- not the GGUF conversions or
+#: ONNX exports, gigabytes this runtime will never open.
 FETCH_PROGRAM = r'''import sys
 from huggingface_hub import snapshot_download
 
@@ -157,7 +155,7 @@ async def prepare_model(
     directory = cache.directory_for(model_ref, pinned)
 
     if cache.is_complete(model_ref, pinned):
-        _debug.info("model: %s@%s already prepared", model_ref, pinned[:8])
+        _debug.debug("model: %s@%s already prepared", model_ref, pinned[:8])
         return PreparedModel(directory, model_ref, pinned, fetched=False)
 
     # An incomplete directory from a killed process is thrown away rather than
@@ -166,7 +164,7 @@ async def prepare_model(
     directory.mkdir(parents=True, exist_ok=True)
 
     mount = host_path_of(directory) if host_path_of else directory
-    _debug.info("model: fetching %s@%s", model_ref, pinned[:8])
+    _debug.debug("model: fetching %s@%s", model_ref, pinned[:8])
     try:
         finished = await runner.run(
             fetch_command(image_reference, mount, model_ref, pinned),

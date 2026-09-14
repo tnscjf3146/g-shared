@@ -253,12 +253,31 @@ class TheLogIsStartedBeforeAnythingCanFailTest(StartupTestCase):
 
         self.assertTrue((self.directory / DEBUG_LOG_NAME).is_file())
 
-    def test_the_settings_are_recorded_for_whoever_diagnoses_the_run(self):
+    def test_the_settings_are_recorded_for_whoever_diagnoses_a_failed_run(self):
         self.enrol()
 
-        self.start()
+        self.start(run_worker=lambda settings, say: WorkerExitCode.EXPECTED_FAILURE)
 
         self.assertIn("worker-001", self.logged)
+        self.assertIn("stopped with exit code 2", self.logged)
+
+    def test_a_failed_run_names_the_build_that_wrote_it(self):
+        # Without it a report cannot be told from an older copy of the
+        # executable that was never replaced.
+        from gshared_worker.logging_setup import BUILD
+
+        self.enrol()
+
+        self.start(run_worker=lambda settings, say: WorkerExitCode.EXPECTED_FAILURE)
+
+        self.assertIn(BUILD, self.logged)
+
+    def test_a_run_that_worked_writes_nothing_at_the_default_level(self):
+        self.enrol()
+
+        self.assertEqual(self.start(), WorkerExitCode.OK)
+
+        self.assertEqual(self.logged.strip(), "")
 
     def test_the_stored_token_is_never_written_to_it(self):
         self.enrol()
@@ -424,49 +443,72 @@ class SomebodyStoppedItTest(StartupTestCase):
         self.assertIn("중지했습니다.", self.output)
 
 
-class TheWindowStaysOpenLongEnoughToReadTest(unittest.TestCase):
-    def test_a_run_that_worked_does_not_ask_anybody_to_press_a_key(self):
-        said = []
+class AFailureIsShownWithoutAConsoleTest(unittest.TestCase):
+    """G-shared.exe has no console, so a failed run is shown in a dialog."""
 
-        worker_main._pause_if_the_window_will_close(
-            0, owns_console=lambda: True, wait=lambda: None, out=said.append
-        )
+    def test_a_run_that_worked_shows_nothing(self):
+        shown = []
 
-        self.assertEqual(said, [])
+        worker_main._show_the_failure(
+            0, ["연결되었습니다."], windowed=True, show=shown.append)
 
-    def test_a_failed_run_in_a_window_of_its_own_is_held(self):
-        said = []
-        waited = []
+        self.assertEqual(shown, [])
 
-        worker_main._pause_if_the_window_will_close(
-            2,
-            owns_console=lambda: True,
-            wait=lambda: waited.append(True),
-            out=said.append,
-        )
+    def test_a_failed_windowless_run_shows_what_it_said(self):
+        shown = []
 
-        self.assertTrue(waited)
-        self.assertIn("Enter 키를 누르면 창이 닫힙니다.", said)
+        worker_main._show_the_failure(
+            2, ["", "이 설정으로는 G-shared를 시작할 수 없습니다.", "  원인"],
+            windowed=True, show=shown.append)
 
-    def test_a_failed_run_in_somebody_elses_terminal_is_not_held(self):
-        waited = []
+        self.assertEqual(len(shown), 1)
+        self.assertIn("이 설정으로는 G-shared를 시작할 수 없습니다.", shown[0])
+        self.assertIn("원인", shown[0])
 
-        worker_main._pause_if_the_window_will_close(
-            2,
-            owns_console=lambda: False,
-            wait=lambda: waited.append(True),
-            out=lambda *_: None,
-        )
+    def test_only_the_last_lines_are_shown(self):
+        shown = []
+        said = [f"line {n}" for n in range(100)]
 
-        self.assertEqual(waited, [])
+        worker_main._show_the_failure(2, said, windowed=True, show=shown.append)
 
-    def test_being_unable_to_hold_the_window_is_not_worth_failing_over(self):
-        def cannot_tell():
-            raise OSError("no console")
+        self.assertIn("line 99", shown[0])
+        self.assertNotIn("line 0\n", shown[0] + "\n")
 
-        worker_main._pause_if_the_window_will_close(
-            2, owns_console=cannot_tell, wait=lambda: None, out=lambda *_: None
-        )
+    def test_a_run_from_a_terminal_shows_no_dialog(self):
+        # The lines are already on screen there.
+        shown = []
+
+        worker_main._show_the_failure(
+            2, ["멈췄습니다."], windowed=False, show=shown.append)
+
+        self.assertEqual(shown, [])
+
+    def test_being_unable_to_show_it_is_not_worth_failing_over(self):
+        def cannot_show(text):
+            raise RuntimeError("no display")
+
+        worker_main._show_the_failure(2, ["멈췄습니다."], windowed=True, show=cannot_show)
+
+    def test_run_hands_the_failure_to_the_dialog(self):
+        shown = []
+
+        with TemporaryDirectory() as folder, \
+                patch.object(worker_main, "_is_windowed", lambda: True), \
+                patch.object(worker_main, "_error_dialog", shown.append):
+            code = worker_main.run(
+                out=lambda *_: None,
+                env={"LOCALAPPDATA": str(Path(folder) / "AppData")},
+                directory=Path(folder),
+                run_worker=lambda settings, say: (
+                    say("이 PC는 아직 GPU 작업을 실행할 준비가 되지 않았습니다.")
+                    or WorkerExitCode.EXPECTED_FAILURE),
+                guard_factory=FakeGuard,
+            )
+            stop_debug_log()
+
+        self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
+        self.assertEqual(len(shown), 1)
+        self.assertIn("준비가 되지 않았습니다", shown[0])
 
 
 @unittest.skipUnless(os.name == "nt", "the instance guard is Windows-only")

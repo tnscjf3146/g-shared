@@ -164,7 +164,7 @@ def store_credentials(
     temporary.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
     # The identity, never the token.
-    _debug.info("stored credentials for %s at %s", worker_id.strip(), path)
+    _debug.debug("stored credentials for %s at %s", worker_id.strip(), path)
     return path
 
 

@@ -24,11 +24,9 @@ from gshared_worker.job_runtime import LABEL_GENERATION, LABEL_JOB_ID
 from gshared_worker.runtime_stop import (
     FIELD_SEPARATOR,
     STOP_GRACE_SECONDS,
-    ContainerState,
     RuntimeHandle,
     StopOutcome,
     inspect_command,
-    look_at_container,
     read_state,
     stop_command,
     stop_container,

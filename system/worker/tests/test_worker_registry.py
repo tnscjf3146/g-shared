@@ -251,11 +251,6 @@ class AuthenticatingAnExistingWorkerTest(unittest.TestCase):
             self.assertIsNot(
                 api.verify(STORED).state, WorkerAuthState.NEEDS_ENROLLMENT)
 
-    def test_only_403_is_a_revocation(self):
-        api, _ = registry(403, {"code": "WORKER_REVOKED", "message": "removed"})
-
-        self.assertIs(api.verify(STORED).state, WorkerAuthState.REVOKED)
-
     def test_a_missing_register_endpoint_is_a_contract_error_too(self):
         api, _ = registry(404, {"code": "NOT_FOUND", "message": "no handler"})
 

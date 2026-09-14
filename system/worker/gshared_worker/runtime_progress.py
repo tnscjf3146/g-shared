@@ -160,7 +160,7 @@ class ProgressTracker:
             # A step before training_started. Either the events arrived out of
             # order or something else on stdout is imitating them; either way
             # this run has not been told how long it is.
-            _debug.info("progress: a step arrived before training started")
+            _debug.debug("progress: a step arrived before training started")
             return
         published = self._measure(event.step, event.total_steps, event)
         if published is not None:
@@ -195,15 +195,15 @@ class ProgressTracker:
         """
         total = _positive(total) or self._total_steps
         if not total:
-            _debug.info("progress: an event carried no usable step total")
+            _debug.debug("progress: an event carried no usable step total")
             return None
         if isinstance(step, bool) or not isinstance(step, int) or step < 0:
-            _debug.info("progress: an event carried no usable step")
+            _debug.debug("progress: an event carried no usable step")
             return None
         if step > total:
             # More steps than the run has. Not clamped: the two numbers
             # disagree and neither can be trusted to stand for the other.
-            _debug.info("progress: step %s is past the total %s", step, total)
+            _debug.debug("progress: step %s is past the total %s", step, total)
             return None
         if step <= self._last_step:
             # Already reported, or older than what was. The Trainer publishes
@@ -213,7 +213,7 @@ class ProgressTracker:
 
         percent = round(step / total * 100.0, 2)
         if not math.isfinite(percent) or percent < 0.0 or percent > 100.0:
-            _debug.info("progress: %s%% is not a percentage", percent)
+            _debug.debug("progress: %s%% is not a percentage", percent)
             return None
 
         elapsed = self._elapsed(event)
@@ -253,12 +253,12 @@ class ProgressTracker:
             # the part a customer looks at; dropping the whole update over a
             # bad second would be the more expensive mistake.
             if "elapsedSec" in event.payload:
-                _debug.info("progress: the container's elapsed time was unusable")
+                _debug.debug("progress: the container's elapsed time was unusable")
             if self._started_at is None:
                 return None
             reported = self._monotonic() - self._started_at
         if not math.isfinite(reported) or reported < 0:
-            _debug.info("progress: %s is not an elapsed time", reported)
+            _debug.debug("progress: %s is not an elapsed time", reported)
             return None
         seconds = int(reported)
         # A clock that appears to have gone backwards is reported as standing
@@ -277,7 +277,7 @@ class ProgressTracker:
             return None
         total = event.total_epochs or self._total_epochs
         if total and current > total:
-            _debug.info("progress: epoch %s is past the total %s", current, total)
+            _debug.debug("progress: epoch %s is past the total %s", current, total)
             return None
         return current
 
@@ -324,7 +324,7 @@ class ProgressChannel:
         with self._lock:
             if event.generation < self._generation:
                 # A line from a container that has already been replaced.
-                _debug.info("progress: an event from run %s arrived late",
+                _debug.debug("progress: an event from run %s arrived late",
                             event.generation)
                 return
             self._latest = event
@@ -399,13 +399,13 @@ class TerminalChannel:
         with self._lock:
             if self._pending is not None:
                 if self._job_id == getattr(terminal, "job_id", None):
-                    _debug.info("terminal: %s already has an answer",
+                    _debug.debug("terminal: %s already has an answer",
                                 self._job_id)
                     return False
                 # A different Job's answer while one is still unsent. The
                 # first is not discarded: one GPU runs one Job at a time, so
                 # this means the previous answer never reached the Backend.
-                _debug.info("terminal: %s is still unsent; %s is not taken",
+                _debug.debug("terminal: %s is still unsent; %s is not taken",
                             self._job_id, getattr(terminal, "job_id", None))
                 return False
             self._pending = terminal

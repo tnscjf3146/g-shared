@@ -242,7 +242,7 @@ class JobAcceptance:
         """
         with self._lock:
             if self._deciding is not None:
-                _debug.info(
+                _debug.debug(
                     "acceptance: already deciding on %s, ignoring %s",
                     self._deciding, job.job_id)
                 return False
@@ -266,7 +266,7 @@ class JobAcceptance:
         cannot be made to wait for.
         """
         if self._clean_up is None:
-            _debug.info("acceptance: no escrow configured, nothing to clean up")
+            _debug.warning("acceptance: no escrow configured, nothing to clean up")
             return False
         with self._lock:
             if self._deciding is not None:
@@ -287,7 +287,7 @@ class JobAcceptance:
         the same output directory.
         """
         if self._run_job is None:
-            _debug.info("acceptance: no runtime configured for %s", job.job_id)
+            _debug.warning("acceptance: no runtime configured for %s", job.job_id)
             return False
         with self._lock:
             if self._deciding is not None:
@@ -320,7 +320,7 @@ class JobAcceptance:
         does not start a second ``docker stop`` or a second ``abortJob``.
         """
         if self._cancel_job is None:
-            _debug.info("acceptance: no cancellation configured for %s",
+            _debug.warning("acceptance: no cancellation configured for %s",
                         job.job_id)
             return False
         with self._lock:
@@ -329,11 +329,11 @@ class JobAcceptance:
                 # Nothing has started running. There is no container to stop
                 # and no generation to name; a cancellation here would have
                 # nothing to arbitrate over.
-                _debug.info("acceptance: %s has no runtime to cancel",
+                _debug.debug("acceptance: %s has no runtime to cancel",
                             job.job_id)
                 return False
             if terminal.job_id != job.job_id:
-                _debug.info("acceptance: cancellation for %s while holding %s",
+                _debug.warning("acceptance: cancellation for %s while holding %s",
                             job.job_id, terminal.job_id)
                 return False
 
@@ -399,11 +399,11 @@ class JobAcceptance:
         ``submitResult`` or a second ``abortJob``.
         """
         if self._settle_job is None:
-            _debug.info("acceptance: no settlement configured for %s",
+            _debug.warning("acceptance: no settlement configured for %s",
                         job.job_id)
             return False
         if not self.terminal.is_empty:
-            _debug.info("acceptance: %s already has a terminal answer",
+            _debug.debug("acceptance: %s already has a terminal answer",
                         self.terminal.job_id)
             return False
         with self._lock:
@@ -540,7 +540,7 @@ class JobAcceptance:
         if thread is not None and thread.is_alive():
             thread.join(timeout=JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
-                _debug.info("acceptance: still deciding at shutdown, leaving it")
+                _debug.warning("acceptance: still deciding at shutdown, leaving it")
 
 
 def _accepts(what: Any, name: str) -> bool:

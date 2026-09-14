@@ -137,7 +137,7 @@ class BackendClient:
         )
         # Only the method and the path are logged. The body carries a password
         # and the header carries a token.
-        _debug.info("backend: %s %s", method, path)
+        _debug.debug("backend: %s %s", method, path)
         try:
             with self._opener(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 answered = BackendAnswer(
@@ -149,12 +149,12 @@ class BackendClient:
         except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
             # A wrong address, a service that is down, a network that is not
             # there. None of them say anything about the account.
-            _debug.info("backend: %s could not be reached (%s)", path, type(error).__name__)
+            _debug.warning("backend: %s could not be reached (%s)", path, type(error).__name__)
             return BackendAnswer(
                 Outcome.UNREACHABLE, "BACKEND_UNREACHABLE",
                 "G-shared 서비스에 연결할 수 없습니다. 서비스가 복구되면 다시 시도하세요.",
             )
-        _debug.info(
+        _debug.log(logging.DEBUG if answered.outcome is Outcome.OK else logging.WARNING, 
             "backend: %s -> %s%s", path, answered.outcome.value,
             f" ({answered.code})" if answered.code else "",
         )

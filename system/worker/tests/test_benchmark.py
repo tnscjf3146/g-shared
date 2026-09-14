@@ -15,6 +15,7 @@ import unittest
 from gshared_worker.benchmark import (
     BENCHMARK_IMAGE,
     BenchmarkOutcome,
+    BenchmarkReport,
     GpuBenchmark,
     read_result,
 )

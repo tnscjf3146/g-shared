@@ -14,14 +14,12 @@ import unittest
 from gshared_worker.escrow import AcceptOutcome, AcceptResult
 from gshared_worker.job_rejection import RejectCode
 from gshared_worker.job_acceptance import (
-    Decision,
     JobAcceptance,
     refuse_without_escrow,
 )
 from gshared_worker.worker_connection import (
     HEARTBEAT_ACK_TIMEOUT_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
-    ConnectionOutcome,
     _dispatch_to,
     answer_decisions,
     keep_alive,

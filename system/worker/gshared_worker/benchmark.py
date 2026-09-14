@@ -136,7 +136,7 @@ class GpuBenchmark:
         if not await self._image_present():
             # Fetching is not part of the measurement: the clock inside the
             # container starts long after this.
-            _debug.info("benchmark: fetching the runtime image")
+            _debug.debug("benchmark: fetching the runtime image")
             pulled = await self._docker(
                 ["docker", "pull", self._image], _PULL_TIMEOUT_SECONDS)
             if pulled is None or pulled.exit_code != 0 or not await self._image_present():
@@ -145,7 +145,7 @@ class GpuBenchmark:
                     "the benchmark runtime image could not be fetched, so the "
                     "GPU was never measured")
 
-        _debug.info("benchmark: running %s (%s runs of %s steps)",
+        _debug.debug("benchmark: running %s (%s runs of %s steps)",
                     BENCHMARK_VERSION, RUNS, MEASURED_STEPS)
         finished = await self._docker(_command(self._image), _BENCHMARK_TIMEOUT_SECONDS)
         if finished is None:
@@ -157,8 +157,8 @@ class GpuBenchmark:
         if report.outcome is BenchmarkOutcome.FAILED and finished.exit_code == 0:
             # It said it failed but the container succeeded, or vice versa.
             # Either way the answer is not a measurement.
-            _debug.info("benchmark: container exit 0 with a failed result")
-        _debug.info("benchmark: %s -- %s", report.outcome.value, report.detail)
+            _debug.warning("benchmark: container exit 0 with a failed result")
+        _debug.log(logging.DEBUG if report.outcome is BenchmarkOutcome.MEASURED else logging.WARNING, "benchmark: %s -- %s", report.outcome.value, report.detail)
         return report
 
     async def _image_present(self) -> bool:

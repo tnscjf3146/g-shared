@@ -229,7 +229,7 @@ def create_wallet(
     path = wallet_file_path(directory)
     _write_atomically(path, {"address": address, "privateKeyProtected": sealed})
 
-    _debug.info("wallet: created %s", _short(address))
+    _debug.debug("wallet: created %s", _short(address))
     return WorkerWallet(address=address, private_key=private_key)
 
 
@@ -267,11 +267,11 @@ def prepare_wallet(
     loaded = load_wallet(directory, unprotector=unprotector, accounts=accounts)
 
     if loaded.state is WalletState.UNUSABLE:
-        _debug.info("wallet: unusable -- %s", loaded.detail)
+        _debug.warning("wallet: unusable -- %s", loaded.detail)
         raise WalletError(loaded.detail)
 
     if loaded.is_present:
-        _debug.info("wallet: loaded %s", _short(loaded.wallet.address))
+        _debug.debug("wallet: loaded %s", _short(loaded.wallet.address))
         say(f"  Worker 지갑 준비 완료: {loaded.wallet.short}")
         return loaded.wallet
 

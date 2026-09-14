@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File system\worker\packaging\build.ps1
 
 | 파일 | 역할 |
 |---|---|
-| `G-shared.spec` | PyInstaller 레시피 (onefile, console) |
+| `G-shared.spec` | PyInstaller 레시피 (onefile). `G-shared.exe`는 콘솔 창 없음, `selfcheck.exe`만 콘솔 |
 | `requirements-build.txt` | 번들에 들어갈 것 + PyInstaller, 버전 고정 |
 | `selfcheck.py` | 빌드 검증 전용 — 배포 exe에는 없음 |
 | `build.ps1` | 위 전 과정 |
@@ -73,6 +73,14 @@ WSL2 · NVIDIA Driver · Docker Engine · NVIDIA Container Toolkit.
 - 등록 전 실행끼리는 `unregistered` identity로 단일 실행을 공유 — 동시에 두 번 등록되지 않는다.
 - 로그인 버튼 중복 클릭은 요청 1회로 처리된다.
 
+## 화면과 로그
+
+- 콘솔 창이 없다. 사용자에게 보이는 것은 로그인 창과, 실행이 실패했을 때 마지막 안내를 보여주는 오류 창뿐이다.
+- `gshared-debug.log` 기본 수준은 WARNING. 정상 진행은 기록하지 않고, 실패·거절·연결 오류·예외와 실패한 실행의 종료 코드·빌드·설정 요약만 남긴다.
+- 토큰·비밀번호·private key·서명 URL은 기록하지 않는다.
+
 ## 알려진 제약
+
+- **GPU Job 실행이 exe에 연결되어 있지 않다.** `connect_to_backend`가 `JobAcceptance()`를 escrow·runtime·settlement·cancellation 없이 만든다. `runtime_pipeline`, `runtime_image`, `execution_context`, `dataset_fetch`, `model_prep`와 `escrow_decider`·`escrow_cleaner`·`runtime_waiter`는 구현·테스트되어 있지만 진입점에서 호출되지 않는다. 연결은 기능 추가라 정리 작업에서 하지 않았다.
 
 - pynvml은 선언된 의존성이 아니라 번들되지 않는다. GPU 조회는 드라이버에 포함된 `nvidia-smi`로 한다.

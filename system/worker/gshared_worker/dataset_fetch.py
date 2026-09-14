@@ -126,7 +126,7 @@ def fetch_dataset(
             # the URL is the credential.
             last = f"the download did not finish ({type(error).__name__})"
             partial.unlink(missing_ok=True)
-            _debug.info("dataset: %s (attempt %s/%s)", last, attempt, attempts)
+            _debug.warning("dataset: %s (attempt %s/%s)", last, attempt, attempts)
             if attempt == attempts:
                 break
             if sleep is not None and not sleep(waiting):
@@ -151,7 +151,7 @@ def fetch_dataset(
 
         destination.unlink(missing_ok=True)
         partial.replace(destination)
-        _debug.info("dataset: %s bytes, sha256 %s...", size, digest[:12])
+        _debug.debug("dataset: %s bytes, sha256 %s...", size, digest[:12])
         return FetchedDataset(destination, size, digest)
 
     raise DatasetRefused(

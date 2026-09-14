@@ -57,14 +57,14 @@ def describe_machine(runner: CommandRunner | None = None) -> MachineFacts | None
 
         name = socket.gethostname() or ""
     if not name:
-        _debug.info("machine facts: this machine has no hostname")
+        _debug.warning("machine facts: this machine has no hostname")
         return None
 
     report = asyncio.run(_gpu(runner or AsyncSubprocessRunner()))
     if report is None or report.vram_mib is None:
         # A card whose memory nvidia-smi would not state cannot be offered with
         # a vramMb the Backend can schedule against.
-        _debug.info("machine facts: the GPU could not be described")
+        _debug.warning("machine facts: the GPU could not be described")
         return None
 
     facts = MachineFacts(
@@ -74,7 +74,7 @@ def describe_machine(runner: CommandRunner | None = None) -> MachineFacts | None
         vram_mb=report.vram_mib,
         driver_version=report.driver_version,
     )
-    _debug.info(
+    _debug.debug(
         "machine facts: %s / %s / %s (%s MB, driver %s)",
         facts.device_name, facts.os_version, facts.gpu_model,
         facts.vram_mb, facts.driver_version,

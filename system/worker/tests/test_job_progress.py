@@ -22,7 +22,6 @@ import json
 import threading
 import unittest
 
-from gshared_worker.escrow import AcceptOutcome, AcceptResult
 from gshared_worker.job_acceptance import JobAcceptance
 from gshared_worker.job_runtime import (
     RuntimeOutcome,

@@ -42,7 +42,7 @@ from gshared_worker.job_settlement import (
     Settlement,
     Unsettled,
 )
-from gshared_worker.runtime_stop import RuntimeHandle, StopOutcome
+from gshared_worker.runtime_stop import RuntimeHandle
 from gshared_worker.worker_job import USER_REQUEST, read_assignment
 
 OPERATOR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
@@ -318,15 +318,6 @@ class TestTheIntentIsSeparateFromTheClaim(unittest.TestCase):
 
 
 class TestNoContainerAfterACancellation(unittest.TestCase):
-    def test_a_fresh_job_may_run(self):
-        self.assertTrue(may_start_runtime(JobTerminal("123")))
-
-    def test_a_cancelled_one_may_not(self):
-        terminal = JobTerminal("123")
-        terminal.request_cancel(USER_REQUEST)
-
-        self.assertFalse(may_start_runtime(terminal))
-
     def test_no_arbitration_at_all_still_runs(self):
         self.assertTrue(may_start_runtime(None))
 

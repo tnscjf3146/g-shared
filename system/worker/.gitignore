@@ -1,6 +1,9 @@
 # The supplier's own settings and their Worker token. Never committed.
 worker-config.json
 
+# This machine's signing key, sealed with DPAPI. Never committed either.
+worker-wallet.json
+
 # Written beside the Worker every run.
 gshared-debug.log
 

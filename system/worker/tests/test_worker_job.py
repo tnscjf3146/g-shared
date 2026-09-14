@@ -17,7 +17,6 @@ from gshared_worker.job_rejection import RejectCode
 from gshared_worker.worker_job import (
     JOB_ACCEPTED,
     SlotState,
-    AssignedJob,
     JobAssignmentError,
     JobSlot,
     OfferOutcome,

@@ -24,9 +24,8 @@ from gshared_worker.job_cancellation import (
     ALREADY_ENDED,
     BACKEND_CANCEL_COMPLETION_RACE,
     JobCancelledReady,
-    JobTerminal,
 )
-from gshared_worker.job_runtime import RuntimeFailure, RuntimeOutcome, RuntimeState
+from gshared_worker.job_runtime import RuntimeOutcome, RuntimeState
 from gshared_worker.job_settlement import JobFailureReady, JobResultReady, Unsettled
 from gshared_worker.runtime_progress import RuntimeProgressEvent, TerminalChannel
 from gshared_worker.worker_connection import (

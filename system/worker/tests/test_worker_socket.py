@@ -21,7 +21,6 @@ from gshared_worker.worker_socket import (
     WS_PATH,
     ConnectionWentAway,
     HandshakeRefused,
-    ProtocolViolation,
     SocketOutcome,
     TransportUnavailable,
     open_registered_socket,

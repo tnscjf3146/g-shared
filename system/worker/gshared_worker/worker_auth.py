@@ -142,7 +142,7 @@ class WorkerAuthService:
             return WorkerAuthResult(WorkerAuthState.CREDENTIAL_ERROR, loaded.detail)
 
         answered = self._registry.verify(loaded.credentials)
-        _debug.info(
+        _debug.debug(
             "worker auth: %s / %s", answered.state.value, loaded.credentials.worker_id
         )
         return WorkerAuthResult(
@@ -167,7 +167,7 @@ class WorkerAuthService:
         """
         answered = self._registry.register(access_token, registration)
         if answered.state is not WorkerAuthState.REGISTERED:
-            _debug.info("worker registration refused: %s", answered.state.value)
+            _debug.warning("worker registration refused: %s", answered.state.value)
             return WorkerAuthResult(answered.state, answered.detail), None
         if answered.credentials is None:
             # Registered, apparently, without saying what this Worker is now.
@@ -175,7 +175,7 @@ class WorkerAuthService:
                 WorkerAuthState.AUTH_FAILED,
                 "The service registered this machine but returned no Worker identity.",
             ), None
-        _debug.info(
+        _debug.debug(
             "worker registration issued %s", answered.credentials.worker_id
         )
         return (

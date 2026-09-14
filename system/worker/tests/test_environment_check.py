@@ -145,12 +145,17 @@ class OnlyWhatThePersonCanActOnIsShownTest(StageTestCase):
 
 class TheLogKeepsEverythingTest(StageTestCase):
     def test_every_prerequisite_is_recorded_even_the_ones_that_passed(self):
-        # "The driver was fine" is exactly what rules the driver out when the
-        # next report arrives.
-        self.run_stage(diagnosis())
+        # When a machine is not ready, "the driver was fine" is exactly what
+        # rules the driver out when the report arrives.
+        self.run_stage(diagnosis(WSL2=Finding.INACTIVE))
 
         for prerequisite in Prerequisite:
             self.assertIn(prerequisite.value, self.logged)
+
+    def test_a_ready_machine_writes_nothing_at_the_default_level(self):
+        self.run_stage(diagnosis())
+
+        self.assertEqual(self.logged.strip(), "")
 
     def test_a_prerequisite_hidden_from_the_screen_is_still_in_the_log(self):
         self.run_stage(diagnosis(

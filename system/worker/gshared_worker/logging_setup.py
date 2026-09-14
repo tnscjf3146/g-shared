@@ -67,7 +67,10 @@ def start_debug_log(directory: Path) -> Path:
     handler = logging.FileHandler(path, encoding="utf-8")
     handler.setFormatter(logging.Formatter(_FORMAT))
     handler.set_name(_OURS)
-    log.setLevel(logging.INFO)
+    # WARNING in production: a healthy run writes nothing, and a failed one
+    # leaves its failures, refusals and unexpected faults. Progress is logged
+    # at DEBUG, for whoever lowers this while diagnosing.
+    log.setLevel(logging.WARNING)
     log.addHandler(handler)
     # Diagnostics are not the supplier's screen: without this every line would
     # also reach the root logger and be printed over the six that matter.
@@ -78,10 +81,6 @@ def start_debug_log(directory: Path) -> Path:
 def stop_debug_log() -> None:
     """Close the log file. Only a caller that starts several runs needs this."""
     _remove_our_handlers()
-
-
-def stamp_the_build() -> None:
-    log.info("G-shared Worker built %s", BUILD)
 
 
 def _remove_our_handlers() -> None:
