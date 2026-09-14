@@ -6,7 +6,12 @@ import { Suspense, useEffect, useRef, useState } from 'react'
 import { ACESFilmicToneMapping } from 'three'
 import { Backdrop } from './backdrop'
 import { CameraRig } from './cameraRig'
+import { ChainCallout } from './chainCallout'
+import { EscrowCallout } from './escrowCallout'
+import { FinCallout } from './finCallout'
+import { GpuFitCallout } from './gpuFitCallout'
 import { GpuModel } from './gpuModel'
+import { ProviderCallout } from './providerCallout'
 import { Lights, Studio } from './lights'
 import { Smoke } from './smoke'
 import { StatusLeds } from './statusLeds'
@@ -50,6 +55,13 @@ export function GpuCanvas() {
           {/* 배경은 차콜판 한 장 고정(로고 정중앙, 스크롤 무관) — 2026-09-14 사용자 결정. 검정판 와이프·스틸판 조명은 backdrop.tsx 에 남겨둔 채 마운트만 안 한다 */}
           <Backdrop kind="shroud" />
           <GpuModel />
+          {/* 지시선 콜아웃(three/callout.tsx 공용) — GpuModel 뒤에 두어 Fin_ 병합이 끝난 scene 을 본다.
+              항목 하나 = 선 하나 = 부품 하나(animejs.com 식). 02 핀 네 지점 → 할 수 있는 일 / 03 긴 변 → GPU 등급·AI 추천 / 04 PWM·전원·LED·BIOS·다이 → 수익·워커 / 05 콜드플레이트 → 에스크로 장부(표라 하나) / 06 층마다 → 블록 기록, 기판 끝 → tx */}
+          <FinCallout />
+          <GpuFitCallout />
+          <ProviderCallout />
+          <EscrowCallout />
+          <ChainCallout />
           <StatusLeds />
           <Smoke />
           <Studio />

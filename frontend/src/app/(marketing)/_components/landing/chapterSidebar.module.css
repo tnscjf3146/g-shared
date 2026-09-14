@@ -65,6 +65,14 @@
   border-radius: 4px;
 }
 
+/* 라벨 글자 수가 3~4 로 달라도 칸 폭은 같게 — 가장 긴 라벨(G-shared, 라틴 8자) 기준 고정 폭 + 왼쪽 정렬(2026-09-14 사용자 요청).
+   글자를 벌리지는 않는다(양끝맞춤은 한글에 안 먹고, 쪼개서 벌리면 '사 용 자' 처럼 떠 보였다). 번호(.index)·마커는 그대로 */
+.word {
+  display: inline-block;
+  width: 4.2em;
+  text-align: left; /* .item 의 text-align: right 를 여기서만 되돌린다 */
+}
+
 .label {
   position: relative;
   display: inline-flex;
