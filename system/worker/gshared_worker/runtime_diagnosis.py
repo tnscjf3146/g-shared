@@ -115,7 +115,7 @@ class RuntimeDiagnosisRunner:
             skipped.add(prerequisite)
             return RuntimeCheck(
                 prerequisite, Finding.UNDETERMINED,
-                f"Not tested: {blocker.value} is unresolved.",
+                f"확인하지 않음: {blocker.value} 문제가 먼저 해결되어야 합니다.",
             )
 
         def unresolved(
@@ -149,19 +149,18 @@ class RuntimeDiagnosisRunner:
         if not state.exists:
             return RuntimeCheck(
                 RuntimePrerequisite.GSHARED_DISTRO, Finding.MISSING,
-                f"{WSL_DISTRO_NAME} does not exist yet.",
-                f"Create the {WSL_DISTRO_NAME} distribution. Nothing the "
-                "supplier installed for themselves is touched.",
+                f"{WSL_DISTRO_NAME} 배포판이 아직 없습니다.",
+                f"{WSL_DISTRO_NAME} 배포판을 만듭니다. 사용자가 직접 설치한 것은 건드리지 않습니다.",
             )
         if not state.is_usable:
             return RuntimeCheck(
                 RuntimePrerequisite.GSHARED_DISTRO, Finding.INACTIVE,
-                f"{WSL_DISTRO_NAME} is registered as WSL version {state.version}.",
-                "Convert it to WSL2. Version 1 cannot reach the GPU.",
+                f"{WSL_DISTRO_NAME} 배포판이 WSL 버전 {state.version}으로 등록되어 있습니다.",
+                "WSL2로 변환하세요. 버전 1에서는 GPU를 쓸 수 없습니다.",
             )
         return RuntimeCheck(
             RuntimePrerequisite.GSHARED_DISTRO, Finding.SATISFIED,
-            f"{WSL_DISTRO_NAME} is registered on WSL2.",
+            f"{WSL_DISTRO_NAME} 배포판이 WSL2에 등록되어 있습니다.",
         )
 
     async def _engine(self, skip, blocker) -> RuntimeCheck:
@@ -171,7 +170,7 @@ class RuntimeDiagnosisRunner:
         if state == "running":
             return RuntimeCheck(
                 RuntimePrerequisite.DOCKER_ENGINE, Finding.SATISFIED,
-                f"The Docker Engine inside {WSL_DISTRO_NAME} is answering.",
+                f"{WSL_DISTRO_NAME} 안의 Docker Engine이 응답합니다.",
             )
         if state == "installed":
             # Present but the daemon is not up. Starting is ours to do, and it
@@ -179,13 +178,13 @@ class RuntimeDiagnosisRunner:
             # working Docker is how a working Docker gets replaced.
             return RuntimeCheck(
                 RuntimePrerequisite.DOCKER_ENGINE, Finding.INACTIVE,
-                "Docker is installed in the distribution but not running.",
-                "Start the Docker Engine inside the distribution.",
+                "배포판에 Docker가 설치되어 있지만 실행 중이 아닙니다.",
+                "배포판 안에서 Docker Engine을 시작합니다.",
             )
         return RuntimeCheck(
             RuntimePrerequisite.DOCKER_ENGINE, Finding.MISSING,
-            "The distribution has no Docker Engine.",
-            "Install the Docker Engine inside the distribution.",
+            "배포판에 Docker Engine이 없습니다.",
+            "배포판 안에 Docker Engine을 설치합니다.",
         )
 
     async def _toolkit(self, skip, blocker) -> RuntimeCheck:
@@ -194,12 +193,12 @@ class RuntimeDiagnosisRunner:
         if await self._runtime.toolkit_configured():
             return RuntimeCheck(
                 RuntimePrerequisite.CONTAINER_TOOLKIT, Finding.SATISFIED,
-                "The NVIDIA container toolkit is installed and Docker uses it.",
+                "NVIDIA container toolkit이 설치되어 있고 Docker가 사용 중입니다.",
             )
         return RuntimeCheck(
             RuntimePrerequisite.CONTAINER_TOOLKIT, Finding.MISSING,
-            "Docker in the distribution cannot hand a GPU to a container.",
-            "Install the NVIDIA container toolkit and configure the Docker runtime.",
+            "배포판의 Docker가 컨테이너에 GPU를 넘겨주지 못합니다.",
+            "NVIDIA container toolkit을 설치하고 Docker runtime을 설정합니다.",
         )
 
     async def _container_gpu(self, skip, blocker) -> RuntimeCheck:
@@ -209,19 +208,18 @@ class RuntimeDiagnosisRunner:
         if verified.succeeded:
             return RuntimeCheck(
                 RuntimePrerequisite.CONTAINER_GPU, Finding.SATISFIED,
-                f"A container can see the GPU: {verified.detail}",
+                f"컨테이너에서 GPU가 보입니다: {verified.detail}",
             )
         if verified.outcome.value == "GPU_UNAVAILABLE":
             return RuntimeCheck(
                 RuntimePrerequisite.CONTAINER_GPU, Finding.BLOCKED,
                 verified.detail,
-                "Check that the NVIDIA driver supports WSL and that the "
-                "container toolkit is configured for the Docker runtime.",
+                "NVIDIA 드라이버가 WSL을 지원하는지, container toolkit이 Docker runtime에 설정되어 있는지 확인하세요.",
             )
         # Anything else -- an engine that stopped answering between checks, a
         # failed image pull -- says nothing about the GPU. Calling it a GPU
         # fault would send somebody after their driver for a network problem.
         return RuntimeCheck(
             RuntimePrerequisite.CONTAINER_GPU, Finding.UNDETERMINED,
-            f"The GPU could not be tested: {verified.detail}",
+            f"GPU를 확인하지 못했습니다: {verified.detail}",
         )

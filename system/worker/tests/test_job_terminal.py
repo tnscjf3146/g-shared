@@ -507,7 +507,7 @@ class TestAJobThatCannotBeSettled(unittest.TestCase):
                                "the chain holds another result")),
             holding(), lambda *p: lines.append(" ".join(str(x) for x in p)))
 
-        self.assertTrue(any("could not be settled" in line for line in lines))
+        self.assertTrue(any("정산하지 못했습니다" in line for line in lines))
 
     def test_a_settlement_that_raised_leaves_no_answer(self):
         def explode(job, outcome):

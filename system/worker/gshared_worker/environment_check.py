@@ -32,16 +32,16 @@ def check_environment(
 ) -> int:
     """Diagnose this machine and say whether the Worker may go on."""
     say("")
-    say("Checking system environment...")
+    say("시스템 환경을 확인하는 중...")
     found = asyncio.run((diagnosis or EnvironmentDiagnosis(WindowsHostProbe())).run())
     _log(found)
 
     if found.is_ready:
-        say("  GPU environment ready.")
+        say("  GPU 환경이 준비되었습니다.")
         return int(WorkerExitCode.OK)
 
     say("")
-    say("This machine is not ready to run GPU work.")
+    say("이 PC는 아직 GPU 작업을 실행할 준비가 되지 않았습니다.")
     for line in what_is_left(found):
         say(f"  {line}")
     return int(WorkerExitCode.EXPECTED_FAILURE)

@@ -31,6 +31,8 @@ class AuthWindow:
         self._presenter = presenter
         self._token: str | None = None
         self._root: tk.Tk | None = None
+        #: True while a sign-in request is out, and for good once one succeeded.
+        self._submitting = False
 
     def ask_to_sign_in(self) -> str | None:
         """Open the window and block until it is closed or sign-in succeeds."""
@@ -61,24 +63,23 @@ class AuthWindow:
 
     def _draw_login(self, shown: Shown) -> None:
         self._heading("G-shared")
-        email = self._field("Email")
-        password = self._field("Password", secret=True)
+        email = self._field("이메일")
+        password = self._field("비밀번호", secret=True)
         self._message(shown)
-        self._button("Sign in", lambda: self._render(
-            self._presenter.log_in(email.get(), password.get())))
-        self._footer("No account yet?", "Sign up",
+        self._button("로그인", lambda: self._submit_login(email.get(), password.get()))
+        self._footer("계정이 없으신가요?", "회원가입",
                      lambda: self._render(self._presenter.show_signup()))
         email.focus_set()
 
     def _draw_signup(self, shown: Shown) -> None:
-        self._heading("Create a G-shared account")
-        email = self._field("Email")
-        password = self._field("Password", secret=True)
-        nickname = self._field("Nickname")
+        self._heading("G-shared 계정 만들기")
+        email = self._field("이메일")
+        password = self._field("비밀번호", secret=True)
+        nickname = self._field("닉네임")
         self._message(shown)
-        self._button("Create account", lambda: self._render(
+        self._button("계정 만들기", lambda: self._render(
             self._presenter.sign_up(email.get(), password.get(), nickname.get())))
-        self._footer("Already have one?", "Sign in",
+        self._footer("이미 계정이 있으신가요?", "로그인",
                      lambda: self._render(self._presenter.show_login()))
         email.focus_set()
 
@@ -115,6 +116,25 @@ class AuthWindow:
         link = ttk.Label(row, text=f" {action}", foreground="#0645ad", cursor="hand2")
         link.pack(side="left")
         link.bind("<Button-1>", lambda _event: command())
+
+    def _submit_login(self, email: str, password: str) -> None:
+        """Sign in once, however many times the button is pressed.
+
+        Tk queues a second click made while the first request is still out and
+        delivers it the moment that request returns. Without this, a double
+        click on a slow network signs in twice -- and a token already obtained
+        must not be replaced or handed back a second time, because the machine
+        is registered with the first one.
+        """
+        if self._submitting or self._token is not None:
+            return
+        self._submitting = True
+        try:
+            shown = self._presenter.log_in(email, password)
+        finally:
+            self._submitting = False
+        if self._token is None:
+            self._render(shown)
 
     def _close(self) -> None:
         if self._root is not None:

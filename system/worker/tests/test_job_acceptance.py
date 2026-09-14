@@ -310,7 +310,7 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
             At(5, json.dumps(assignment())), decide=lambda job: REFUSED)
 
         self.assertTrue(slot.is_idle)
-        self.assertTrue(any("not accepted" in line for line in lines))
+        self.assertTrue(any("수락하지" in line for line in lines))
 
     def test_an_uncertain_job_is_kept_rather_than_given_up(self):
         # A transaction of ours may still land. Freeing the slot now would
@@ -320,7 +320,7 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
 
         self.assertFalse(slot.is_idle)
         self.assertIs(slot.state, SlotState.ACCEPTING)
-        self.assertTrue(any("held rather than given up" in line
+        self.assertTrue(any("포기하지 않고 보관해 둡니다" in line
                             for line in lines))
 
     def test_a_second_job_is_not_taken_while_one_is_being_decided(self):
@@ -330,7 +330,7 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
             decide=lambda job: UNCERTAIN)
 
         self.assertEqual(slot.held.job_id, "123")
-        self.assertTrue(any("456" in line and "not accepted" in line
+        self.assertTrue(any("456" in line and "수락하지" in line
                             for line in lines))
 
     def test_the_same_job_offered_again_does_not_start_a_second_decision(self):

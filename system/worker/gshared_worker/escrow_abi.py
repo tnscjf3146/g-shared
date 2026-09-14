@@ -21,6 +21,7 @@ Worker accepting a job that was never funded.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -49,10 +50,14 @@ def default_artifact_path() -> Path:
     this runs from the source tree or an installed package -- and a wrong count
     produces a confusing "file not found" instead of a clear one.
 
-    Packaging this for a frozen executable is task 10's problem. Until then a
-    Worker run from the repository finds it, and one run from anywhere else
-    says so plainly.
+    A packaged Worker carries the same file, unmodified, at the same relative
+    path inside the bundle (see ``packaging/G-shared.spec``). It is looked for
+    there first, so a packaged run never walks up into whatever folder the
+    executable happens to have been copied into.
     """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and bundle:
+        return Path(bundle) / ARTIFACT_RELATIVE_PATH
     here = Path(__file__).resolve()
     for parent in here.parents:
         candidate = parent / ARTIFACT_RELATIVE_PATH

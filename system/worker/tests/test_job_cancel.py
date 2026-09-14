@@ -183,7 +183,7 @@ class TestOnlyOneReasonIsActedOn(unittest.TestCase):
         acceptance, lines = self.ask(message)
 
         self.assertEqual(acceptance.asked, [])
-        self.assertTrue(any("could not be read" in line for line in lines))
+        self.assertTrue(any("읽을 수 없습니다" in line for line in lines))
 
     def test_a_cancellation_with_no_job_id_is_refused(self):
         message = {"type": "JOB_CANCEL", "timestamp": "t",
@@ -225,7 +225,7 @@ class TestItMustBeTheJobWeHold(unittest.TestCase):
         acceptance, lines = self.ask(cancellation("123"), JobSlot())
 
         self.assertEqual(acceptance.asked, [])
-        self.assertTrue(any("not holding it" in line for line in lines))
+        self.assertTrue(any("맡은 작업이 아닙니다" in line for line in lines))
 
     def test_the_slot_is_kept_when_the_cleanup_cannot_start(self):
         # Busy, or no escrow configured. Giving the slot up while the chain may
@@ -238,7 +238,7 @@ class TestItMustBeTheJobWeHold(unittest.TestCase):
                        acceptance)
 
         self.assertFalse(slot.is_idle)
-        self.assertTrue(any("not lost" in line for line in lines))
+        self.assertTrue(any("잃지 않도록" in line for line in lines))
 
 
 class TestWhatHappensWhenTheChainAnswers(unittest.TestCase):
@@ -289,7 +289,7 @@ class TestWhatHappensWhenTheChainAnswers(unittest.TestCase):
 
         self.assertEqual(backend.cancelleds, [])
         self.assertFalse(slot.is_idle)
-        self.assertTrue(any("still lands" in line for line in lines))
+        self.assertTrue(any("트랜잭션이 아직 처리될 수 있으므로" in line for line in lines))
 
     def test_a_completed_job_is_never_reported_as_cancelled(self):
         """The Backend says cancel; the chain says finished and paid.
@@ -302,7 +302,7 @@ class TestWhatHappensWhenTheChainAnswers(unittest.TestCase):
 
         self.assertEqual(backend.cancelleds, [])
         self.assertFalse(slot.is_idle)
-        self.assertTrue(any("needs a person" in line for line in lines))
+        self.assertTrue(any("담당자 확인이 필요합니다" in line for line in lines))
 
     def test_a_job_that_was_never_ours_frees_the_slot_quietly(self):
         # FUNDED means no acceptJob of ours ever landed. There is nothing to

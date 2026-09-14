@@ -382,13 +382,13 @@ class TestACancellationForSomethingElse(unittest.TestCase):
         acceptance, lines = self.ask(a_cancellation("456"), holding("123"))
 
         self.assertIsNone(acceptance.terminal_for)
-        self.assertTrue(any("holding 123" in line for line in lines))
+        self.assertTrue(any("이 PC는 123 작업을 처리 중" in line for line in lines))
 
     def test_a_cancellation_with_no_job_held_changes_nothing(self):
         acceptance, lines = self.ask(a_cancellation("123"), JobSlot())
 
         self.assertIsNone(acceptance.terminal_for)
-        self.assertTrue(any("not holding it" in line for line in lines))
+        self.assertTrue(any("맡은 작업이 아닙니다" in line for line in lines))
 
     def test_an_unknown_reason_is_not_read_as_a_user_cancellation(self):
         acceptance, _ = self.ask(a_cancellation("123", "SOMETHING_NEW"),
@@ -483,13 +483,13 @@ class TestWhenNothingCanBeSaid(unittest.TestCase):
         lines = self.told(Unsettled("123", BACKEND_CANCEL_COMPLETION_RACE,
                                     "the job completed first"))
 
-        self.assertTrue(any("disagree" in line for line in lines), lines)
+        self.assertTrue(any("상태가 달라" in line for line in lines), lines)
 
     def test_anything_else_says_the_job_is_being_kept(self):
         lines = self.told(Unsettled("123", "RECONCILIATION_REQUIRED",
                                     "the container is still running"))
 
-        self.assertTrue(any("being held" in line for line in lines), lines)
+        self.assertTrue(any("보관해 둡니다" in line for line in lines), lines)
 
     def test_the_slot_is_never_released_by_any_of_them(self):
         from gshared_worker.job_acceptance import Decision

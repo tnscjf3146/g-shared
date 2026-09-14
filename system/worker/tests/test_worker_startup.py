@@ -268,19 +268,45 @@ class TheLogIsStartedBeforeAnythingCanFailTest(StartupTestCase):
         self.assertNotIn("a-token", self.logged)
 
     def test_a_machine_that_could_not_be_configured_still_has_a_log(self):
+        (self.directory / CONFIG_FILE_NAME).write_text("{ not json", encoding="utf-8")
+
         self.start()
 
         self.assertIn("configuration refused", self.logged)
 
 
 class AMachineNobodyConfiguredTest(StartupTestCase):
-    def test_it_stops_with_the_code_a_launcher_must_not_retry(self):
-        self.assertEqual(self.start(), WorkerExitCode.EXPECTED_FAILURE)
+    """A first run goes on to be registered rather than stopping for a workerId."""
 
-    def test_the_supplier_is_told_what_to_do_about_it(self):
+    def test_it_goes_on_to_the_stage_that_registers_it(self):
+        self.assertEqual(self.start(), WorkerExitCode.OK)
+        self.assertEqual(len(self.reached), 1)
+        self.assertIsNone(self.reached[0].worker_id)
+
+    def test_the_supplier_is_told_they_will_sign_in(self):
         self.start()
 
-        self.assertIn("not enrolled yet", self.output)
+        self.assertIn("아직 등록되지 않았습니다", self.output)
+        self.assertIn("로그인 창이 열립니다", self.output)
+
+    def test_it_is_guarded_under_the_unregistered_identity(self):
+        claimed = []
+
+        class Recording(FakeGuard):
+            def __init__(self, worker_id, gpu_index, *, lock_directory=None):
+                claimed.append((worker_id, gpu_index))
+                super().__init__(worker_id, gpu_index, lock_directory=lock_directory)
+
+        self.start(guard_factory=Recording)
+
+        self.assertEqual(claimed, [(worker_main.UNREGISTERED_IDENTITY, 0)])
+
+    def test_a_second_first_run_on_the_same_gpu_is_turned_away(self):
+        # What stops two first runs registering the machine twice.
+        FakeGuard.held.add((worker_main.UNREGISTERED_IDENTITY, 0))
+
+        self.assertEqual(self.start(), WorkerExitCode.ALREADY_RUNNING)
+        self.assertEqual(self.reached, [])
 
     def test_no_identity_is_claimed_before_the_settings_are_known(self):
         self.start()
@@ -395,7 +421,7 @@ class SomebodyStoppedItTest(StartupTestCase):
         code = self.start(run_worker=interrupted)
 
         self.assertEqual(code, WorkerExitCode.OK)
-        self.assertIn("Stopped.", self.output)
+        self.assertIn("중지했습니다.", self.output)
 
 
 class TheWindowStaysOpenLongEnoughToReadTest(unittest.TestCase):
@@ -420,7 +446,7 @@ class TheWindowStaysOpenLongEnoughToReadTest(unittest.TestCase):
         )
 
         self.assertTrue(waited)
-        self.assertIn("Press Enter to close this window.", said)
+        self.assertIn("Enter 키를 누르면 창이 닫힙니다.", said)
 
     def test_a_failed_run_in_somebody_elses_terminal_is_not_held(self):
         waited = []

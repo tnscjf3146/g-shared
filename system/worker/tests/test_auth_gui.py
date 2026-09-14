@@ -138,7 +138,7 @@ class SigningUpTest(unittest.TestCase):
 
         self.assertIs(shown.screen, Screen.LOGIN)
         self.assertFalse(shown.signed_in)
-        self.assertIn("Sign in", shown.notice)
+        self.assertIn("로그인", shown.notice)
 
     def test_nobody_is_signed_in_automatically(self):
         backend = Backend()
@@ -224,10 +224,10 @@ class WhatTheWindowNeedsToOpenTest(unittest.TestCase):
             resolve_backend_url(env={}, directory=self.directory),
             DEFAULT_BACKEND_URL)
 
-    def test_resolving_settings_would_have_refused_the_same_machine(self):
-        # Why this exists at all.
-        with self.assertRaises(WorkerConfigurationError):
-            resolve_settings(env={}, directory=self.directory)
+    def test_resolving_settings_no_longer_refuses_the_same_machine(self):
+        # A first run reaches this window; it is not stopped for lacking the
+        # workerId the window exists to obtain.
+        self.assertIsNone(resolve_settings(env={}, directory=self.directory).worker_id)
 
     def test_the_configured_address_is_used_when_there_is_one(self):
         (self.directory / CONFIG_FILE_NAME).write_text(

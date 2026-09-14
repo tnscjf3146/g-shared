@@ -37,13 +37,13 @@ _debug = logging.getLogger(LOGGER_NAME)
 #: would never have to manage.
 _IN_PLAIN_WORDS = {
     RuntimePrerequisite.GSHARED_DISTRO:
-        "Setting up a private Linux environment... (about 500 MB)",
+        "전용 Linux 환경을 설치하는 중... (약 500 MB)",
     RuntimePrerequisite.DOCKER_ENGINE:
-        "Installing the software that runs GPU work... (about 500 MB)",
+        "GPU 작업을 실행할 프로그램을 설치하는 중... (약 500 MB)",
     RuntimePrerequisite.CONTAINER_TOOLKIT:
-        "Giving that software access to your GPU... (about 400 MB)",
+        "그 프로그램이 GPU를 쓸 수 있게 설정하는 중... (약 400 MB)",
     RuntimePrerequisite.CONTAINER_GPU:
-        "Checking that a container can reach your GPU...",
+        "컨테이너에서 GPU가 보이는지 확인하는 중...",
 }
 
 
@@ -64,8 +64,8 @@ def ensure_runtime(
 ) -> int:
     """Bring the GPU runtime up, or say plainly what is in the way."""
     say("")
-    say("Preparing the GPU runtime...")
-    say(f"  Everything runs inside the {WSL_DISTRO_NAME} WSL distribution.")
+    say("GPU 실행 환경을 준비하는 중...")
+    say(f"  모든 작업은 {WSL_DISTRO_NAME} WSL 배포판 안에서 실행됩니다.")
 
     prepared = asyncio.run(
         (setup or build_runtime_setup(announce=_announce(say))).prepare()
@@ -74,21 +74,18 @@ def ensure_runtime(
 
     if prepared.is_ready:
         say("")
-        say("RUNTIME READY.")
+        say("GPU 실행 환경 준비 완료.")
         for line in _what_is_working(prepared.diagnosis):
             say(f"  {line}")
-        say("")
-        say("Enrolling this machine and connecting to the Backend are not part")
-        say("  of this build yet.")
         return int(WorkerExitCode.OK)
 
     say("")
-    say("This machine's GPU runtime is not ready.")
+    say("이 PC의 GPU 실행 환경이 준비되지 않았습니다.")
     if prepared.progress is Progress.NEEDS_A_RESTART:
         # Said first and on its own: everything below it is a consequence of
         # work Windows has not finished, and reading those as separate problems
         # sends somebody looking for faults a restart will clear.
-        say("  Restart this PC, then run G-shared again.")
+        say("  PC를 다시 시작한 뒤 G-shared를 다시 실행하세요.")
     for line in what_is_left(prepared):
         say(f"  {line}")
     return int(WorkerExitCode.EXPECTED_FAILURE)
@@ -121,7 +118,7 @@ def what_is_left(prepared: Setup) -> list[str]:
         if check.remedy:
             left.append(f"  {check.remedy}")
         if check.prerequisite in refused:
-            left.append(f"  It was tried and refused: {refused[check.prerequisite]}")
+            left.append(f"  시도했지만 실패했습니다: {refused[check.prerequisite]}")
     return left
 
 
@@ -144,11 +141,11 @@ def _announce(say: Callable[..., None]) -> Callable[..., None]:
         if not warned:
             warned = True
             say("")
-            say("  This machine needs setting up first. It happens once.")
-            say("  Around 1.5 GB is downloaded, so this takes several minutes --")
-            say("  longer on a slow connection. Leave it running.")
+            say("  처음 한 번만 필요한 설치를 진행합니다.")
+            say("  약 1.5 GB를 내려받아 몇 분 걸리고,")
+            say("  인터넷이 느리면 더 걸립니다. 창을 닫지 말고 기다려 주세요.")
         say("  " + _IN_PLAIN_WORDS.get(
-            check.prerequisite, f"Setting up {check.prerequisite.value}..."))
+            check.prerequisite, f"{check.prerequisite.value} 설치 중..."))
 
     return announce
 

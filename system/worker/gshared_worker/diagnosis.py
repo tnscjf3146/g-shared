@@ -138,7 +138,7 @@ class EnvironmentDiagnosis:
             skipped.add(prerequisite)
             return Check(
                 prerequisite, Finding.UNDETERMINED,
-                f"Not tested: {blocker.value} is unresolved.",
+                f"확인하지 않음: {blocker.value} 문제가 먼저 해결되어야 합니다.",
             )
 
         def unresolved(*needed: Prerequisite) -> Prerequisite | None:
@@ -173,17 +173,17 @@ class EnvironmentDiagnosis:
         if build is None:
             return Check(
                 Prerequisite.WINDOWS_VERSION, Finding.BLOCKED,
-                "This is not Windows.",
-                "The Worker runs GPU containers inside WSL2 on Windows.",
+                "Windows가 아닙니다.",
+                "Worker는 Windows의 WSL2 안에서 GPU 컨테이너를 실행합니다.",
             )
         if build < MINIMUM_WINDOWS_BUILD:
             return Check(
                 Prerequisite.WINDOWS_VERSION, Finding.BLOCKED,
-                f"Windows build {build} is older than {MINIMUM_WINDOWS_BUILD}.",
-                "Update Windows. Below this build the GPU cannot reach WSL2 at all.",
+                f"Windows 빌드 {build}은(는) 최소 요구 빌드 {MINIMUM_WINDOWS_BUILD}보다 낮습니다.",
+                "Windows를 업데이트하세요. 이 빌드보다 낮으면 WSL2에서 GPU를 쓸 수 없습니다.",
             )
         return Check(
-            Prerequisite.WINDOWS_VERSION, Finding.SATISFIED, f"Windows build {build}."
+            Prerequisite.WINDOWS_VERSION, Finding.SATISFIED, f"Windows 빌드 {build}."
         )
 
     async def _virtualization(self) -> Check:
@@ -191,14 +191,13 @@ class EnvironmentDiagnosis:
         if enabled is False:
             return Check(
                 Prerequisite.HARDWARE_VIRTUALIZATION, Finding.BLOCKED,
-                "The firmware reports virtualization as disabled.",
-                "Enable virtualization (VT-x / AMD-V) in the BIOS or UEFI settings. "
-                "Nothing installed on Windows can turn this on.",
+                "펌웨어에서 가상화가 꺼져 있습니다.",
+                "BIOS 또는 UEFI 설정에서 가상화(VT-x / AMD-V)를 켜세요. Windows에 설치하는 프로그램으로는 켤 수 없습니다.",
             )
         if enabled is None:
             return Check(
                 Prerequisite.HARDWARE_VIRTUALIZATION, Finding.UNDETERMINED,
-                "The firmware setting could not be read.",
+                "펌웨어 설정을 읽지 못했습니다.",
             )
         # Not "enabled in firmware": on a machine already running a hypervisor
         # the firmware flag reads False and the probe concludes yes from the
@@ -206,7 +205,7 @@ class EnvironmentDiagnosis:
         # itself contradicts.
         return Check(
             Prerequisite.HARDWARE_VIRTUALIZATION, Finding.SATISFIED,
-            "This machine can virtualize.",
+            "이 PC는 가상화를 사용할 수 있습니다.",
         )
 
     async def _driver(self) -> Check:
@@ -214,15 +213,14 @@ class EnvironmentDiagnosis:
         if driver is None:
             return Check(
                 Prerequisite.NVIDIA_DRIVER, Finding.BLOCKED,
-                "No usable NVIDIA driver was found.",
-                "Install the NVIDIA driver for this GPU. Driver installation "
-                "reboots and is specific to the card, so it is not automated here.",
+                "사용할 수 있는 NVIDIA 드라이버를 찾지 못했습니다.",
+                "이 GPU에 맞는 NVIDIA 드라이버를 설치하세요. 드라이버 설치는 재부팅이 필요하고 그래픽카드마다 달라서 자동으로 하지 않습니다.",
             )
         gpu_name = getattr(driver, "gpu_name", None)
-        card = f" on {gpu_name}" if gpu_name else ""
+        card = f" ({gpu_name})" if gpu_name else ""
         return Check(
             Prerequisite.NVIDIA_DRIVER, Finding.SATISFIED,
-            f"NVIDIA driver {driver.version}{card}.",
+            f"NVIDIA 드라이버 {driver.version}{card}.",
         )
 
     async def _wsl(self, skip, blocker: Prerequisite | None) -> Check:
@@ -236,15 +234,14 @@ class EnvironmentDiagnosis:
             # claiming a fix nothing here can carry out.
             return Check(
                 Prerequisite.WSL2, Finding.BLOCKED,
-                "WSL is not installed.",
-                "Open PowerShell as administrator, run  wsl --install  and then "
-                "restart this PC. Windows needs the restart before WSL works.",
+                "WSL이 설치되어 있지 않습니다.",
+                "관리자 권한 PowerShell에서  wsl --install  을 실행한 뒤 PC를 다시 시작하세요. WSL은 다시 시작한 후에 동작합니다.",
             )
         if version < 2:
             return Check(
                 Prerequisite.WSL2, Finding.INACTIVE,
-                f"WSL is installed but defaults to version {version}.",
-                "Set WSL's default version to 2. Version 1 cannot reach the GPU.",
+                f"WSL은 설치되어 있지만 기본 버전이 {version}입니다.",
+                "WSL 기본 버전을 2로 바꾸세요. 버전 1에서는 GPU를 쓸 수 없습니다.",
             )
         # The Worker's distribution is created by name and in a location of our
         # choosing. An older wsl.exe rejects both options, and the run then ends
@@ -254,11 +251,9 @@ class EnvironmentDiagnosis:
         if await self._host.wsl_can_create_named_distributions() is False:
             return Check(
                 Prerequisite.WSL2, Finding.BLOCKED,
-                "This version of WSL cannot create a distribution of its own.",
-                "Open PowerShell as administrator and run  wsl --update  to get "
-                f"a newer WSL, then start G-shared again. {WSL_DISTRO_NAME} is "
-                "created with options an older wsl.exe refuses.",
+                "이 WSL 버전으로는 전용 배포판을 만들 수 없습니다.",
+                f"관리자 권한 PowerShell에서  wsl --update  를 실행해 WSL을 업데이트한 뒤 G-shared를 다시 실행하세요. {WSL_DISTRO_NAME} 배포판은 이전 wsl.exe가 지원하지 않는 옵션으로 만들어집니다.",
             )
         return Check(
-            Prerequisite.WSL2, Finding.SATISFIED, "WSL defaults to version 2."
+            Prerequisite.WSL2, Finding.SATISFIED, "WSL 기본 버전이 2입니다."
         )

@@ -106,13 +106,13 @@ class WindowsVersionTest(DiagnosisTestCase):
         )
 
         self.assertIs(check.finding, Finding.BLOCKED)
-        self.assertIn("Update Windows", check.remedy)
+        self.assertIn("Windows를 업데이트", check.remedy)
 
     async def test_not_being_windows_is_blocked_rather_than_missing(self):
         check = await self.check(Prerequisite.WINDOWS_VERSION, build=None)
 
         self.assertIs(check.finding, Finding.BLOCKED)
-        self.assertIn("not Windows", check.detail)
+        self.assertIn("Windows가 아닙니다", check.detail)
 
 
 class HardwareVirtualizationTest(DiagnosisTestCase):
@@ -170,7 +170,7 @@ class NvidiaDriverTest(DiagnosisTestCase):
         check = await self.check(Prerequisite.NVIDIA_DRIVER, driver=None)
 
         self.assertIs(check.finding, Finding.BLOCKED)
-        self.assertIn("Install the NVIDIA driver", check.remedy)
+        self.assertIn("NVIDIA 드라이버를 설치", check.remedy)
 
 
 class Wsl2Test(DiagnosisTestCase):
@@ -183,7 +183,7 @@ class Wsl2Test(DiagnosisTestCase):
         check = await self.check(Prerequisite.WSL2, wsl_version=1)
 
         self.assertIs(check.finding, Finding.INACTIVE)
-        self.assertIn("default version to 2", check.remedy)
+        self.assertIn("기본 버전을 2로", check.remedy)
 
     async def test_no_wsl_is_blocked_rather_than_missing(self):
         # MISSING would promise this program installs it, and "wsl --install"
@@ -193,7 +193,7 @@ class Wsl2Test(DiagnosisTestCase):
 
         self.assertIs(check.finding, Finding.BLOCKED)
         self.assertIn("wsl --install", check.remedy)
-        self.assertIn("restart", check.remedy.casefold())
+        self.assertIn("다시 시작", check.remedy)
 
     async def test_a_wsl_too_old_to_create_our_distribution_is_blocked(self):
         check = await self.check(Prerequisite.WSL2, wsl_named=False)

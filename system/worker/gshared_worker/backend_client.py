@@ -152,7 +152,7 @@ class BackendClient:
             _debug.info("backend: %s could not be reached (%s)", path, type(error).__name__)
             return BackendAnswer(
                 Outcome.UNREACHABLE, "BACKEND_UNREACHABLE",
-                "The G-shared service could not be reached. Try again when it is back.",
+                "G-shared 서비스에 연결할 수 없습니다. 서비스가 복구되면 다시 시도하세요.",
             )
         _debug.info(
             "backend: %s -> %s%s", path, answered.outcome.value,

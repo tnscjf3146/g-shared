@@ -80,7 +80,7 @@ class ARuntimeThatIsReadyTest(StageTestCase):
     def test_the_supplier_is_told_in_the_words_the_spec_uses(self):
         self.run_stage(prepared())
 
-        self.assertIn("RUNTIME READY", self.output)
+        self.assertIn("GPU 실행 환경 준비 완료", self.output)
 
     def test_what_the_gpu_said_is_shown(self):
         # The one line worth reading on success.
@@ -96,7 +96,7 @@ class ARuntimeThatIsReadyTest(StageTestCase):
     def test_nothing_is_asked_of_them(self):
         self.run_stage(prepared())
 
-        self.assertNotIn("not ready", self.output)
+        self.assertNotIn("준비되지 않았습니다", self.output)
 
 
 class ARuntimeThatIsNotReadyTest(StageTestCase):
@@ -109,7 +109,7 @@ class ARuntimeThatIsNotReadyTest(StageTestCase):
     def test_a_runtime_that_did_not_come_up_never_says_ready(self):
         self.run_stage(prepared(Progress.STUCK, DOCKER_ENGINE=Finding.MISSING))
 
-        self.assertNotIn("RUNTIME READY", self.output)
+        self.assertNotIn("GPU 실행 환경 준비 완료", self.output)
 
     def test_the_supplier_is_shown_the_problem_and_the_fix(self):
         self.run_stage(prepared(
@@ -125,7 +125,7 @@ class ARuntimeThatIsNotReadyTest(StageTestCase):
         self.run_stage(prepared(
             Progress.NEEDS_A_RESTART, DOCKER_ENGINE=Finding.UNDETERMINED))
 
-        self.assertIn("Restart this PC", self.output)
+        self.assertIn("PC를 다시 시작한 뒤", self.output)
 
 
 class OnlyWhatThePersonCanActOnIsShownTest(StageTestCase):
@@ -150,7 +150,7 @@ class OnlyWhatThePersonCanActOnIsShownTest(StageTestCase):
             DOCKER_ENGINE=Finding.MISSING,
         ))
 
-        self.assertIn("  It was tried and refused: apt-get could not reach the archive",
+        self.assertIn("  시도했지만 실패했습니다: apt-get could not reach the archive",
                       left)
 
     def test_a_successful_attempt_is_not_reported_as_a_refusal(self):

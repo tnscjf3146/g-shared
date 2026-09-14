@@ -158,16 +158,19 @@ class ANewMachineFromEmptyToRegisteredTest(StageTestCase):
     def setUp(self):
         super().setUp()
         self.registry = Registry()
+        # Unsealing is faked the same way as sealing: registration now reads the
+        # stored identity straight back and authenticates it before going on.
         with patch("gshared_worker.worker_credentials.protect_current_user",
-                   lambda secret: "sealed:" + secret):
+                   lambda secret: "sealed:" + secret),                 patch("gshared_worker.worker_credentials.unprotect_current_user",
+                      lambda sealed: sealed.removeprefix("sealed:")):
             self.code = self.run_stage(self.registry)
 
     def test_it_reaches_auth_ready(self):
         self.assertEqual(self.code, WorkerExitCode.OK)
-        self.assertIn("AUTH READY", self.output)
+        self.assertIn("등록 확인 완료", self.output)
 
     def test_the_person_is_asked_to_sign_in(self):
-        self.assertIn("Sign in to attach it to your account", self.output)
+        self.assertIn("로그인하면 계정에 연결됩니다", self.output)
 
     def test_the_access_token_is_what_registers_the_machine(self):
         self.assertEqual(self.registry.registered, ["user-jwt"])
@@ -200,7 +203,7 @@ class AnExistingMachineTest(StageTestCase):
 
         self.assertEqual(code, WorkerExitCode.OK)
         self.assertEqual(asked, [])
-        self.assertIn("AUTH READY", self.output)
+        self.assertIn("등록 확인 완료", self.output)
 
     def test_a_revoked_machine_stops_with_the_code_for_credentials(self):
         with patch("gshared_worker.worker_credentials.unprotect_current_user",
@@ -210,7 +213,7 @@ class AnExistingMachineTest(StageTestCase):
                 WorkerAuthState.REVOKED, "removed from the account")))
 
         self.assertEqual(code, WorkerExitCode.CREDENTIAL_MISMATCH)
-        self.assertIn("no longer registered", self.output)
+        self.assertIn("더 이상 G-shared 계정에 등록되어 있지 않습니다", self.output)
 
     def test_a_detail_that_says_something_new_is_still_shown(self):
         # Only the repetition is dropped, never the information.
@@ -257,8 +260,8 @@ class A404IsNotARevocationTest(StageTestCase):
     def test_it_says_the_machine_is_not_the_problem(self):
         self.run_404(WorkerAuthState.BACKEND_CONTRACT_ERROR)
 
-        self.assertIn("did not answer", self.output)
-        self.assertIn("problem with the service", self.output)
+        self.assertIn("그 요청에 응답하지 않았습니다", self.output)
+        self.assertIn("서비스 쪽 문제", self.output)
 
     def test_nothing_is_registered_again_and_nothing_is_written(self):
         for state in (WorkerAuthState.BACKEND_CONTRACT_ERROR,
@@ -289,8 +292,8 @@ class A404IsNotARevocationTest(StageTestCase):
     def test_a_worker_the_service_has_no_record_of_is_told_apart(self):
         self.run_404(WorkerAuthState.WORKER_NOT_FOUND)
 
-        self.assertIn("no record of this machine", self.output)
-        self.assertNotIn("no longer registered", self.output)
+        self.assertIn("등록 기록이 없습니다", self.output)
+        self.assertNotIn("더 이상 G-shared 계정에 등록되어 있지 않습니다", self.output)
 
 
 class CredentialsThatCannotBeReadTest(StageTestCase):
@@ -345,7 +348,7 @@ class AServiceThatIsDownTest(StageTestCase):
         self.assertEqual(written["workerId"], "worker-001")
 
     def test_the_person_is_told_nothing_was_changed(self):
-        self.assertIn("Nothing was changed", self.output)
+        self.assertIn("아무것도 바뀌지 않았습니다", self.output)
 
     def test_the_same_sentence_is_not_printed_twice(self):
         # Two lines saying the same thing read as two separate problems.
@@ -363,7 +366,7 @@ class SomebodyWhoClosedTheWindowTest(StageTestCase):
     def test_they_are_told_the_machine_is_still_unregistered(self):
         self.run_stage(Registry(), sign_in=None)
 
-        self.assertIn("still unregistered", self.output)
+        self.assertIn("아직 등록되지 않았습니다", self.output)
 
 
 class ARegistrationThatFailedTest(StageTestCase):
@@ -513,7 +516,7 @@ class AGpuThatCannotBeMeasuredTest(StageTestCase):
                                   "BENCHMARK_CUDA_UNAVAILABLE: no CUDA device")
 
         self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
-        self.assertIn("could not measure this GPU", self.output)
+        self.assertIn("GPU 성능을 측정하지 못해", self.output)
         self.assertIn("no CUDA device", self.output)
 
     def test_no_failure_registers_the_machine_or_writes_anything(self):
@@ -533,7 +536,7 @@ class AGpuThatCannotBeMeasuredTest(StageTestCase):
     def test_the_person_is_told_nothing_was_changed(self):
         self.stopped_by(BenchmarkOutcome.TIMED_OUT)
 
-        self.assertIn("Nothing was changed", self.output)
+        self.assertIn("아무것도 바뀌지 않았습니다", self.output)
 
 
 class WhenTheGpuIsMeasuredTest(StageTestCase):
@@ -572,8 +575,8 @@ class WhenTheGpuIsMeasuredTest(StageTestCase):
             Registry(),
             benchmark=lambda: order.append("measured") or measured())
         # The sign-in line is printed before the measuring line.
-        self.assertLess(self.output.index("Sign in to attach"),
-                        self.output.index("Measuring what this GPU can do"))
+        self.assertLess(self.output.index("로그인하면 계정에 연결됩니다"),
+                        self.output.index("GPU 성능을 측정하는 중"))
         self.assertEqual(order, ["measured"])
 
     def test_the_measurement_is_shown_to_the_person(self):
@@ -595,7 +598,7 @@ class AMachineThatCannotBeDescribedTest(StageTestCase):
 
         self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
         self.assertEqual(asked, [])
-        self.assertIn("GPU could not be described", self.output)
+        self.assertIn("GPU 정보를 읽지 못해", self.output)
 
 
 if __name__ == "__main__":

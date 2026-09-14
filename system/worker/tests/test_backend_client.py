@@ -176,7 +176,7 @@ class WhenTheServiceIsNotThereTest(unittest.TestCase):
 
         answered = BackendClient(BASE, opener=opener).login("a@b.com", "abcd1234")
 
-        self.assertIn("Try again", answered.message)
+        self.assertIn("다시 시도하세요", answered.message)
 
     def test_a_refusal_with_no_readable_body_still_says_something_useful(self):
         # A proxy in front of the Backend, say.

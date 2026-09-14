@@ -60,6 +60,9 @@ def start_debug_log(directory: Path) -> Path:
     supplier can find.
     """
     path = directory / DEBUG_LOG_NAME
+    # The per-user folder does not exist on a machine that has never run the
+    # packaged Worker. Opening a file in it would otherwise be the first fault.
+    directory.mkdir(parents=True, exist_ok=True)
     _remove_our_handlers()
     handler = logging.FileHandler(path, encoding="utf-8")
     handler.setFormatter(logging.Formatter(_FORMAT))
