@@ -2,6 +2,6 @@
   "GPUJobEscrowModule": {
     "paymentToken": "0xaCe3c977A539C16668528619F9417589f12C7B22",
     "acceptTimeout": 600,
-    "executionTimeout": 86400
+    "executionTimeout": 108000
   }
 }

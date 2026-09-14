@@ -20,7 +20,7 @@ for (const p of paths) {
   assert.ok(!existsSync(p), "Smoke-test output already exists; refusing to overwrite " + p);
 }
 const ACCEPT_TIMEOUT = 600;
-const EXECUTION_TIMEOUT = 86400;
+const EXECUTION_TIMEOUT = 108000;
 const params = resolve(root, "ignition/parameters/ssafy-escrow.json");
 const originalParams = await readFile(params);
 const writeParams = (paymentToken, accept = ACCEPT_TIMEOUT, execution = EXECUTION_TIMEOUT) => writeFile(params, JSON.stringify({

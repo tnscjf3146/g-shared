@@ -60,7 +60,7 @@ contract GasReportTest is Test {
         // cancelJob — 의뢰자가 직접 취소
         vm.startPrank(client);
         token.approve(address(escrow), PRICE);
-        uint256 a = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        uint256 a = escrow.createAndFundJob(keccak256("job-cancel"), PRICE, provider);
         g = gasleft();
         escrow.cancelJob(a);
         console.log("cancelJob        ", g - gasleft());
@@ -69,7 +69,7 @@ contract GasReportTest is Test {
         // abortJob — 공급자가 반납
         vm.startPrank(client);
         token.approve(address(escrow), PRICE);
-        uint256 b = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        uint256 b = escrow.createAndFundJob(keccak256("job-abort"), PRICE, provider);
         vm.stopPrank();
         vm.startPrank(provider);
         escrow.acceptJob(b);
@@ -81,7 +81,7 @@ contract GasReportTest is Test {
         // settleTimeout · FUNDED 만료
         vm.startPrank(client);
         token.approve(address(escrow), PRICE);
-        uint256 c = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        uint256 c = escrow.createAndFundJob(keccak256("job-timeout-funded"), PRICE, provider);
         vm.stopPrank();
         (, , uint64 dl, , , , ) = escrow.jobs(c);
         vm.warp(dl + 1);
@@ -92,7 +92,7 @@ contract GasReportTest is Test {
         // settleTimeout · ASSIGNED 만료
         vm.startPrank(client);
         token.approve(address(escrow), PRICE);
-        uint256 d = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        uint256 d = escrow.createAndFundJob(keccak256("job-timeout-assigned"), PRICE, provider);
         vm.stopPrank();
         vm.prank(provider);
         escrow.acceptJob(d);

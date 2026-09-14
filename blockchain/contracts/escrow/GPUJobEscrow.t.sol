@@ -13,6 +13,7 @@ contract GPUJobEscrowTest is Test {
     GPUJobEscrow internal escrow;
 
     address internal client   = address(0xC11E27);
+    address internal client2  = address(0xC11E28);
     address internal provider = address(0x9401DE);   // 정산 주소. 사람 지갑
     address internal operator = address(0x09E4A70);  // 서명 대행자. 기계 키
     address internal operator2 = address(0x09E4A72); // 같은 사람의 다른 기계
@@ -56,10 +57,14 @@ contract GPUJobEscrowTest is Test {
     // 그 지점에서 시작하는 테스트가 없다.
 
     function _funded() internal returns (uint256 jobId) {
+        return _fundedWithRef(keccak256(abi.encode(EXTERNAL_REF, escrow.nextJobId())));
+    }
+
+    function _fundedWithRef(bytes32 externalRef) internal returns (uint256 jobId) {
         vm.prank(client);
         token.approve(address(escrow), PRICE);
         vm.prank(client);
-        jobId = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        jobId = escrow.createAndFundJob(externalRef, PRICE, provider);
     }
 
     function _assigned() internal returns (uint256 jobId) {
@@ -91,8 +96,13 @@ contract GPUJobEscrowTest is Test {
     // ── 생성자 ───────────────────────────────────────────────────
 
     function test_constructor_rejectsZeroToken() public {
-        vm.expectRevert(bytes("Escrow: token is zero"));
+        vm.expectRevert(GPUJobEscrow.InvalidPaymentToken.selector);
         new GPUJobEscrow(address(0), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT);
+    }
+
+    function test_constructor_rejectsAddressWithoutCode() public {
+        vm.expectRevert(GPUJobEscrow.InvalidPaymentToken.selector);
+        new GPUJobEscrow(address(0xBEEF), ACCEPT_TIMEOUT, EXECUTION_TIMEOUT);
     }
 
     function test_constructor_storesPaymentToken() public view {
@@ -116,13 +126,14 @@ contract GPUJobEscrowTest is Test {
 
     function test_createAndFundJob_movesTokensAndFunds() public {
         uint256 before = token.balanceOf(client);
-        uint256 jobId  = _funded();
+        uint256 jobId  = _fundedWithRef(EXTERNAL_REF);
 
         assertEq(jobId, 1);
         assertEq(uint8(_state(jobId)), uint8(GPUJobEscrow.JobState.FUNDED));
         assertEq(token.balanceOf(client), before - PRICE);
         assertEq(token.balanceOf(address(escrow)), PRICE);
         assertEq(escrow.nextJobId(), 2);
+        assertEq(escrow.jobIdByClientRef(client, EXTERNAL_REF), jobId);
     }
 
     function test_createAndFundJob_storesJobFields() public {
@@ -159,6 +170,7 @@ contract GPUJobEscrowTest is Test {
         vm.expectRevert();
         escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
 
+        assertEq(escrow.jobIdByClientRef(client, EXTERNAL_REF), 0);
         assertEq(escrow.nextJobId(), 1);
         assertEq(token.balanceOf(address(escrow)), 0);
     }
@@ -199,16 +211,47 @@ contract GPUJobEscrowTest is Test {
         escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
     }
 
-    /// @notice 작업 번호는 컨트랙트가 매긴다. externalRef 는 참조값일 뿐 키가 아니다.
-    function test_createAndFundJob_sameExternalRefIsAllowed() public {
+    function test_createAndFundJob_rejectsZeroExternalRef() public {
+        vm.prank(client);
+        token.approve(address(escrow), PRICE);
+
+        vm.prank(client);
+        vm.expectRevert(GPUJobEscrow.InvalidExternalRef.selector);
+        escrow.createAndFundJob(bytes32(0), PRICE, provider);
+    }
+
+    function test_createAndFundJob_rejectsSameExternalRefFromSameClient() public {
         vm.startPrank(client);
         token.approve(address(escrow), PRICE * 2);
         uint256 first  = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
-        uint256 second = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        vm.expectRevert(abi.encodeWithSelector(GPUJobEscrow.ExternalRefAlreadyUsed.selector, EXTERNAL_REF));
+        escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
         vm.stopPrank();
 
         assertEq(first, 1);
+        assertEq(escrow.nextJobId(), 2);
+        assertEq(escrow.jobIdByClientRef(client, EXTERNAL_REF), first);
+    }
+
+    /// @notice 제3자가 같은 값을 먼저 써도 원래 의뢰자의 참조값을 막을 수 없다.
+    function test_createAndFundJob_sameExternalRefFromDifferentClientsIsAllowed() public {
+        vm.prank(client);
+        token.transfer(client2, PRICE);
+
+        vm.prank(client);
+        token.approve(address(escrow), PRICE);
+        vm.prank(client2);
+        token.approve(address(escrow), PRICE);
+
+        vm.prank(client2);
+        uint256 first = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+        vm.prank(client);
+        uint256 second = escrow.createAndFundJob(EXTERNAL_REF, PRICE, provider);
+
+        assertEq(first, 1);
         assertEq(second, 2);
+        assertEq(escrow.jobIdByClientRef(client2, EXTERNAL_REF), first);
+        assertEq(escrow.jobIdByClientRef(client, EXTERNAL_REF), second);
     }
 
     // ── setOperator ──────────────────────────────────────────────
