@@ -8,6 +8,7 @@ import type {
   createJobResponseSchema,
   datasetMetadataSchema,
   datasetSchema,
+  escrowTermsSchema,
   estimateRequestSchema,
   estimateSchema,
   gpuFitSchema,
@@ -46,6 +47,7 @@ export type Estimate = z.infer<typeof estimateSchema>
 export type CreateJobRequest = z.infer<typeof createJobRequestSchema>
 export type CreateJobResponse = z.infer<typeof createJobResponseSchema>
 
+export type EscrowTerms = z.infer<typeof escrowTermsSchema>
 export type JobSummary = z.infer<typeof jobSummarySchema>
 export type JobPage = z.infer<typeof jobPageSchema>
 export type JobDetail = z.infer<typeof jobDetailSchema>

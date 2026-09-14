@@ -241,6 +241,41 @@ export const jobHandlers = [
     return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1' }, { status: 201 })
   }),
 
+  // 예치 조건 — 백엔드 미구현 stub(계약: schema.ts escrowTermsSchema). 구현되면 이 핸들러만 삭제.
+  // priceWei 는 estimatedCost(TOKEN) × 10^18 문자열, 주소들은 고정 더미. escrowAddress 는 배포 전이라 env 우선
+  http.get(`${URL}/:jobId/escrow-terms`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (job.status !== 'CREATED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    return HttpResponse.json({
+      jobId: job.jobId,
+      externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
+      priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
+      providerWallet: '0x1111111111111111111111111111111111111111',
+      clientWallet: '0x2222222222222222222222222222222222222222',
+      chainId: 31221,
+      tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
+      escrowAddress: process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x3333333333333333333333333333333333333333',
+    })
+  }),
+
+  // 예치 확인 — 현행 백엔드 규격 { escrowJobId }. 성공 시 FUNDED 로 전이
+  http.post(`${URL}/:jobId/fund`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const id = Number(params.jobId)
+    const job = find(id)
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (job.status !== 'CREATED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    const body = (await request.json().catch(() => null)) as { escrowJobId?: string } | null
+    if (!body?.escrowJobId || !/^[0-9]{1,78}$/.test(body.escrowJobId)) return error(400, 'INVALID_INPUT', 'escrowJobId는 0 이상의 정수 문자열이어야 합니다.')
+    set(id, { status: 'FUNDED' })
+    resume(find(id)!)
+    return new HttpResponse(null, { status: 200 })
+  }),
+
   http.post(`${URL}/:jobId/cancel`, async ({ request, params }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')

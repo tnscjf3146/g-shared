@@ -8,6 +8,7 @@ import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
 import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, STATUS_META, STATUS_SENTENCE, formatBytes, formatCost, formatDateTime, formatDuration } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
+import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
 import { JobDetailSkeleton } from './jobSkeleton'
@@ -145,6 +146,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
         <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
+        {job.status === 'CREATED' && <FundPanel job={job} onFunded={() => void load()} />}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
         {job.assignedWorkerId && (
           <p className="text-[14px] tabular-nums text-text-muted" title={job.assignedWorkerId}>

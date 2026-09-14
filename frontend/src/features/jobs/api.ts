@@ -9,11 +9,12 @@ import {
   estimateSchema,
   gpuOptionSchema,
   gpuSchema,
+  escrowTermsSchema,
   jobDetailSchema,
   jobPageSchema,
   workloadSchema,
 } from './schema'
-import type { Catalog, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus } from './types'
+import type { Catalog, EscrowTerms, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus } from './types'
 import * as z from 'zod/mini'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -72,4 +73,15 @@ export async function getCatalog(): Promise<Catalog> {
     authFetch<unknown>(CATALOG_PATHS.gpus).then((r) => z.array(gpuSchema).parse(r)),
   ])
   return { workloads, baseModels, gpus }
+}
+
+/** GET /jobs/{jobId}/escrow-terms — 예치 조건. 백엔드 미구현: 계약만 확정(schema.ts), MSW 목업이 응답 */
+export async function getEscrowTerms(jobId: number): Promise<EscrowTerms> {
+  return escrowTermsSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/escrow-terms`))
+}
+
+/** POST /jobs/{jobId}/fund — 온체인 예치 뒤 확인 요청. 현행 백엔드 규격은 { escrowJobId }(개발용).
+ *  TODO(-167): 백엔드가 txHash 기반 영수증 검증으로 바꾸면 본문을 { txHash } 로 교체 */
+export function fundJob(jobId: number, escrowJobId: string): Promise<void> {
+  return authFetch<void>(`${JOBS_PATH}/${jobId}/fund`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ escrowJobId }) })
 }
