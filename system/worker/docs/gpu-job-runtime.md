@@ -60,9 +60,25 @@ retry budget은 `execution_context.py` 상수 한 곳에 있다. stop signal이 
 
 ## 3. Runtime Image
 
+### 기준값 (Canonical Runtime)
+
+System 안의 원본은 `gshared_worker/runtime_image.py` 의 `CANONICAL_RUNTIME_*` 상수 하나다. 테스트·selfcheck·문서는 이 값을 따른다.
+
+| 항목 | 값 |
+|---|---|
+| repository | `le3560/gshared-qlora-sft-runtime` |
+| tag (사람용, pull에 쓰지 않음) | `0.2.0` |
+| digest | `sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d` |
+| imageRef | `le3560/gshared-qlora-sft-runtime@sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d` |
+
+> **Backend 인계:** 운영 `workloads` 카탈로그(`qlora-sft-v1`)의 현재 값 `gshared/qlora-sft-runtime` · `sha256:0000…0000` 은 **무효한 placeholder**이며 Worker가 거부한다. `image_repository` · `image_digest` 를 위 repository · digest 로 바꿔야 한다(Backend migration 담당).
+
+### 규칙
+
 | 규칙 | |
 |---|---|
-| approved repository | `gshared/qlora-sft-runtime`, `le3560/gshared-qlora-sft-runtime` (Docker Hub 배포본, 0.2.0 = `sha256:acda63bc…126d`) — **Worker 설정**, 메시지가 아님 |
+| approved repository | `gshared/qlora-sft-runtime`, `le3560/gshared-qlora-sft-runtime` — **Worker 설정**, 메시지가 아님 |
+| approved digest | **위 canonical digest 하나만** (`APPROVED_DIGESTS`). 승인 repository의 다른 digest도 거부 |
 | immutable digest | `repository@sha256:<64 hex>` 만 |
 | tag | **거부** (오늘 맞는 이미지를 가리켜도) |
 | all-zero digest | **거부** — Backend 카탈로그 seed의 placeholder |

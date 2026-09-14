@@ -80,6 +80,43 @@ def main() -> int:
 
     check("escrow ABI", abi)
 
+    def runtime_image():
+        from gshared_worker.runtime_image import (
+            CANONICAL_RUNTIME_DIGEST, CANONICAL_RUNTIME_REFERENCE,
+            CANONICAL_RUNTIME_TAG, PLACEHOLDER_DIGEST, ImageRefused, check_image)
+
+        image = check_image(CANONICAL_RUNTIME_REFERENCE, CANONICAL_RUNTIME_DIGEST)
+        _require(image.reference == CANONICAL_RUNTIME_REFERENCE, image.reference)
+        for refused, digest in (
+                (f"{image.repository}@{PLACEHOLDER_DIGEST}", PLACEHOLDER_DIGEST),
+                (f"{image.repository}:{CANONICAL_RUNTIME_TAG}", CANONICAL_RUNTIME_DIGEST)):
+            try:
+                check_image(refused, digest)
+            except ImageRefused:
+                continue
+            raise AssertionError(f"accepted {refused}")
+        return (f"{image.repository}:{CANONICAL_RUNTIME_TAG} pinned to "
+                f"{CANONICAL_RUNTIME_DIGEST[:19]}...; placeholder and tag refused")
+
+    check("runtime image", runtime_image)
+
+    def chain_config():
+        import re
+
+        from gshared_worker.config import (
+            DEFAULT_CHAIN_ID, DEFAULT_ESCROW_ADDRESS, DEFAULT_ESCROW_RPC_URL)
+        from gshared_worker.escrow import SSAFY_CHAIN_ID
+
+        _require(DEFAULT_CHAIN_ID == SSAFY_CHAIN_ID == 31221,
+                 f"chain {DEFAULT_CHAIN_ID} / {SSAFY_CHAIN_ID}")
+        _require(re.fullmatch(r"0x[0-9a-fA-F]{40}", DEFAULT_ESCROW_ADDRESS or ""),
+                 f"escrow address {DEFAULT_ESCROW_ADDRESS!r}")
+        _require(DEFAULT_ESCROW_RPC_URL.startswith("https://"), DEFAULT_ESCROW_RPC_URL)
+        return (f"chain {DEFAULT_CHAIN_ID}, escrow {DEFAULT_ESCROW_ADDRESS}, "
+                f"rpc {DEFAULT_ESCROW_RPC_URL}")
+
+    check("chain config", chain_config)
+
     def wallet_and_dpapi():
         from gshared_worker.credentials import (
             protect_current_user, unprotect_current_user)
