@@ -137,7 +137,7 @@ def request_ticket(
     check_upload_url(upload_url)
     expires = body.get("expiresAt")
     # The key is logged; the URL never is.
-    _debug.info("upload: ticket for %s", object_key)
+    _debug.debug("upload: ticket for %s", object_key)
     return UploadTicket(object_key, upload_url,
                         expires if isinstance(expires, str) else None)
 
@@ -186,7 +186,7 @@ def put_artifact(
     if status is not None and not 200 <= status < 300:
         raise UploadRefused(f"the storage answered HTTP {status}",
                             transient=status >= 500)
-    _debug.info("upload: sent %s bytes", size_bytes)
+    _debug.debug("upload: sent %s bytes", size_bytes)
 
 
 def complete_upload(
@@ -229,7 +229,7 @@ def complete_upload(
         # answering false -- but the field is in the contract and a false here
         # would mean the object was not checked.
         raise UploadRefused("the service did not verify the uploaded result")
-    _debug.info("upload: %s verified by the service", object_key)
+    _debug.debug("upload: %s verified by the service", object_key)
     return StoredResult(object_key, sha256, int(size_bytes))
 
 
@@ -284,7 +284,7 @@ def upload_result(
             ticket = None
             if attempt == attempts:
                 break
-            _debug.info("upload: %s (attempt %s/%s), waiting %.1fs",
+            _debug.warning("upload: %s (attempt %s/%s), waiting %.1fs",
                         last, attempt, attempts, waiting)
             if sleep is not None and not sleep(waiting):
                 raise UploadRefused(

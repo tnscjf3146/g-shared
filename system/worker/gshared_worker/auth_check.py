@@ -102,7 +102,7 @@ def authenticate_worker(
     say("이 PC의 G-shared 등록 상태를 확인하는 중...")
 
     loaded = load_credentials()
-    _debug.info("credentials: %s -- %s", loaded.state.value, loaded.detail)
+    _debug.debug("credentials: %s -- %s", loaded.state.value, loaded.detail)
 
     service = WorkerAuthService(registry or _backend_registry(settings))
     result = service.authenticate(loaded)
@@ -130,7 +130,7 @@ def _describe_this_machine(
     """What this machine is, or None when it cannot say."""
     facts = (describe or describe_machine)()
     if facts is None:
-        _debug.info("enrolment stopped: this machine could not be described")
+        _debug.warning("enrolment stopped: this machine could not be described")
         say("")
         say("아직 이 PC를 등록할 수 없습니다.")
         say("  GPU 정보를 읽지 못해 등록할 내용이 없습니다.")
@@ -156,7 +156,7 @@ def _measure_this_gpu(
         say(f"  {report.result.summary()}")
         return report
 
-    _debug.info("benchmark refused: %s -- %s", report.outcome.value, report.detail)
+    _debug.warning("benchmark refused: %s -- %s", report.outcome.value, report.detail)
     say("")
     say("GPU 성능을 측정하지 못해 등록하지 않았습니다.")
     say(f"  {report.detail}")
@@ -281,7 +281,7 @@ def _plainly(text: str) -> str:
 
 
 def _report(say: Callable[..., None], result: WorkerAuthResult) -> int:
-    _debug.info("worker auth: %s -- %s", result.state.value, result.detail)
+    _debug.log(logging.DEBUG if result.is_authenticated else logging.WARNING, "worker auth: %s -- %s", result.state.value, result.detail)
 
     if result.is_authenticated:
         say(f"  등록되었습니다: {result.worker_id}")

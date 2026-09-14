@@ -54,26 +54,6 @@ class CommandRunner(Protocol):
 OnLine = Callable[[str], None]
 
 
-class StreamingCommandRunner(CommandRunner, Protocol):
-    """A runner that can also report lines as they are written.
-
-    Separate from :class:`CommandRunner` so that everything which only needs
-    the finished output keeps the smaller contract. A caller that wants lines
-    asks for them; a caller that does not is unaffected, and the fakes in the
-    existing tests stay valid runners.
-    """
-
-    async def run_streaming(
-        self,
-        args: list[str],
-        *,
-        timeout: float,
-        max_output_bytes: int,
-        on_stdout_line: OnLine | None = None,
-        on_stderr_line: OnLine | None = None,
-    ) -> CommandResult: ...
-
-
 class LineSplitter:
     """Bytes from a pipe in, whole lines out.
 

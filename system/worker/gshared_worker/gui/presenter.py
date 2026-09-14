@@ -72,7 +72,7 @@ class AuthPresenter:
 
         answered = self._client.login(email.strip(), password)
         if answered.succeeded:
-            _debug.info("gui: signed in")
+            _debug.debug("gui: signed in")
             return Shown(Screen.LOGIN, access_token=answered.body["accessToken"])
         return Shown(Screen.LOGIN, error=answered.message)
 
@@ -89,7 +89,7 @@ class AuthPresenter:
         # there is nothing to be signed in with. Sending the person to the
         # login screen is what actually happened, rather than a guess that
         # they are now logged in.
-        _debug.info("gui: account created")
+        _debug.debug("gui: account created")
         self.screen = Screen.LOGIN
         return Shown(
             Screen.LOGIN,

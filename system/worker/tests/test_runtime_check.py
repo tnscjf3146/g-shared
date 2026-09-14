@@ -177,10 +177,17 @@ class OnlyWhatThePersonCanActOnIsShownTest(StageTestCase):
 
 class TheLogKeepsEverythingTest(StageTestCase):
     def test_every_prerequisite_is_recorded_even_the_ones_that_passed(self):
-        self.run_stage(prepared())
+        # Recorded in full when the runtime is not ready, which is when a
+        # report needs to say what was fine as well as what was not.
+        self.run_stage(prepared(Progress.STUCK, DOCKER_ENGINE=Finding.MISSING))
 
         for prerequisite in RuntimePrerequisite:
             self.assertIn(prerequisite.value, self.logged)
+
+    def test_a_ready_runtime_writes_nothing_at_the_default_level(self):
+        self.run_stage(prepared())
+
+        self.assertEqual(self.logged.strip(), "")
 
     def test_every_action_is_recorded_with_its_outcome(self):
         self.run_stage(prepared(

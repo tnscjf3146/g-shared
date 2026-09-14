@@ -46,8 +46,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from .escrow import AcceptOutcome, JobState, abort_escrow_job
-from .job_rejection import RejectCode
-from .job_runtime import RuntimeOutcome, RuntimeState
+from .job_runtime import RuntimeOutcome
 from .logging_setup import LOGGER_NAME
 from .runtime_stop import RuntimeHandle, StopOutcome, stop_container
 from .worker_job import USER_REQUEST
@@ -131,7 +130,7 @@ class JobTerminal:
         with self._lock:
             if self._claim is TerminalClaim.NONE:
                 self._claim = who
-                _debug.info("terminal: %s is owned by %s", self.job_id, who.value)
+                _debug.debug("terminal: %s is owned by %s", self.job_id, who.value)
                 return True
             return self._claim is who
 
@@ -155,11 +154,11 @@ class JobTerminal:
         """
         with self._lock:
             if self._cancel_reason is not None:
-                _debug.info("cancel: %s was already asked to stop", self.job_id)
+                _debug.debug("cancel: %s was already asked to stop", self.job_id)
                 return False
             self._cancel_reason = reason
         self.token.set()
-        _debug.info("cancel: %s asked to stop (%s)", self.job_id, reason)
+        _debug.debug("cancel: %s asked to stop (%s)", self.job_id, reason)
         return True
 
     @property
@@ -265,7 +264,7 @@ class Cancellation:
         if not terminal.claim_for(TerminalClaim.CANCEL):
             # Lost the race. A result or a failure is already writing to the
             # chain, or has. Reading it is all that is left to do.
-            _debug.info("cancel: %s is already owned by %s",
+            _debug.debug("cancel: %s is already owned by %s",
                         job.job_id, terminal.claim.value)
             return self._reconcile(job, terminal, outcome)
 
@@ -299,13 +298,13 @@ class Cancellation:
             # Cancelled before ``docker run`` -- during the context fetch, the
             # model, the dataset or the pull. There is nothing to stop, and
             # ``may_start_runtime`` keeps it that way.
-            _debug.info("cancel: %s had not started a container",
+            _debug.debug("cancel: %s had not started a container",
                         terminal.job_id)
             return StopOutcome.ALREADY_GONE
         try:
             return asyncio.run(stop_container(self._runner, handle))
         except Exception as error:
-            _debug.info("cancel: stopping %s failed (%s)",
+            _debug.warning("cancel: stopping %s failed (%s)",
                         handle.container_name, type(error).__name__)
             return StopOutcome.UNKNOWN
 
@@ -332,7 +331,7 @@ class Cancellation:
             # Already given back -- by the failure path, or by an earlier
             # attempt of ours. Whoever did it owns the message; this reports
             # nothing so the two cannot both be sent.
-            _debug.info("cancel: %s is already cancelled, owned by %s",
+            _debug.debug("cancel: %s is already cancelled, owned by %s",
                         job.job_id, terminal.claim.value)
             return _already_ended(job.job_id, terminal.claim)
         return _unsettled(
@@ -359,7 +358,7 @@ def _completed_after_cancel(job_id: str, detail: str) -> Any:
     """
     from .job_settlement import Unsettled
 
-    _debug.info("cancel: %s completed on chain before the cancellation", job_id)
+    _debug.warning("cancel: %s completed on chain before the cancellation", job_id)
     return Unsettled(job_id, BACKEND_CANCEL_COMPLETION_RACE, detail)
 
 

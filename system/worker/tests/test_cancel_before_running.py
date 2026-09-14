@@ -24,7 +24,7 @@ from pathlib import Path
 
 from gshared_worker.command_runner import CommandResult
 from gshared_worker.job_cancellation import JobTerminal, may_start_runtime
-from gshared_worker.job_runtime import RuntimeOutcome, RuntimeState, run_training
+from gshared_worker.job_runtime import RuntimeState, run_training
 from gshared_worker.job_workspace import JobWorkspace
 from gshared_worker.runtime_pipeline import RuntimePipeline, RuntimeSettings
 from gshared_worker.worker_job import USER_REQUEST, read_assignment

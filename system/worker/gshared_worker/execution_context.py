@@ -167,7 +167,7 @@ def fetch_execution_context(
             raise ContextRefused(last)
         if attempt == attempts:
             break
-        _debug.info("context: %s (attempt %s/%s), waiting %.1fs",
+        _debug.warning("context: %s (attempt %s/%s), waiting %.1fs",
                     last, attempt, attempts, waiting)
         if sleep is not None and not sleep(waiting):
             raise ContextRefused(

@@ -46,7 +46,6 @@ from typing import Any, Callable
 
 from .escrow import (
     AcceptOutcome,
-    AcceptResult,
     JobState,
     abort_escrow_job,
     submit_escrow_result,
@@ -203,7 +202,7 @@ class Settlement:
             # A training run nobody can collect is not a completed Job. The
             # escrow is still ASSIGNED, so the deposit is given back rather
             # than held for the execution timeout.
-            _debug.info("settlement: %s could not be stored", job.job_id)
+            _debug.warning("settlement: %s could not be stored", job.job_id)
             return self._fail_on_chain(
                 job, outcome, STORAGE_FAILURE, refused.detail)
 
@@ -215,7 +214,7 @@ class Settlement:
         # A cancellation that arrives after this loses and reads the chain
         # instead; one that arrives before it wins and this stops here.
         if terminal is not None and not _claim_result(terminal):
-            _debug.info("settlement: %s is owned by the cancellation",
+            _debug.debug("settlement: %s is owned by the cancellation",
                         job.job_id)
             return _stood_down(job.job_id, "before submitResult")
 
@@ -288,7 +287,7 @@ class Settlement:
         # The failure path's own gate. Same rule, same reason: the abort is
         # a transaction, so whoever is about to send one says so first.
         if terminal is not None and not _claim_failure(terminal):
-            _debug.info("settlement: %s is owned by the cancellation",
+            _debug.debug("settlement: %s is owned by the cancellation",
                         job.job_id)
             return _stood_down(job.job_id, "before abortJob")
 
@@ -367,7 +366,7 @@ STOOD_DOWN = "CANCELLED_BY_REQUEST"
 
 
 def _stood_down(job_id: str, where: str) -> Any:
-    _debug.info("settlement: %s stood down %s", job_id, where)
+    _debug.debug("settlement: %s stood down %s", job_id, where)
     return Unsettled(job_id, STOOD_DOWN,
                      f"the job is being cancelled; the settlement stopped "
                      f"{where}")

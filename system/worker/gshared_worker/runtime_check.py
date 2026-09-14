@@ -157,18 +157,18 @@ def _log(prepared: Setup) -> None:
     exactly what rules the toolkit out when the next report arrives.
     """
     for attempt in prepared.attempts:
-        _debug.info(
+        _debug.log(logging.DEBUG if prepared.diagnosis.is_ready else logging.WARNING, 
             "%s %s: %s -- %s",
             attempt.action.value, attempt.prerequisite.value,
             "ok" if attempt.succeeded else "failed", attempt.detail,
         )
     for check in prepared.diagnosis.checks:
-        _debug.info(
+        _debug.log(logging.DEBUG if prepared.diagnosis.is_ready else logging.WARNING, 
             "%s [%s]: %s",
             check.prerequisite.value, check.finding.value, check.detail,
         )
         if check.remedy:
-            _debug.info("  remedy: %s", check.remedy)
-    _debug.info(
+            _debug.log(logging.DEBUG if prepared.diagnosis.is_ready else logging.WARNING, "  remedy: %s", check.remedy)
+    _debug.log(logging.DEBUG if prepared.diagnosis.is_ready else logging.WARNING, 
         "runtime %s (ready=%s)", prepared.progress.value, prepared.diagnosis.is_ready
     )

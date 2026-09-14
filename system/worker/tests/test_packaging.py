@@ -138,7 +138,9 @@ class TheBuildRecipeTest(unittest.TestCase):
 
     def test_the_entry_point_is_the_workers_own(self):
         self.assertIn('WORKER / "gshared_worker" / "__main__.py"', self.spec)
-        self.assertIn('onefile(worker, "G-shared")', self.spec)
+        self.assertIn('onefile(worker, "G-shared", console=False)', self.spec)
+        # selfcheck.exe keeps a console: build.ps1 reads what it prints.
+        self.assertIn('onefile(check, "selfcheck", console=True)', self.spec)
 
     def test_the_training_stack_and_test_tools_are_kept_out(self):
         for name in ("torch", "transformers", "xgboost", "pandas", "numpy",

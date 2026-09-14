@@ -15,7 +15,6 @@ from gshared_worker.config import WSL_DISTRO_NAME
 from gshared_worker.errors import CommandError
 from gshared_worker.wsl_runtime import (
     BASE_DISTRO_PREFERENCE,
-    DistroState,
     GsharedRuntimeProbe,
     WslCommandRunner,
     WslDistroProbe,

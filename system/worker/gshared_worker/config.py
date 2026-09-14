@@ -210,19 +210,6 @@ def read_config_file(path: Path) -> dict[str, object]:
     return values
 
 
-def resolve_backend_url(
-    *, env: Mapping[str, str], directory: Path | None = None
-) -> str:
-    """Which G-shared service to talk to, without needing an enrolled machine.
-
-    The sign-in window needs this and nothing else: it exists to obtain the
-    workerId that :func:`resolve_settings` insists on, so it cannot be made to
-    ask for one first. The configuration file is still read and still refused
-    if it is malformed -- a typo is a typo whoever is asking.
-    """
-    return _backend_url(env, read_config_file(config_file_path(directory)))
-
-
 def _backend_url(env: Mapping[str, str], file_values: Mapping[str, object]) -> str:
     return _first(
         _clean(env.get(ENV_BACKEND_URL)),

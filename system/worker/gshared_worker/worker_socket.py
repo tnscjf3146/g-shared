@@ -296,16 +296,16 @@ def open_registered_socket(
     the caller logs would blur that.
     """
     url = websocket_url(settings.backend_url)
-    _debug.info("websocket: connecting to %s", url)
+    _debug.debug("websocket: connecting to %s", url)
 
     try:
         transport = (open_socket or open_worker_socket)(url, credentials.worker_token)
     except HandshakeRefused as refused:
-        _debug.info("websocket: handshake refused with HTTP %s", refused.status)
+        _debug.warning("websocket: handshake refused with HTTP %s", refused.status)
         return SocketResult(
             SocketOutcome.HANDSHAKE_REFUSED, str(refused), status=refused.status), None
     except TransportUnavailable as unavailable:
-        _debug.info("websocket: could not be reached (%s)", unavailable)
+        _debug.warning("websocket: could not be reached (%s)", unavailable)
         return SocketResult(SocketOutcome.UNREACHABLE, str(unavailable)), None
 
     result = _register_on(transport, credentials.worker_id, clock, timeout)
@@ -326,7 +326,7 @@ def _register_on(
         socket.send(json.dumps(register_message(worker_id, (clock or now_in_iso8601)())))
     except ConnectionWentAway as gone:
         return SocketResult(SocketOutcome.CLOSED_BEFORE_ACK, str(gone))
-    _debug.info("websocket: REGISTER sent for %s", worker_id)
+    _debug.debug("websocket: REGISTER sent for %s", worker_id)
 
     try:
         raw = socket.recv(timeout)
@@ -363,7 +363,7 @@ def _read_ack(raw: str, worker_id: str) -> SocketResult:
             "the service confirmed a different machine than this one",
         )
 
-    _debug.info("websocket: REGISTER_ACK accepted for %s", worker_id)
+    _debug.debug("websocket: REGISTER_ACK accepted for %s", worker_id)
     return SocketResult(SocketOutcome.REGISTERED, "this machine is registered with the service")
 
 
@@ -393,7 +393,7 @@ def _close_quietly(socket: WorkerSocketTransport) -> None:
     try:
         socket.close()
     except Exception:
-        _debug.info("websocket: the connection could not be closed cleanly", exc_info=True)
+        _debug.debug("websocket: the connection could not be closed cleanly", exc_info=True)
 
 
 def open_worker_socket(url: str, worker_token: str) -> WorkerSocketTransport:

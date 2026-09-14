@@ -161,7 +161,7 @@ def pack_result(output_dir: Path, destination: Path) -> PackagedResult:
 
     digest, size = hash_file(partial)
     partial.replace(destination)
-    _debug.info("result: packaged %s bytes, sha256 %s...", size, digest[:12])
+    _debug.debug("result: packaged %s bytes, sha256 %s...", size, digest[:12])
     return PackagedResult(destination, digest, size)
 
 

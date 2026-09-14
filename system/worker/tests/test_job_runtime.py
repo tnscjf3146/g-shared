@@ -16,7 +16,6 @@ from __future__ import annotations
 import ast
 import asyncio
 import inspect
-import json
 import tempfile
 import unittest
 from pathlib import Path

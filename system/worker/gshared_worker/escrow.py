@@ -39,11 +39,6 @@ _debug = logging.getLogger(LOGGER_NAME)
 #: The SSAFY chain. Every acceptance checks the node actually answers with it.
 SSAFY_CHAIN_ID = 31221
 
-#: GCoin has 18 decimals. Prices travel as decimal strings of the smallest
-#: unit and are compared as integers -- never as floats, which lose exactness
-#: somewhere above nine tokens.
-WEI_PER_TOKEN = 10 ** 18
-
 RECEIPT_TIMEOUT_SECONDS = 120
 
 
@@ -284,7 +279,7 @@ def check_job_matches(
     if job.state is JobState.ASSIGNED:
         if _same_address(job.operator, operator_address):
             # Already ours. A second transaction would revert on "not FUNDED".
-            _debug.info("escrow: job %s is already accepted by this machine",
+            _debug.debug("escrow: job %s is already accepted by this machine",
                         escrow_job_id)
             return False
         raise JobRefused(
@@ -412,19 +407,19 @@ def accept_escrow_job(
             check_operator_approved(
                 chain, terms.provider_wallet, operator_address)
     except JobRefused as refused:
-        _debug.info("escrow: refusing job %s -- %s (%s)",
+        _debug.warning("escrow: refusing job %s -- %s (%s)",
                     escrow_job_id, refused.detail, refused.code.value)
         return AcceptResult(
             AcceptOutcome.REFUSED, refused.detail, code=refused.code)
     except EscrowUnavailable as unavailable:
         # Nothing was sent, so nothing is in flight -- but the job is still
         # ours to take when the chain comes back, so this is not a refusal.
-        _debug.info("escrow: chain unavailable -- %s", unavailable)
+        _debug.warning("escrow: chain unavailable -- %s", unavailable)
         return AcceptResult(
             AcceptOutcome.UNCERTAIN, str(unavailable),
             code=RejectCode.BLOCKCHAIN_RPC_FAILED)
     except Exception as error:
-        _debug.info("escrow: pre-accept check failed (%s)", type(error).__name__)
+        _debug.warning("escrow: pre-accept check failed (%s)", type(error).__name__)
         return AcceptResult(
             AcceptOutcome.UNCERTAIN,
             f"the job could not be checked ({type(error).__name__})",
@@ -619,14 +614,14 @@ def _send_and_confirm(
     try:
         transaction_hash = send(escrow_job_id)
     except Exception as error:
-        _debug.info("escrow: %s send failed (%s) -- checking the job",
+        _debug.warning("escrow: %s send failed (%s) -- checking the job",
                     what, type(error).__name__)
         return _what_the_chain_says(
             chain, escrow_job_id, operator_address, wanted,
             f"the {what} transaction could not be confirmed "
             f"({type(error).__name__})", result_hash=result_hash)
 
-    _debug.info("escrow: %s sent for job %s, tx %s",
+    _debug.debug("escrow: %s sent for job %s, tx %s",
                 what, escrow_job_id, _short(transaction_hash))
 
     try:
@@ -788,7 +783,7 @@ class Web3Escrow:
             from_block=0, argument_filters={"jobId": int(escrow_job_id)})
         found = list(logs)
         if len(found) != 1:
-            _debug.info("escrow: %s JobFunded logs for job %s",
+            _debug.warning("escrow: %s JobFunded logs for job %s",
                         len(found), escrow_job_id)
             return None
         args = found[0]["args"]

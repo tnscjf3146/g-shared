@@ -320,7 +320,7 @@ def parse_event_line(line: str) -> RuntimeEvent | None:
     try:
         payload = json.loads(line[position + len(EVENT_MARKER):])
     except ValueError:
-        _debug.info("runtime: an event line was not JSON")
+        _debug.debug("runtime: an event line was not JSON")
         return None
     if not isinstance(payload, dict):
         return None
@@ -462,7 +462,7 @@ async def run_training(
     """
     command = run_command(image_reference, workspace, model_path, training,
                           host_path_of=host_path_of, generation=generation)
-    _debug.info("runtime: starting %s (run %s)",
+    _debug.debug("runtime: starting %s (run %s)",
                 container_name(workspace.job_id), generation)
 
     events: list[RuntimeEvent] = []
@@ -507,13 +507,13 @@ async def run_training(
             # container SIGTERM and then SIGKILL, so this arrives as 143 or
             # 137 -- codes the exit table does not know and would read as a
             # crash. The Job did not crash; somebody cancelled it.
-            _debug.info("runtime: exit %s after a cancellation", exit_code)
+            _debug.debug("runtime: exit %s after a cancellation", exit_code)
             return RuntimeOutcome(
                 RuntimeState.CANCELLED, None,
                 "the job was stopped at the customer's request", exit_code,
                 workspace.output_dir, events, actual_runtime_sec=ran_for)
         failure = failure_for_exit(exit_code)
-        _debug.info("runtime: exit %s -- %s", exit_code, failure.value)
+        _debug.warning("runtime: exit %s -- %s", exit_code, failure.value)
         return RuntimeOutcome(
             RuntimeState.FAILED, failure,
             _said_why(events, failure), exit_code,

@@ -201,20 +201,20 @@ async def stop_container(
     try:
         before = await look_at_container(runner, handle)
     except Exception as error:
-        _debug.info("stop: %s could not be inspected (%s)",
+        _debug.warning("stop: %s could not be inspected (%s)",
                     handle.container_name, type(error).__name__)
         return StopOutcome.UNKNOWN
 
     if not before.exists:
         # Never started, already ended, or ended and removed by ``--rm``.
         # All three mean the GPU is not running this Job.
-        _debug.info("stop: %s is not there", handle.container_name)
+        _debug.debug("stop: %s is not there", handle.container_name)
         handle.outcome = StopOutcome.ALREADY_GONE
         return StopOutcome.ALREADY_GONE
 
     if not before.belongs_to(handle):
         # The name matched and the labels did not. Somebody else's.
-        _debug.info("stop: %s is not this run's container; left alone",
+        _debug.warning("stop: %s is not this run's container; left alone",
                     handle.container_name)
         handle.outcome = StopOutcome.NOT_OURS
         return StopOutcome.NOT_OURS
@@ -224,7 +224,7 @@ async def stop_container(
         return StopOutcome.ALREADY_GONE
 
     handle.stop_requested = True
-    _debug.info("stop: asking %s to stop (%ss grace)",
+    _debug.debug("stop: asking %s to stop (%ss grace)",
                 handle.container_name, grace)
     try:
         await runner.run(
@@ -233,12 +233,12 @@ async def stop_container(
     except Exception as error:
         # The command failed. That says nothing about the container, so the
         # answer comes from looking rather than from the exit code.
-        _debug.info("stop: the stop command failed (%s)", type(error).__name__)
+        _debug.warning("stop: the stop command failed (%s)", type(error).__name__)
 
     try:
         after = await look_at_container(runner, handle)
     except Exception as error:
-        _debug.info("stop: %s could not be re-inspected (%s)",
+        _debug.warning("stop: %s could not be re-inspected (%s)",
                     handle.container_name, type(error).__name__)
         handle.outcome = StopOutcome.UNKNOWN
         return StopOutcome.UNKNOWN
@@ -251,7 +251,7 @@ async def stop_container(
         handle.outcome = StopOutcome.STOPPED
         return StopOutcome.STOPPED
     if after.running:
-        _debug.info("stop: %s is still running after the grace period",
+        _debug.warning("stop: %s is still running after the grace period",
                     handle.container_name)
         handle.outcome = StopOutcome.STILL_RUNNING
         return StopOutcome.STILL_RUNNING

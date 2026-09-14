@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +27,7 @@ from .errors import WorkerAlreadyRunningError, WorkerConfigurationError, WorkerE
 from .exit_codes import WorkerExitCode
 from .instance_guard import WorkerInstanceGuard, default_lock_directory
 from .auth_check import authenticate_worker
-from .logging_setup import LOGGER_NAME, stamp_the_build, start_debug_log
+from .logging_setup import BUILD, LOGGER_NAME, start_debug_log
 from .runtime_check import ensure_runtime
 from .worker_connection import connect_to_backend
 
@@ -55,8 +56,17 @@ def run(
     """Everything, in order. Returns the code the launcher reads."""
     directory = directory or data_directory()
     log_path = start_debug_log(directory)
-    stamp_the_build()
-    say = out or print
+    emit = out or print
+    #: Everything the supplier was told, kept so a failed run can be shown in a
+    #: dialog by the packaged Worker, which has no console to print it to.
+    said: list[str] = []
+    #: The settings this run used, for the one log line a failed run leaves.
+    recorded: list[str] = []
+
+    def say(*parts: object) -> None:
+        said.append(" ".join(str(part) for part in parts))
+        emit(*parts)
+
     run_worker = run_worker or start_the_machine
 
     try:
@@ -69,11 +79,12 @@ def run(
             # An injected environment must also decide where the identity
             # lives, or a test still writes into the real user profile.
             lock_directory=None if env is None else default_lock_directory(env),
+            recorded=recorded,
         )
     except KeyboardInterrupt:
         # Somebody decided to stop it. That is not a fault, and a traceback for
         # it reads as a crash they caused.
-        _debug.info("stopped from the keyboard")
+        _debug.debug("stopped from the keyboard")
         say("")
         say("중지했습니다.")
         exit_code = int(WorkerExitCode.OK)
@@ -87,7 +98,13 @@ def run(
         say("  이 파일을 보내 주시면 원인을 확인할 수 있습니다.")
         exit_code = int(WorkerExitCode.UNEXPECTED_FAULT)
 
-    _pause_if_the_window_will_close(exit_code, out=say)
+    if exit_code != 0:
+        # The one line a report needs when nothing else was worth writing:
+        # which build, which settings, and how it ended.
+        _debug.warning(
+            "stopped with exit code %s (build %s; %s)", exit_code, BUILD,
+            recorded[0] if recorded else "configuration not read")
+        _show_the_failure(exit_code, said)
     return exit_code
 
 
@@ -99,6 +116,7 @@ def _start(
     guard_factory: Any,
     *,
     lock_directory: Path | None,
+    recorded: list[str] | None = None,
 ) -> int:
     """The run itself, with the failures that were anticipated named."""
     say("")
@@ -108,20 +126,22 @@ def _start(
     except WorkerConfigurationError as error:
         # Anticipated: a machine nobody has configured, or a file with a typo
         # in it. Both are for the supplier to fix, and neither is a fault.
-        _debug.info("configuration refused: %s", error)
+        _debug.warning("configuration refused: %s", error)
         say("")
         say("이 설정으로는 G-shared를 시작할 수 없습니다.")
         say(f"  {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
 
-    _debug.info(
-        "configuration: worker=%s gpu=%s backend=%s from=%s token=%s",
+    summary = "worker=%s gpu=%s backend=%s from=%s token=%s" % (
         settings.worker_id,
         settings.gpu_index,
         settings.backend_url,
         settings.config_path or "environment and defaults",
         "present" if settings.worker_token else "absent",
     )
+    _debug.debug("configuration: %s", summary)
+    if recorded is not None:
+        recorded.append(summary)
     if settings.worker_id is None:
         say(f"  이 PC는 아직 등록되지 않았습니다 (GPU {settings.gpu_index}).")
         say("  점검이 끝나면 로그인 창이 열립니다.")
@@ -141,7 +161,7 @@ def _start(
     except ValueError as error:
         # An unusable identity must not escape as a traceback, nor as anything
         # a launcher would retry.
-        _debug.info("identity refused: %s", error)
+        _debug.warning("identity refused: %s", error)
         say("")
         say(f"G-shared를 시작할 수 없습니다: {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
@@ -153,7 +173,7 @@ def _start(
         return int(WorkerExitCode.EXPECTED_FAILURE)
 
     if not acquired:
-        _debug.info("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
+        _debug.warning("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
         say("")
         say("이 PC에서 G-shared가 이미 실행 중입니다.")
         say("  GPU 하나에는 Worker 하나만 실행할 수 있습니다.")
@@ -167,7 +187,7 @@ def _start(
         # Releasing never raises; Windows reclaims the identity anyway when
         # this process ends.
         guard.release()
-        _debug.info("released the Worker identity")
+        _debug.debug("released the Worker identity")
 
 
 def _run_the_worker(
@@ -179,17 +199,17 @@ def _run_the_worker(
         code = int(run_worker(settings, say))
     except WorkerAlreadyRunningError:
         # Something deeper found the same answer the guard did. Not a fault.
-        _debug.info("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
+        _debug.warning("%s", WorkerExitCode.ALREADY_RUNNING.issue_code)
         say("")
         say("이 PC에서 G-shared가 이미 실행 중입니다.")
         return int(WorkerExitCode.ALREADY_RUNNING)
     except WorkerError as error:
         # Anticipated and already explained by whoever raised it.
-        _debug.info("expected failure: %s", error)
+        _debug.warning("expected failure: %s", error)
         say("")
         say(f"G-shared가 멈췄습니다: {error}")
         return int(WorkerExitCode.EXPECTED_FAILURE)
-    _debug.info("worker stopped with exit code %s", code)
+    _debug.debug("worker stopped with exit code %s", code)
     return code
 
 
@@ -222,42 +242,51 @@ def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int
     return connect_to_backend(settings, say)
 
 
-def _this_process_owns_the_console() -> bool:
-    """True when closing this program closes the window it is printing into.
-
-    Windows gives a double-clicked program a console of its own and destroys it
-    the instant the program ends. Started from a terminal somebody already had
-    open, that terminal owns itself and has other processes attached.
-    """
-    import ctypes
-
-    buffer = (ctypes.c_uint32 * 8)()
-    attached = ctypes.windll.kernel32.GetConsoleProcessList(buffer, 8)
-    return attached == 1
+#: How many of the last lines a failure dialog shows. The end of a run is
+#: where it says what went wrong and what to do about it.
+_DIALOG_LINES = 25
 
 
-def _pause_if_the_window_will_close(
+def _is_windowed() -> bool:
+    """True for the packaged G-shared.exe, which has no console to print to."""
+    return bool(getattr(sys, "frozen", False)) and sys.stdout is None
+
+
+def _show_the_failure(
     exit_code: int,
+    said: list[str],
     *,
-    owns_console: Any = None,
-    wait: Any = None,
-    out: Any = None,
+    windowed: bool | None = None,
+    show: Callable[[str], None] | None = None,
 ) -> None:
-    """Hold a failed run on screen when nothing else will.
+    """Put the end of a failed run in front of the supplier.
 
-    Everything this program says about a configuration it could not use is
-    printed and then lost with the window a double-click created.
+    The packaged Worker has no console, so what it says about a configuration
+    it could not use, a machine that is not ready, or a copy that is already
+    running would otherwise vanish with nothing on screen. Run from a terminal
+    those lines are already there, and nothing more is shown.
     """
     if exit_code == 0:
         return
-    say = out or print
+    if not (_is_windowed() if windowed is None else windowed):
+        return
+    lines = [line.rstrip() for line in said if line.strip()]
+    text = chr(10).join(lines[-_DIALOG_LINES:]) or "G-shared가 멈췄습니다."
     try:
-        if not (owns_console or _this_process_owns_the_console)():
-            return
-        say("")
-        say("Enter 키를 누르면 창이 닫힙니다.")
-        (wait or input)()
+        (show or _error_dialog)(text)
     except Exception:
-        # Being unable to hold the window open is not worth failing over; the
-        # exit code and the log still say what happened.
-        _debug.info("could not hold the window open", exc_info=True)
+        # Not being able to show it is no reason to fail; the exit code and
+        # the log still say what happened.
+        _debug.warning("the failure could not be shown", exc_info=True)
+
+
+def _error_dialog(text: str) -> None:
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        messagebox.showerror("G-shared", text, parent=root)
+    finally:
+        root.destroy()

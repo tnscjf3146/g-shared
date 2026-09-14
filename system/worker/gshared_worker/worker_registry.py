@@ -76,11 +76,6 @@ def operator_path(worker_id: str) -> str:
     return f"/api/workers/{quote(worker_id, safe=SAFE)}/operator"
 
 
-def gpu_path(worker_id: str) -> str:
-    """The GPU endpoint for one Worker, with the id safe to put in a path."""
-    return f"/api/workers/{quote(worker_id, safe='')}/gpu"
-
-
 @dataclass(frozen=True)
 class BenchmarkUpdate:
     """A re-measured GPU, as ``PUT .../benchmark`` states it.
@@ -305,14 +300,14 @@ def _refused(answered: BackendAnswer, subject: str) -> RegistryAnswer:
         if answered.code == WORKER_NOT_FOUND:
             # The service looked and found nothing. Said so in as many words,
             # which is the only thing that makes a 404 mean this.
-            _debug.info("worker api: 404 %s", WORKER_NOT_FOUND)
+            _debug.warning("worker api: 404 %s", WORKER_NOT_FOUND)
             return RegistryAnswer(
                 WorkerAuthState.WORKER_NOT_FOUND,
                 f"the service has no record of {subject}")
         # A 404 from a path that is not there. Reading this as a revocation
         # would tell a supplier their machine was removed from their account
         # because an endpoint has not been written yet.
-        _debug.info("worker api: 404 without %s -- treating as a contract error "
+        _debug.warning("worker api: 404 without %s -- treating as a contract error "
                     "(code=%s)", WORKER_NOT_FOUND, answered.code)
         return RegistryAnswer(
             WorkerAuthState.BACKEND_CONTRACT_ERROR,

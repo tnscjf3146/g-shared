@@ -93,7 +93,7 @@ def analysis(script, extra=()):
     )
 
 
-def onefile(a, name):
+def onefile(a, name, *, console):
     pyz = PYZ(a.pure)
     return EXE(
         pyz,
@@ -107,9 +107,10 @@ def onefile(a, name):
         strip=False,
         upx=False,
         runtime_tmpdir=None,
-        # The Worker speaks to the supplier on a console and holds a failed
-        # run on screen; the sign-in window is opened from there.
-        console=True,
+        # G-shared.exe opens no console window: a supplier sees the sign-in
+        # window, and a run that fails shows its last lines in a dialog.
+        # selfcheck.exe keeps one, because build.ps1 reads what it prints.
+        console=console,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
@@ -119,7 +120,7 @@ def onefile(a, name):
 
 
 worker = analysis(WORKER / "gshared_worker" / "__main__.py")
-onefile(worker, "G-shared")
+onefile(worker, "G-shared", console=False)
 
 if os.environ.get("GSHARED_BUILD_SELFCHECK") == "1":
     # The module list is handed to selfcheck.exe as a file, because a frozen
@@ -128,4 +129,4 @@ if os.environ.get("GSHARED_BUILD_SELFCHECK") == "1":
     modules.write_text(chr(10).join(WORKER_MODULES), encoding="utf-8")
     check = analysis(WORKER / "packaging" / "selfcheck.py",
                      extra=[(str(modules), ".")])
-    onefile(check, "selfcheck")
+    onefile(check, "selfcheck", console=True)

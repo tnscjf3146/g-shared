@@ -211,7 +211,7 @@ OnMessage = Callable[[dict[str, Any]], None]
 
 def _note_unhandled(message: dict[str, Any]) -> None:
     """Somebody else's message. Noted, not acted on, and never taken for an ACK."""
-    _debug.info("websocket: ignoring a %s message this build does not handle",
+    _debug.debug("websocket: ignoring a %s message this build does not handle",
                 message.get("type"))
 
 
@@ -242,7 +242,7 @@ def take_the_job(
         # does not describe a Job that can be run. Dropping the connection over
         # it would take a working machine offline and the next one would carry
         # the same message. Said, and carried on.
-        _debug.info("job: refused an assignment -- %s", refused)
+        _debug.warning("job: refused an assignment -- %s", refused)
         say(f"  작업이 들어왔지만 내용을 읽을 수 없습니다: {refused}")
         return
 
@@ -252,7 +252,7 @@ def take_the_job(
         # anticipates: JobMatcher has a TODO for Jobs whose JOB_ACCEPTED never
         # arrives, and inventing a refusal message it does not read would not
         # reach anybody.
-        _debug.info(
+        _debug.warning(
             "job: %s offered while holding %s -- not accepted",
             job.job_id, slot.held.job_id)
         say(f"  작업 {job.job_id}: {slot.held.job_id} 작업을 처리 중이라 수락하지 않았습니다.")
@@ -262,7 +262,7 @@ def take_the_job(
         # The same Job, offered again while we are still deciding on it. The
         # decision under way will answer it; starting another would be a second
         # acceptJob transaction for one Job.
-        _debug.info("job: %s offered again while still deciding", job.job_id)
+        _debug.debug("job: %s offered again while still deciding", job.job_id)
         return
 
     if outcome is OfferOutcome.ALREADY_HELD:
@@ -278,7 +278,7 @@ def take_the_job(
     if not acceptance.start(job):
         # Should not happen -- the slot was IDLE -- but a reservation with
         # nobody deciding on it would sit for ever. Given back rather than held.
-        _debug.info("job: %s could not be started, releasing", job.job_id)
+        _debug.warning("job: %s could not be started, releasing", job.job_id)
         slot.release()
 
 
@@ -306,7 +306,7 @@ def cancel_the_job(
     try:
         request = read_cancellation(message)
     except JobAssignmentError as refused:
-        _debug.info("job: refused a cancellation -- %s", refused)
+        _debug.warning("job: refused a cancellation -- %s", refused)
         say(f"  취소 요청이 왔지만 내용을 읽을 수 없습니다: {refused}")
         return
 
@@ -319,7 +319,7 @@ def cancel_the_job(
         # cancellation**: the path below ends in a transaction that refunds a
         # client, and acting on a word we do not recognise would be giving
         # work away on a guess.
-        _debug.info("job: cancellation for %s with reason %s is not handled "
+        _debug.warning("job: cancellation for %s with reason %s is not handled "
                     "by this build", request.job_id, request.reason)
         say(f"  작업 {request.job_id}: 취소되었습니다 ({request.reason}). 이 버전은 해당 사유를 처리하지 않습니다.")
         return
@@ -328,12 +328,12 @@ def cancel_the_job(
     if held is None:
         # Nothing to give back. Reaching for the chain here would mean acting
         # on a job this machine has no record of ever holding.
-        _debug.info("job: cancellation for %s but no job is held", request.job_id)
+        _debug.debug("job: cancellation for %s but no job is held", request.job_id)
         say(f"  작업 {request.job_id}: 취소되었지만 이 PC가 맡은 작업이 아닙니다.")
         return
 
     if held.job_id != request.job_id:
-        _debug.info("job: cancellation for %s while holding %s -- ignored",
+        _debug.warning("job: cancellation for %s while holding %s -- ignored",
                     request.job_id, held.job_id)
         say(f"  작업 {request.job_id}: 취소 요청이 왔지만 이 PC는 {held.job_id} 작업을 처리 중입니다. 아무것도 바뀌지 않았습니다.")
         return
@@ -343,7 +343,7 @@ def cancel_the_job(
         # Busy, or no escrow configured. Either way the slot is kept: giving it
         # up while the chain may still have this job assigned here would lose
         # track of a job this machine owes.
-        _debug.info("job: cleanup for %s could not be started", request.job_id)
+        _debug.warning("job: cleanup for %s could not be started", request.job_id)
         say("  지금은 반환하지 못했습니다. 작업을 잃지 않도록 보관해 둡니다.")
 
 
@@ -369,12 +369,12 @@ def _cancel_for_the_customer(
         # Nothing in hand. Whatever this is about, it is not a Job this
         # machine is running, and reaching for Docker or the chain would be
         # acting on somebody else's.
-        _debug.info("cancel: %s arrived but no job is held", request.job_id)
+        _debug.debug("cancel: %s arrived but no job is held", request.job_id)
         say(f"  작업 {request.job_id}: 취소되었지만 이 PC가 맡은 작업이 아닙니다.")
         return
 
     if held.job_id != request.job_id:
-        _debug.info("cancel: %s arrived while holding %s -- ignored",
+        _debug.warning("cancel: %s arrived while holding %s -- ignored",
                     request.job_id, held.job_id)
         say(f"  작업 {request.job_id}: 취소 요청이 왔지만 이 PC는 {held.job_id} 작업을 처리 중입니다. 아무것도 바뀌지 않았습니다.")
         return
@@ -383,7 +383,7 @@ def _cancel_for_the_customer(
         # No runtime has started, or none is configured. The Job is kept:
         # giving the slot up while the chain may still have it assigned here
         # would lose track of something this machine owes.
-        _debug.info("cancel: %s could not be started", request.job_id)
+        _debug.warning("cancel: %s could not be started", request.job_id)
         say(f"  작업 {request.job_id}: 취소되었지만 아직 실행 중인 것이 없습니다. 보관해 둡니다.")
         return
 
@@ -451,13 +451,13 @@ def send_progress(
         # A container whose Job has already been given up, or -- worse -- an
         # update for one Job sent while another is held. Neither is sent: the
         # Backend would apply it to whatever row the id named.
-        _debug.info("progress: %s is not the Job in hand; dropped",
+        _debug.debug("progress: %s is not the Job in hand; dropped",
                     progress.job_id)
         return False
     if slot.state is not SlotState.ASSIGNED:
         # Still being accepted. Nothing is training yet, and the Backend has
         # not moved the Job to RUNNING, so it would drop this anyway.
-        _debug.info("progress: %s is not confirmed yet; dropped", progress.job_id)
+        _debug.debug("progress: %s is not confirmed yet; dropped", progress.job_id)
         return False
 
     try:
@@ -467,7 +467,7 @@ def send_progress(
         # of GPU time and does not end because a frame did not go out -- the
         # loop will notice the socket and reconnect, and the snapshot is put
         # back so the reconnected one says where the run actually is.
-        _debug.info("progress: %s not sent (%s)", progress.job_id, gone)
+        _debug.debug("progress: %s not sent (%s)", progress.job_id, gone)
         acceptance.progress.resend_on_next_take()
         return False
     return True
@@ -503,7 +503,7 @@ def send_terminal(
         # The Job was let go some other way. Dropping the answer here is
         # right: the slot is the Worker's claim on the Job, and without it
         # this is a message about somebody else's work.
-        _debug.info("terminal: %s is no longer held; dropped", terminal.job_id)
+        _debug.debug("terminal: %s is no longer held; dropped", terminal.job_id)
         acceptance.terminal.done(terminal)
         return False
 
@@ -519,7 +519,7 @@ def send_terminal(
     except ConnectionWentAway as gone:
         # Kept. The Backend has not been told, and the reconnect will try
         # again -- which is why this is a channel and not a fire-and-forget.
-        _debug.info("terminal: %s not sent (%s)", terminal.job_id, gone)
+        _debug.warning("terminal: %s not sent (%s)", terminal.job_id, gone)
         return False
 
     acceptance.terminal.done(terminal)
@@ -527,7 +527,7 @@ def send_terminal(
     # Only now. The GPU has been free since the container stopped, but the
     # Job was not finished until the service had been told.
     slot.release()
-    _debug.info("terminal: %s reported as %s",
+    _debug.debug("terminal: %s reported as %s",
                 terminal.job_id, message["type"])
     return True
 
@@ -554,7 +554,7 @@ def _settle(
     acceptance: Any = None,
 ) -> None:
     job, result = decision.job, decision.result
-    _debug.info("job: %s -- %s %s (%s)", job.job_id, decision.work.value,
+    _debug.debug("job: %s -- %s %s (%s)", job.job_id, decision.work.value,
                 result.outcome.name, result.detail)
 
     if decision.is_cleanup:
@@ -678,7 +678,7 @@ def _settle_cancellation(
     if getattr(cancelled, "reason", "") == ALREADY_ENDED:
         # It finished some other way first and that answer is already on its
         # way. Nothing is wrong and nothing more is sent.
-        _debug.info("cancel: %s had already ended", job.job_id)
+        _debug.debug("cancel: %s had already ended", job.job_id)
         return
 
     detail = getattr(cancelled, "detail", "") or "the cancellation did not finish"
@@ -755,7 +755,7 @@ def _settle_cleanup(
         # paid. Both cannot be true. Nothing is sent and nothing is aborted --
         # a COMPLETED job has already settled, and this machine is not the
         # place to decide which side is wrong.
-        _debug.info("job: %s is COMPLETED on chain but the service cancelled it",
+        _debug.warning("job: %s is COMPLETED on chain but the service cancelled it",
                     job.job_id)
         say(f"  작업 {job.job_id}: 체인에서는 이미 완료되었는데 서비스가 취소를 요청했습니다. 양쪽 모두 아무것도 바꾸지 않았습니다.")
         say("  담당자 확인이 필요합니다.")
@@ -788,7 +788,7 @@ def _say_cancelled(
             reason=ACCEPT_VALIDATION_FAILED,
             abort_tx_hash=result.transaction_hash))
     except ConnectionWentAway:
-        _debug.info("job: %s released but the reply did not get out", job.job_id)
+        _debug.warning("job: %s released but the reply did not get out", job.job_id)
 
 
 def _say_yes(
@@ -815,7 +815,7 @@ def _say_yes(
         # The read loop is about to find the same thing and say so. The Job
         # stays held: the Backend still has it assigned to this machine, and
         # the reply goes again if it offers it after the reconnect.
-        _debug.info("job: %s accepted but the reply did not get out", job.job_id)
+        _debug.warning("job: %s accepted but the reply did not get out", job.job_id)
 
 
 def _say_no(
@@ -835,7 +835,7 @@ def _say_no(
         socket.send(job_rejected_message(
             job_id, (clock or now_in_iso8601)(), code=code, message=detail))
     except ConnectionWentAway:
-        _debug.info("job: %s refused but the reply did not get out", job_id)
+        _debug.warning("job: %s refused but the reply did not get out", job_id)
 
 
 def keep_alive(
@@ -1077,7 +1077,7 @@ def _connect_until_stopped(
             if not _worth_retrying(result):
                 return _report_giving_up(say, result)
             delay = next(delays)
-            _debug.info(
+            _debug.warning(
                 "websocket: %s -- retrying in %gs", result.outcome.value, delay)
             say(f"  연결되지 않았습니다 ({result.detail}). {delay:g}초 후 다시 시도합니다...")
             if stop.wait(delay):
@@ -1088,7 +1088,7 @@ def _connect_until_stopped(
         # next failure, so the next one starts from one second again.
         delays = backoff_delays()
         say("  연결되었습니다. 이 PC가 서비스에 등록되어 있습니다.")
-        _debug.info("websocket: registered as %s", socket.worker_id)
+        _debug.debug("websocket: registered as %s", socket.worker_id)
         # A training run carried on while the line was down. The Backend's
         # view of it stopped at whatever last got through, so the newest
         # snapshot is offered once on the new connection. Only the newest:
@@ -1107,9 +1107,9 @@ def _connect_until_stopped(
             socket.close()
 
         if outcome is ConnectionOutcome.STOPPED:
-            _debug.info("websocket: closed on request")
+            _debug.debug("websocket: closed on request")
             break
-        _debug.info("websocket: connection lost -- %s", detail)
+        _debug.warning("websocket: connection lost -- %s", detail)
         say(f"  연결이 끊겼습니다 ({detail}). 다시 연결하는 중...")
 
     say("")
@@ -1166,7 +1166,7 @@ def _dispatch_to(
 
 def _report_giving_up(say: Callable[..., None], result: SocketResult) -> int:
     """Say why no further attempt will be made, and with what code."""
-    _debug.info(
+    _debug.warning(
         "websocket: giving up -- %s%s",
         result.outcome.value, f" (HTTP {result.status})" if result.status else "",
     )
@@ -1212,7 +1212,7 @@ def connect_to_backend(
             # Should not happen: the stage before this one only returns OK once
             # a machine has an accepted identity. Said rather than assumed,
             # because the alternative is an AttributeError three lines down.
-            _debug.info("websocket: no credentials after a successful auth stage")
+            _debug.warning("websocket: no credentials after a successful auth stage")
             say("")
             say("G-shared에 연결할 수 없습니다: 이 PC의 인증 정보를 더 이상 읽을 수 없습니다.")
             return int(WorkerExitCode.CREDENTIAL_MISMATCH)

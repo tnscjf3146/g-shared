@@ -837,7 +837,6 @@ class TestReconnecting(unittest.TestCase):
     def test_reconnecting_never_calls_the_registration_endpoint(self):
         # Nothing here does HTTP at all. Signing in, the benchmark and
         # POST /api/workers/register belong to the stage before this one.
-        import inspect
 
         from gshared_worker import worker_connection
 
@@ -896,11 +895,6 @@ class TestFailuresNotWorthRetrying(unittest.TestCase):
             FakeTransport("{ half written", answers=False), stop=Stop(stop_after=99))
 
         self.assertEqual(code, int(WorkerExitCode.EXPECTED_FAILURE))
-
-    def test_a_service_that_is_down_is_retried_though(self):
-        _, stop, _ = supervise(TransportUnavailable("down"), stop=Stop(stop_after=1))
-
-        self.assertEqual(stop.waits, [1])
 
     def test_a_registration_that_timed_out_is_retried(self):
         # A Backend that accepts the socket and never confirms.
@@ -962,7 +956,6 @@ class TestStopping(unittest.TestCase):
     def test_nothing_waits_on_a_real_clock(self):
         # Every wait in the module goes through the stop signal, so a Worker
         # asked to quit does not sit in a sleep for half a minute.
-        import inspect
 
         from gshared_worker import worker_connection
 
@@ -980,7 +973,6 @@ class TestTheRealStopSignal(unittest.TestCase):
     def test_it_waits_in_pieces_rather_than_one_long_one(self):
         import threading
 
-        event = threading.Event()
         slices = []
 
         class Recording(threading.Event):

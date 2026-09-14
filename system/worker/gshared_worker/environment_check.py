@@ -74,10 +74,10 @@ def _log(found: Diagnosis) -> None:
     is exactly what rules out the driver when the next report arrives.
     """
     for check in found.checks:
-        _debug.info(
+        _debug.log(logging.DEBUG if found.is_ready else logging.WARNING, 
             "%s [%s]: %s",
             check.prerequisite.value, check.finding.value, check.detail,
         )
         if check.remedy:
-            _debug.info("  remedy: %s", check.remedy)
-    _debug.info("environment ready: %s", found.is_ready)
+            _debug.log(logging.DEBUG if found.is_ready else logging.WARNING, "  remedy: %s", check.remedy)
+    _debug.log(logging.DEBUG if found.is_ready else logging.WARNING, "environment ready: %s", found.is_ready)

@@ -13,7 +13,6 @@ from gshared_worker.logging_setup import (
     DEBUG_LOG_NAME,
     LOGGER_NAME,
     build_stamp,
-    stamp_the_build,
     start_debug_log,
     stop_debug_log,
 )
@@ -41,20 +40,35 @@ class TheLogSitsBesideTheWorkerTest(DebugLogTestCase):
         self.assertEqual(path, self.directory / DEBUG_LOG_NAME)
         self.assertTrue(path.is_file())
 
-    def test_what_a_component_logs_reaches_it(self):
+    def test_what_a_component_warns_about_reaches_it(self):
         start_debug_log(self.directory)
 
-        logging.getLogger(LOGGER_NAME).info("the first step began")
+        logging.getLogger(LOGGER_NAME).warning("the backend could not be reached")
 
-        self.assertIn("the first step began", self.written())
+        self.assertIn("the backend could not be reached", self.written())
 
     def test_every_line_says_when_and_how_serious(self):
         start_debug_log(self.directory)
 
-        logging.getLogger(LOGGER_NAME).info("something happened")
+        logging.getLogger(LOGGER_NAME).warning("something went wrong")
 
-        self.assertIn("INFO", self.written())
+        self.assertIn("WARNING", self.written())
         self.assertIn(LOGGER_NAME, self.written())
+
+
+class TheProductionLevelIsWarningTest(DebugLogTestCase):
+    def test_progress_is_not_written_by_default(self):
+        start_debug_log(self.directory)
+
+        logging.getLogger(LOGGER_NAME).info("a step began")
+        logging.getLogger(LOGGER_NAME).debug("a detail")
+
+        self.assertEqual(self.written(), "")
+
+    def test_the_level_is_warning(self):
+        start_debug_log(self.directory)
+
+        self.assertEqual(logging.getLogger(LOGGER_NAME).level, logging.WARNING)
 
 
 class TheTwoStreamsStaySeparateTest(DebugLogTestCase):
@@ -68,14 +82,10 @@ class TheTwoStreamsStaySeparateTest(DebugLogTestCase):
 
 
 class TheLogSaysWhichBuildWroteItTest(DebugLogTestCase):
-    def test_the_build_is_stamped_at_the_top(self):
-        # Without it a report cannot be told from an older copy of the
-        # executable that was never replaced.
-        start_debug_log(self.directory)
+    # That a failed run writes BUILD is checked in test_worker_startup.
 
-        stamp_the_build()
-
-        self.assertIn(BUILD, self.written())
+    def test_the_build_is_known_before_anything_runs(self):
+        self.assertTrue(BUILD.strip())
 
     def test_the_stamp_is_a_real_time_not_a_placeholder(self):
         self.assertTrue(build_stamp().strip())
@@ -90,7 +100,7 @@ class StartingTheLogTwiceTest(DebugLogTestCase):
         start_debug_log(self.directory)
         start_debug_log(self.directory)
 
-        logging.getLogger(LOGGER_NAME).info("only once please")
+        logging.getLogger(LOGGER_NAME).warning("only once please")
 
         self.assertEqual(self.written().count("only once please"), 1)
 

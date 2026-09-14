@@ -214,7 +214,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
         if _stop_now(terminal):
             return _cancelled_before_starting("before starting the container")
 
-        _debug.info("runtime: %s ready, starting training", job.job_id)
+        _debug.debug("runtime: %s ready, starting training", job.job_id)
         generation = getattr(terminal, "generation", 0)
         return await run_training(
             self._runner, image.reference, workspace, model.path,
@@ -265,7 +265,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
 
 
 def _failed(failure: RuntimeFailure, detail: str) -> RuntimeOutcome:
-    _debug.info("runtime: %s -- %s", failure.value, detail)
+    _debug.warning("runtime: %s -- %s", failure.value, detail)
     return RuntimeOutcome(RuntimeState.FAILED, failure, detail)
 
 
@@ -280,7 +280,7 @@ def _cancelled_before_starting(where: str) -> RuntimeOutcome:
     ``actual_runtime_sec`` stays None: no container ran, so there is no
     duration, and a zero would be a measurement nobody made.
     """
-    _debug.info("runtime: stopped %s", where)
+    _debug.debug("runtime: stopped %s", where)
     return RuntimeOutcome(
         RuntimeState.CANCELLED, None,
         f"the job was stopped at the customer's request {where}")

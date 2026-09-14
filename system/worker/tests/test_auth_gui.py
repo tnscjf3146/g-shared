@@ -7,20 +7,10 @@ bottom -- which is skipped where there is no display to open one on.
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
-from pathlib import Path
 
 from gshared_worker.backend_client import BackendAnswer, Outcome
-from gshared_worker.config import (
-    CONFIG_FILE_NAME,
-    DEFAULT_BACKEND_URL,
-    ENV_BACKEND_URL,
-    resolve_backend_url,
-    resolve_settings,
-)
-from gshared_worker.errors import WorkerConfigurationError
 from gshared_worker.gui.presenter import AuthPresenter, Screen
 
 
@@ -202,59 +192,6 @@ class NothingIsKeptTest(unittest.TestCase):
         presenter.log_in("a@b.com", "abcd1234")
 
         self.assertNotIn("jwt", repr(vars(presenter)))
-
-
-class WhatTheWindowNeedsToOpenTest(unittest.TestCase):
-    """An address, and nothing else.
-
-    The window exists to obtain a workerId, so requiring one to open it would
-    make it unreachable on exactly the machines it is for.
-    """
-
-    def setUp(self):
-        from tempfile import TemporaryDirectory
-
-        self._temporary = TemporaryDirectory()
-        self.directory = Path(self._temporary.name)
-        self.addCleanup(self._temporary.cleanup)
-
-    def test_an_unenrolled_machine_still_gets_an_address(self):
-        # No worker-config.json at all: the ordinary case before enrolment.
-        self.assertEqual(
-            resolve_backend_url(env={}, directory=self.directory),
-            DEFAULT_BACKEND_URL)
-
-    def test_resolving_settings_no_longer_refuses_the_same_machine(self):
-        # A first run reaches this window; it is not stopped for lacking the
-        # workerId the window exists to obtain.
-        self.assertIsNone(resolve_settings(env={}, directory=self.directory).worker_id)
-
-    def test_the_configured_address_is_used_when_there_is_one(self):
-        (self.directory / CONFIG_FILE_NAME).write_text(
-            json.dumps({"backendUrl": "wss://gshared.example/ws/workers"}),
-            encoding="utf-8")
-
-        self.assertEqual(
-            resolve_backend_url(env={}, directory=self.directory),
-            "wss://gshared.example/ws/workers")
-
-    def test_the_environment_still_wins(self):
-        (self.directory / CONFIG_FILE_NAME).write_text(
-            json.dumps({"backendUrl": "ws://from-the-file:8080/ws/workers"}),
-            encoding="utf-8")
-
-        self.assertEqual(
-            resolve_backend_url(
-                env={ENV_BACKEND_URL: "ws://from-the-env:9090/ws/workers"},
-                directory=self.directory),
-            "ws://from-the-env:9090/ws/workers")
-
-    def test_a_malformed_file_is_still_refused(self):
-        # A typo is a typo whoever is asking.
-        (self.directory / CONFIG_FILE_NAME).write_text("{ not json", encoding="utf-8")
-
-        with self.assertRaises(WorkerConfigurationError):
-            resolve_backend_url(env={}, directory=self.directory)
 
 
 @unittest.skipUnless(os.name == "nt", "the sign-in window is drawn on Windows")

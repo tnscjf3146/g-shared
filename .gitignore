@@ -11,3 +11,8 @@
 # Spec Kit 도구 (산출물인 blockchain/specs 는 커밋한다)
 blockchain/.specify/
 blockchain/.claude/
+
+# G-shared Worker: files the program writes where it runs. Never committed.
+system/**/gshared-debug.log
+system/**/worker-config.json
+system/**/worker-wallet.json
