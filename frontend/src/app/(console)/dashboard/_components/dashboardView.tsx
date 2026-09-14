@@ -126,7 +126,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
       {/* 작업 탭: 히어로·도넛·최근 활동·노드 지도·KPI 카드(대시보드.png 구조) → 목록. CTA 는 히어로 배너에, 지표는 JobsOverview 의 KPI 카드가 담당 */}
       {tab === 'jobs' ? (
-        <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} />
+        <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
       ) : (
         <StatTiles items={stats} loading={workers.status === 'loading'} />
       )}

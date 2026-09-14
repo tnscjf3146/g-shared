@@ -17,7 +17,7 @@ const SEGMENTS = [
   { key: '종료', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-hairline-strong', dot: 'bg-hairline-strong' },
 ]
 
-export function JobsOverview({ jobList, loading, nameOf, network }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null }) {
+export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {
   // 끝나지 않은 작업(대기 포함) 전체의 예상 비용 합 — 라벨에 "대기 포함"을 명시해 목록의 개별 비용과 헷갈리지 않게
   const activeCost = jobList.filter((j) => ACTIVE_STATUSES.has(j.status)).reduce((a, j) => a + j.estimatedCost, 0)
   const counts = SEGMENTS.map((s) => jobList.filter(s.match).length)
@@ -30,22 +30,35 @@ export function JobsOverview({ jobList, loading, nameOf, network }: { jobList: J
   const runningPages = Math.ceil(allRunning.length / RUNNING_PER_PAGE)
   const runningJobs = allRunning.slice(runningPage * RUNNING_PER_PAGE, (runningPage + 1) * RUNNING_PER_PAGE)
 
+  // 최근 7일 새 작업 — createdAt(LocalDateTime, 로컬 시간) 기준. now 는 DashboardView 의 시계 상태(렌더 순수성)
+  const weekAgo = now - 7 * 24 * 3600_000
+  const recent7 = jobList.filter((j) => new Date(j.createdAt).getTime() >= weekAgo).length
+
   return (
     <>
-      {/* 1행: 히어로 배너(밝은 카드 — 페이지 톤과 같은 결, 그린은 포인트로만) + 상태 분포·워크로드별 */}
+      {/* 1행: 히어로 + 상태 분포. 히어로는 "처음 온 사람에겐 안내, 쓰는 사람에겐 데이터" — 작업이 생기면 한 줄로 얇아진다 */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        {/* 히어로 — 연한 그린 틴트 단색(그라데이션·번짐 없음). 브랜드 색은 배경 틴트와 "수익" 강조, CTA 에만 */}
-        <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-2xl border border-hairline bg-primary/10 p-8 shadow-2">
-          <div className="relative flex flex-col gap-3">
-            <h2 className="max-w-[420px] text-[32px] leading-[1.2] font-extrabold tracking-display text-dark">
+        {/* 히어로 — 연한 그린 틴트 단색. 브랜드 색은 배경 틴트와 "수익" 강조, CTA 에만 */}
+        {jobList.length > 0 ? (
+          <section className="animate-enter relative flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-hairline bg-primary/10 p-6 shadow-2">
+            <h2 className="text-[20px] font-extrabold tracking-heading text-dark">
               유휴 GPU가 <span className="text-primary">수익</span>이 되는 곳
             </h2>
-            <p className="max-w-[400px] text-[15px] leading-relaxed text-text-muted">워크로드를 등록하면 네트워크의 유휴 GPU에 배정되고, 진행 상황과 비용을 여기서 지켜볼 수 있습니다.</p>
-          </div>
-          <div className="relative">
             <Button href="/jobs/new">작업 만들기 +</Button>
-          </div>
-        </section>
+          </section>
+        ) : (
+          <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-2xl border border-hairline bg-primary/10 p-8 shadow-2">
+            <div className="relative flex flex-col gap-3">
+              <h2 className="max-w-[420px] text-[32px] leading-[1.2] font-extrabold tracking-display text-dark">
+                유휴 GPU가 <span className="text-primary">수익</span>이 되는 곳
+              </h2>
+              <p className="max-w-[400px] text-[15px] leading-relaxed text-text-muted">워크로드를 등록하면 네트워크의 유휴 GPU에 배정되고, 진행 상황과 비용을 여기서 지켜볼 수 있습니다.</p>
+            </div>
+            <div className="relative">
+              <Button href="/jobs/new">작업 만들기 +</Button>
+            </div>
+          </section>
+        )}
 
         <section className="card animate-enter flex flex-col gap-5" style={{ animationDelay: '40ms' }}>
           <span className="text-[13px] font-semibold tracking-eyebrow text-text-muted">작업 상태 분포</span>
@@ -64,12 +77,11 @@ export function JobsOverview({ jobList, loading, nameOf, network }: { jobList: J
         </section>
       </div>
 
-      {/* 2행: 지표 — 참고 디자인 KPI 처럼 아이콘 달린 독립 카드 4개 */}
-      <div className="grid grid-cols-2 gap-6 lg:grid-cols-4">
+      {/* 2행: 지표 — 도넛(개수·구성비)과 겹치지 않는 것만. 개수 중복 대신 비용·추세·네트워크 */}
+      <div className="grid grid-cols-2 gap-6 lg:grid-cols-3">
         {[
-          { label: '전체 작업', value: String(jobList.length), sub: `대기 ${counts[1]}개 포함`, d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
-          { label: '진행 중', value: String(counts[0]), sub: `예상 비용(대기 포함) ${formatCost(activeCost)}`, d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
-          { label: '완료', value: String(counts[2]), sub: `실패·취소 ${counts[3]}개`, d: 'M20 6 9 17l-5-5' },
+          { label: '진행 중 예상 비용', value: formatCost(activeCost), sub: `진행·대기 ${counts[0] + counts[1]}건 견적 합`, d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
+          { label: '최근 7일 새 작업', value: String(recent7), sub: '이번 주에 만든 작업', d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
           // 네트워크 전체(GET /network/stats) — 내 워커가 아니라 "지금 일 받을 수 있는 GPU가 몇 대냐"
           { label: '네트워크 온라인 워커', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', sub: '지금 작업을 받을 수 있는 GPU', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
         ].map((k, i) => (
@@ -90,8 +102,8 @@ export function JobsOverview({ jobList, loading, nameOf, network }: { jobList: J
         ))}
       </div>
 
-      {/* 3행: 진행 중 작업 — 전체 폭 */}
-      <section className="card animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
+      {/* 3행: 진행 중 작업 — 이 화면의 주인공. card-featured(그린 테두리 + 글로우, 화면당 하나)로 위계를 준다 */}
+      <section className="card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
           <header className="flex items-center justify-between gap-3">
             <h2 className="text-[17px] font-bold tracking-heading text-dark">진행 중 작업</h2>
             <div className="flex items-center gap-3">
