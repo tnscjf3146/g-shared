@@ -1,6 +1,6 @@
 import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
-import { WORKERS_PATH } from '../schema'
+import { NETWORK_STATS_PATH, WORKERS_PATH } from '../schema'
 import type { Worker } from '../types'
 import { MOCK_WORKERS_INITIAL } from './data'
 
@@ -17,6 +17,13 @@ const withFreshHeartbeat = (w: Worker): Worker => ({
 })
 
 export const workerHandlers = [
+  // 네트워크 전체 워커 현황 — 백엔드 미구현 stub(계약: schema.ts networkStatsSchema). 구현되면 이 핸들러만 삭제
+  http.get(`${API_BASE_URL}${NETWORK_STATS_PATH}`, async ({ request }) => {
+    await delay()
+    if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    return HttpResponse.json({ onlineWorkers: 128, totalWorkers: 162 })
+  }),
+
   http.get(`${URL}/me`, async ({ request }) => {
     await delay()
     if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')

@@ -2,6 +2,8 @@ import * as z from 'zod/mini'
 
 // 경로 상수는 여기(React 의존 없음) — mocks/handlers 가 api.ts 를 import 하면 auth store 가 서버(instrumentation MSW) 번들로 끌려감(wallet.md §3)
 export const WORKERS_PATH = '/workers'
+// 네트워크 전체 워커 현황(대시보드 지표) — 백엔드 미구현, 계약 먼저 고정(MSW 목업이 응답). 구현되면 목업 핸들러만 지우면 된다
+export const NETWORK_STATS_PATH = '/network/stats'
 
 // 다운로드는 시스템 담당이 exe 를 올리는 곳에 따라 바뀐다(worker.md §8). 서버 컴포넌트(안내 카드)도 쓰므로 인증 스토어를 끌고 오는 api.ts 가 아니라 여기 → env 하나, 없으면 저장소 raw 파일
 export const WORKER_DOWNLOAD_URL =
@@ -28,3 +30,9 @@ export const workerSchema = z.object({
 })
 
 export const workerListSchema = z.array(workerSchema)
+
+/** GET /network/stats — 네트워크 전체 워커 현황(소비자 대시보드용). 계약 확정 2026-09-11, 백엔드 구현 전까지 MSW 목업 응답 */
+export const networkStatsSchema = z.object({
+  onlineWorkers: z.number(), // 지금 작업을 받을 수 있는(ONLINE·RUNNING) 워커 수
+  totalWorkers: z.number(), // 등록된 전체 워커 수
+})

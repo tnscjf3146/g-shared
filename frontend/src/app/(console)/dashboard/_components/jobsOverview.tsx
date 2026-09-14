@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ACTIVE_STATUSES, formatCost } from '@/features/jobs/format'
 import type { JobSummary } from '@/features/jobs/types'
+import type { NetworkStats } from '@/features/workers/types'
 import { Pager } from './pager'
 
 // 작업 탭 상단(대시보드.png 참고 구조, 프로필 사진 없음): 히어로 배너 + 상태 도넛 → KPI 카드 4개 → 워크로드별 작업 · 진행 중 작업(진행률)
@@ -16,7 +17,7 @@ const SEGMENTS = [
   { key: '종료', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-hairline-strong', dot: 'bg-hairline-strong' },
 ]
 
-export function JobsOverview({ jobList, loading, nameOf, onlineWorkers, totalWorkers }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; onlineWorkers: number; totalWorkers: number }) {
+export function JobsOverview({ jobList, loading, nameOf, network }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null }) {
   // 끝나지 않은 작업(대기 포함) 전체의 예상 비용 합 — 라벨에 "대기 포함"을 명시해 목록의 개별 비용과 헷갈리지 않게
   const activeCost = jobList.filter((j) => ACTIVE_STATUSES.has(j.status)).reduce((a, j) => a + j.estimatedCost, 0)
   const counts = SEGMENTS.map((s) => jobList.filter(s.match).length)
@@ -69,7 +70,8 @@ export function JobsOverview({ jobList, loading, nameOf, onlineWorkers, totalWor
           { label: '전체 작업', value: String(jobList.length), sub: `대기 ${counts[1]}개 포함`, d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
           { label: '진행 중', value: String(counts[0]), sub: `예상 비용(대기 포함) ${formatCost(activeCost)}`, d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
           { label: '완료', value: String(counts[2]), sub: `실패·취소 ${counts[3]}개`, d: 'M20 6 9 17l-5-5' },
-          { label: '온라인 워커', value: `${onlineWorkers} / ${totalWorkers}`, sub: `${totalWorkers - onlineWorkers}대 오프라인`, d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
+          // 네트워크 전체(GET /network/stats) — 내 워커가 아니라 "지금 일 받을 수 있는 GPU가 몇 대냐"
+          { label: '네트워크 온라인 워커', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', sub: '지금 작업을 받을 수 있는 GPU', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
         ].map((k, i) => (
           <section key={k.label} className="card animate-enter flex flex-col gap-4" style={{ animationDelay: `${80 + i * 40}ms` }}>
             <div className="flex items-center gap-2.5">
