@@ -1,7 +1,7 @@
 'use client'
 
 import { useFrame } from '@react-three/fiber'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { BufferAttribute, BufferGeometry, NormalBlending, Points, ShaderMaterial } from 'three'
 import { P } from '../progress'
 
@@ -101,6 +101,13 @@ export function Smoke() {
     })
     return { puffs, geo, mat }
   }, [])
+  useEffect(
+    () => () => {
+      geo.dispose()
+      mat.dispose()
+    },
+    [geo, mat],
+  )
 
   const lastRef = useRef(-1) // 마지막으로 계산한 P.smoke — 안 바뀌면 640개 재계산·업로드를 건너뛴다(2026-09-11, 조립 컷 프레임 확보)
   useFrame(({ size, viewport, camera }) => {

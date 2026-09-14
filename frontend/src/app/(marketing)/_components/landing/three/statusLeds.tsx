@@ -49,6 +49,14 @@ export function StatusLeds() {
     [],
   )
   const col = useMemo(() => new Color(), [])
+  useEffect(
+    () => () => {
+      geo.dispose()
+      vgeo.dispose()
+      mat.dispose()
+    },
+    [geo, vgeo, mat],
+  )
 
   // 위치는 고정 → 인스턴스 행렬은 마운트 때 한 번만 쓴다(이전엔 매 프레임 70개를 다시 써서 업로드했다, 2026-09-11)
   useEffect(() => {

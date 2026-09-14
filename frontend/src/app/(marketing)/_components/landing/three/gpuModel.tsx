@@ -7,7 +7,8 @@ import { Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { GPU_READY_EVENT, P } from '../progress'
 
-const MODEL = '/models/gpu.glb'
+export const MODEL = '/models/gpu.glb' // backdrop.tsx 도 같은 URL 로 useGLTF(캐시 공유)
+export const DRACO = '/draco/' // Draco 디코더 자가 호스팅(public/draco, three/examples/jsm/libs/draco/gltf 복사). drei 기본값은 gstatic CDN 이라 막힌 망(PC방·사내망)에선 GLB 가 영영 안 풀린다(2026-09-14)
 
 type Part = {
   obj: Object3D
@@ -71,7 +72,7 @@ function mergeGroup(scene: Object3D, prefix: string) {
 }
 
 export function GpuModel() {
-  const { scene } = useGLTF(MODEL, true) // Draco 디코더는 drei 기본(구글 CDN) 사용
+  const { scene } = useGLTF(MODEL, DRACO)
   // 이 컴포넌트가 마운트됐다 = Suspense 를 통과했다 = 모델이 있다 → 인트로를 시작해도 빈 화면이 아니다
   useEffect(() => {
     window.dispatchEvent(new Event(GPU_READY_EVENT))
@@ -132,4 +133,4 @@ export function GpuModel() {
   return <primitive object={scene} />
 }
 
-useGLTF.preload(MODEL, true)
+useGLTF.preload(MODEL, DRACO)

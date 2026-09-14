@@ -4,11 +4,11 @@ import { PerformanceMonitor } from '@react-three/drei'
 import { Canvas } from '@react-three/fiber'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { ACESFilmicToneMapping } from 'three'
+import { Backdrop } from './backdrop'
 import { CameraRig } from './cameraRig'
 import { GpuModel } from './gpuModel'
 import { Lights, Studio } from './lights'
 import { Smoke } from './smoke'
-import { Starfield } from './starfield'
 import { StatusLeds } from './statusLeds'
 
 // r3f 캔버스 조립. 카메라는 cameraRig, 조명은 lights, 부품은 gpuModel — 모두 매 프레임 P 를 읽는다.
@@ -35,20 +35,20 @@ export function GpuCanvas() {
       <Canvas
         frameloop={visible ? 'always' : 'never'}
         dpr={dpr}
-        camera={{ fov: 32, near: 0.1, far: 200, position: [3, 2.5, 4] }} // far 200: 별 구름(반경 30~70)이 잘리지 않게
+        camera={{ fov: 32, near: 0.1, far: 200, position: [3, 2.5, 4] }}
         gl={{
           antialias: true,
           toneMapping: ACESFilmicToneMapping,
           toneMappingExposure: 1.1,
         }}
-        style={{ background: 'transparent' }} // 배경색은 뒤의 sticky 컨테이너(bg-black, 우주 배경)가 담당
+        style={{ background: 'transparent' }} // 배경(backdrop.tsx, 전부 스크롤 스크럽): 01 구간에 밝아지는 차콜 금속판 → 03 검정이 아래서 위로 덮음 → 04 부터 끝까지 조명이 켜지며 맨들한 스틸판. 뒤 sticky 컨테이너는 검정
       >
         {/* fps 가 기준 아래로 떨어지면 factor 가 줄어든다 → dpr 을 1..1.5 사이로 */}
         <PerformanceMonitor onChange={({ factor }) => setDpr(Math.round((DPR_MIN + (DPR_MAX - DPR_MIN) * factor) * 4) / 4)} />
         <CameraRig />
-        {/* 우주 배경(starfield.tsx) — 인트로 동안은 꺼져 있고 REVEAL 에서 켜진다. 카메라가 돌면 시차로 별이 따라 돈다. 바닥색은 sticky 컨테이너 bg-black */}
-        <Starfield />
         <Suspense fallback={null}>
+          {/* 배경은 차콜판 한 장 고정(로고 정중앙, 스크롤 무관) — 2026-09-14 사용자 결정. 검정판 와이프·스틸판 조명은 backdrop.tsx 에 남겨둔 채 마운트만 안 한다 */}
+          <Backdrop kind="shroud" />
           <GpuModel />
           <StatusLeds />
           <Smoke />

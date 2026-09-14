@@ -12,7 +12,7 @@ export const CHAPTERS: { label: string; at: number; to: number; duration?: numbe
 /** 사이드바 항목 7개 = 카드(index 0, 인트로 직후 조립 상태) + CHAPTERS 6개 */
 export const CHAPTER_LABELS: string[] = []
 /** 스크롤 챕터 시작 시각(ms) */
-export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 5500, hsOffEnd: 6100, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
+export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 5500, hsOffEnd: 6100, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게 — 이 구간 스크롤은 배경 판 1 의 밝기만 올린다). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
 CHAPTERS.push(
   { label: '팬 분리', at: T.fans, to: T.fansEnd }, // 3 팬·연기·쉬라우드
   { label: '오빗', at: T.orbit, to: T.orbitEnd }, // 4 카메라
@@ -26,14 +26,13 @@ CHAPTER_LABELS.push('카드', ...CHAPTERS.map((c) => c.label))
 const CAM_INTRO_TOP = { yaw: Math.PI / 2, tilt: 0.315, dist: 3.3, lookY: -0.12 } // lookY 를 낮춰(타깃을 카드 아래로) 카드가 화면 위쪽에 오게 // 인트로 첫 컷: +X 끝 위 낮은 각(18°)에서 카드 길이 방향으로 내려다봄 — 가까운 팬이 크게, 나머지가 멀어지는 구도(Blender 레퍼런스)
 const CAM_HERO = { yaw: Math.PI / 2, tilt: 0, dist: 2.35, lookY: 0.0225, shift: -0.05 } // 끝 캡 정면, G 원이 화면 정중앙
 
-/** 0 INTRO TOP — +X 끝 위 낮은 각에서 카드 길이 방향을 보는 컷. 배경은 이 챕터만 딥 블랙(#deep), 이후는 dark(#333). 로고와 같은 스윕 빔이 카드 위를 −X→+X 로 지나가며 팬 3개를 차례로 비춘다(sweep 0→1).
+/** 0 INTRO TOP — +X 끝 위 낮은 각에서 카드 길이 방향을 보는 컷. 배경은 검정(sticky 바닥). 로고와 같은 스윕 빔이 카드 위를 −X→+X 로 지나가며 팬 3개를 차례로 비춘다(sweep 0→1).
  *  스윕이 끝나면 완전 암전(#blackout 검은 오버레이 — LED 점까지 안 보임), 그 사이 카메라가 끝 캡 정면으로 틸트다운한다(HERO 시작에 오버레이가 걷히고 빔이 켜짐). */
 export function introTop(intro: Timeline) {
   intro.add(P, { yaw: [CAM_INTRO_TOP.yaw, CAM_INTRO_TOP.yaw], tilt: [CAM_INTRO_TOP.tilt, CAM_INTRO_TOP.tilt], dist: [CAM_INTRO_TOP.dist, CAM_INTRO_TOP.dist], lookY: [CAM_INTRO_TOP.lookY, CAM_INTRO_TOP.lookY], shift: [0, 0], env: [0, 0], duration: I.toFront - I.top, ease: 'linear' }, I.top)
   intro.add(P, { beam: [0, 1], duration: 250, ease: 'out(2)' }, I.top)
   intro.add(P, { sweep: [0, 1], duration: I.toFront - I.top, ease: 'inOut(2)' }, I.top)
   intro.add('#blackout', { opacity: [0, 1], duration: I.dark - I.toFront, ease: 'out(2)' }, I.toFront) // 먼저 완전 암전(카메라는 아직 그대로)
-  intro.add('#deep', { opacity: [1, 0], duration: I.dark - I.toFront, ease: 'linear' }, I.toFront) // INTRO TOP 전용 딥 블랙 바닥을 암전 뒤에서 걷어냄 → 이후 배경은 bg-dark
   intro.add(P, { beam: [1, 0], duration: I.dark - I.toFront, ease: 'out(2)' }, I.toFront)
   // 오버레이가 다 덮인 뒤에야 카메라 이동 — 암전 전에 움직임이 보이지 않게
   intro.add(P, { yaw: [CAM_INTRO_TOP.yaw, CAM_HERO.yaw], tilt: [CAM_INTRO_TOP.tilt, CAM_HERO.tilt], dist: [CAM_INTRO_TOP.dist, CAM_HERO.dist], lookY: [CAM_INTRO_TOP.lookY, CAM_HERO.lookY], shift: [0, CAM_HERO.shift], env: [0, 0], sweep: [1, 2], duration: I.hero - I.dark, ease: 'linear' }, I.dark)
@@ -49,11 +48,16 @@ export function hero(intro: Timeline) {
 
 /** 2 REVEAL — 빔 아웃, 위 조명 인, 줌 아웃하며 캡이 우측 하단을 향하는 입체 뷰로. */
 export function reveal(intro: Timeline) {
-  intro.add(P, { stars: [0, 1], duration: 1, ease: 'linear' }, I.reveal) // 별은 스위치처럼 — 조명이 올라오는 순간 함께 켜져 팝인이 묻힌다
   intro.add(P, { beam: [1, 0], duration: 500, ease: 'out(2)' }, I.reveal)
   intro.add(P, { env: [0, 1], duration: 1400, ease: 'out(2)' }, I.reveal)
   intro.add(P, { yaw: [CAM_HERO.yaw, CAM0.yaw], tilt: [CAM_HERO.tilt, CAM0.tilt], dist: [CAM_HERO.dist, CAM0.dist], lookY: [CAM_HERO.lookY, 0], shift: [CAM_HERO.shift, 0], duration: I.end - I.reveal, ease: 'inOut(3)' }, I.reveal)
 }
+
+/** 배경 금속판(three/backdrop.tsx) — 타임라인에 없다. 판 3장의 등장이 전부 **스크롤 스크럽**이라 landingScene 이 구간 진행률을 P 에 직접 쓴다:
+ *  판 1(차콜, 쉬라우드 재질)은 01 카드 구간을 내려가는 정도에 비례해 밝아지고(P.plate, 2026-09-12 사용자 요청 — 02 도착 시 600ms 페이드인이었다),
+ *  판 2(검정 단색)는 03 구간 진행률로 아래에서 위로 덮으며(P.plate2W), 판 3(맨들한 스틸)은 04 부터 끝까지 조명이 켜지듯 드러난다(P.light).
+ *  검정에 다 덮인 뒤 판 1 을 숨기는 것도 backdrop 이 P.plate2W(스크럽 값)로 판단한다 — 타임라인 되감기(최대 2.8초)를 기다리면
+ *  빠른 백스크롤에서 검정이 벗겨진 자리에 판 1 이 아직 없어 바닥이 보이다가 뒤늦게 튀어나왔다(2026-09-12 수정). */
 
 /** 3 FANS + SHROUD OFF — 정지 구간(0–1000) 뒤, 팬 3개와 쉬라우드가 **한 번에** 위로 가속 상승해 화면 밖으로(fansOut·smoke·shroudOff 가 같은 구간에서 함께 돈다). */
 export function fansOut(scroll: Timeline) {
