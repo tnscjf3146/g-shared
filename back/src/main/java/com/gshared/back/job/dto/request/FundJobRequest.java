@@ -4,16 +4,20 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
 /**
- * 예치 확인 요청. escrowJobId 는 의뢰자가 createAndFundJob() 을 보내고 JobFunded 이벤트에서 받은
- * 온체인 jobId(uint256)다. JS 정수 정밀도를 넘을 수 있어 문자열로 받는다.
+ * 예치 확인 요청. 의뢰자가 MetaMask 로 createAndFundJob() 을 보내고 받은 트랜잭션 해시다.
  *
- * <p>개발용 API 다. JOB_ASSIGN·execution-context 가 escrowJobId 를 필수로 싣기 때문에 여기서도 필수다 —
- * 없이 FUNDED 가 되면 매칭이 그 Job 을 배정하지 않는다.
- * TODO: 최종 구조에서는 FE 값을 정본으로 쓰지 않고 Backend 가 JobFunded 이벤트의 externalRef 를 대조해 확정한다.
+ * <p>Backend 는 이 해시의 영수증을 직접 읽어 JobFunded 이벤트를 찾고, externalRef·client·provider·price 를
+ * 자기 기록과 대조한 뒤에야 FUNDED 로 바꾼다. 온체인 jobId 는 프런트가 아니라 이벤트에서 읽는다.
+ *
+ * <p>{@code escrowJobId} 는 <b>체인이 설정되지 않은 로컬 개발</b>에서만 쓰인다 — 대조할 체인이 없으니 받은 값을
+ * 그대로 기록한다. 체인이 설정돼 있으면 무시한다.
  */
 public record FundJobRequest(
 
-        @NotBlank(message = "escrowJobId는 필수값입니다.")
+        @NotBlank(message = "txHash는 필수값입니다.")
+        @Pattern(regexp = "^0x[0-9a-fA-F]{64}$", message = "txHash는 0x로 시작하는 64자리 16진수여야 합니다.")
+        String txHash,
+
         @Pattern(regexp = "^[0-9]{1,78}$", message = "escrowJobId는 0 이상의 정수 문자열이어야 합니다.")
         String escrowJobId
 ) {

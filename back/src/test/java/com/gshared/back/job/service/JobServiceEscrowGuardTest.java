@@ -93,7 +93,7 @@ class JobServiceEscrowGuardTest {
                 dataset.getId(), "AUTO", 1, 16, 0.0002, 512, 985.882, "runtime-xgb-v1", worker.getId(), 9L));
 
         em.flush();   // 조건부 UPDATE(clearAutomatically) 전에 대기 중인 변경을 DB 로
-        jobRepository.fundIfCreated(job.getId(), client.getId(), "17");
+        jobRepository.fundIfCreated(job.getId(), 31221L, null, "17", null);
         jobRepository.assignIfFunded(job.getId(), worker.getId());
         em.clear();
         when(messageSender.send(any(), any())).thenReturn(true);
@@ -238,7 +238,7 @@ class JobServiceEscrowGuardTest {
             Job fresh = jobRepository.save(Job.create(client, job.getWorkloadId(), job.getBaseModelId(),
                     job.getDatasetId(), "AUTO", 1, 16, 0.0002, 512, 985.882, "runtime-xgb-v1", worker.getId(), 9L));
             em.flush();
-            jobRepository.fundIfCreated(fresh.getId(), client.getId(), "18");
+            jobRepository.fundIfCreated(fresh.getId(), 31221L, null, "18", null);
             jobRepository.assignIfFunded(fresh.getId(), worker.getId());
 
             assertThat(jobService.rejectJob(worker.getId(), fresh.getId(), code, "…")).as(code).isTrue();

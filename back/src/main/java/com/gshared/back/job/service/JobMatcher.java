@@ -104,12 +104,24 @@ public class JobMatcher {
         String recommended = job.getRecommendedWorkerId();
         if (recommended != null) {
             Worker w = availableById.get(recommended);
-            return (w != null && !takenThisSweep.contains(recommended)) ? w : null;
+            return (w != null && !takenThisSweep.contains(recommended) && settlesTo(job, w)) ? w : null;
         }
         return availableById.values().stream()
                 .filter(w -> !takenThisSweep.contains(w.getId()))
+                .filter(w -> settlesTo(job, w))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * 이 워커의 정산 지갑이 예치된 provider 인가. 온체인 Job 의 provider 는 예치 때 잠기고, 그 지갑이
+     * 승인한 operator 만 acceptJob 을 부를 수 있다 — 다른 지갑의 워커에게 주면 체인이 되돌린다.
+     * providerWallet 이 없는 Job(예전 데이터)은 거르지 않는다.
+     */
+    private static boolean settlesTo(Job job, Worker worker) {
+        String locked = job.getProviderWallet();
+        String wallet = worker.getOwner() == null ? null : worker.getOwner().getWalletAddress();
+        return locked == null || (wallet != null && locked.equalsIgnoreCase(wallet));
     }
 
     /**

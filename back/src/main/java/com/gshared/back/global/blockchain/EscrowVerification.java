@@ -4,18 +4,20 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.math.BigInteger;
 import java.util.Optional;
 
 /**
  * "체인은 뭐라고 하는가"에 대한 세 가지 답.
  *
- * <p>Backend 가 워커의 말을 받을 때마다 물어야 하는 질문이고, 답은 <b>둘이 아니라
+ * <p>Backend 가 워커·프런트의 말을 받을 때마다 물어야 하는 질문이고, 답은 <b>둘이 아니라
  * 셋</b>이다. 맞다 · 틀리다 · 모르겠다. 셋째를 없애고 boolean 으로 접으면 RPC 장애가
  * "검증 실패"가 되어 멀쩡한 Job 이 죽거나, 반대로 "검증 통과"가 되어 확인한 적 없는
  * 것을 확인했다고 기록하게 된다.
  *
- * <p>어느 쪽으로 접든 다음 날 체인을 보면 거짓이었음이 드러난다. 그래서 모르는
- * 것은 모른다고 돌려주고, 무엇을 할지는 호출부가 그 상태에 맞게 정한다.
+ * <p>모르는 것을 어떻게 할지는 <b>정책</b>이다({@link #blocks(Verdict)}). 운영은
+ * 체인 확인 없이 아무것도 확정하지 않고(fail closed, {@code escrow.verification-required=true}),
+ * 체인 없는 로컬은 모르는 것을 통과시킨다. 정책이 어느 쪽이든 CONTRADICTED 는 항상 막는다.
  */
 @Slf4j
 @Component
@@ -23,6 +25,7 @@ import java.util.Optional;
 public class EscrowVerification {
 
     private final EscrowChainClient chain;
+    private final EscrowProperties properties;
 
     /** 체인에 물어본 결과. */
     public enum Verdict {
@@ -37,19 +40,94 @@ public class EscrowVerification {
             return this == CONTRADICTED;
         }
 
-        /**
-         * 확인됐거나, 확인할 수 없었는가.
-         *
-         * <p>진행을 막지 <b>않는</b> 조건이다. 체인이 명시적으로 아니라고 한 것만
-         * 막는다 -- 아직 배포도 안 된 컨트랙트 때문에 모든 Job 이 멈추면 안 된다.
-         */
-        public boolean allowsProgress() {
-            return this != CONTRADICTED;
+        public boolean isConfirmed() {
+            return this == CONFIRMED;
         }
     }
 
     public boolean isConfigured() {
         return chain.isConfigured();
+    }
+
+    /** 체인 확인 없이는 확정하지 않는 운영 정책인가. */
+    public boolean isRequired() {
+        return properties.verificationRequired();
+    }
+
+    /**
+     * 이 답으로는 상태를 바꿀 수 없는가.
+     *
+     * <p>CONTRADICTED 는 언제나 막는다. UNKNOWN 은 운영({@code verification-required})에서만
+     * 막는다 -- 확인하지 못한 것을 확정하면 RPC 장애가 검증 통과처럼 처리된다. 로컬에서는
+     * 체인 없이도 흐름을 돌려 봐야 하므로 통과시킨다.
+     */
+    public boolean blocks(Verdict verdict) {
+        return verdict == Verdict.CONTRADICTED
+                || (verdict == Verdict.UNKNOWN && isRequired());
+    }
+
+    /**
+     * 예치 확인: 프런트가 준 txHash 가 <b>이 Job 의</b> 예치인가.
+     *
+     * <p>영수증이 성공이고, 목적지가 우리 에스크로이고, 그 안의 JobFunded 가
+     * externalRef·client·provider·price 를 전부 Backend 값과 맞추고, 지금 온체인 상태가
+     * FUNDED 여야 CONFIRMED 다. 하나라도 어긋나면 CONTRADICTED 이고 사유가 붙는다.
+     * 영수증이 아직 없거나(채굴 전) 노드가 답하지 않으면 UNKNOWN 이다.
+     *
+     * <p>escrowJobId 는 프런트가 아니라 <b>이벤트</b>에서 읽는다 -- 그것이 체인이 이 예치에
+     * 붙인 번호다.
+     */
+    public FundingCheck fundingOnChain(String txHash, String expectedExternalRef,
+                                       String expectedClient, String expectedProvider,
+                                       BigInteger expectedPriceWei) {
+        EscrowChainClient.ReceiptLookup lookup = chain.readReceipt(txHash);
+        switch (lookup.status()) {
+            case UNREACHABLE -> {
+                return FundingCheck.unknown("receipt lookup failed");
+            }
+            case NOT_FOUND -> {
+                return FundingCheck.unknown("transaction not yet mined");
+            }
+            default -> { }
+        }
+        EscrowChainClient.Receipt receipt = lookup.receipt();
+        if (!receipt.success()) {
+            return FundingCheck.contradicted("transaction reverted");
+        }
+        if (!receipt.sentTo(chain.contractAddress())) {
+            return FundingCheck.contradicted("transaction was not sent to the escrow contract");
+        }
+        Optional<EscrowChainClient.JobFundedEvent> found = chain.jobFundedIn(receipt);
+        if (found.isEmpty()) {
+            return FundingCheck.contradicted("no JobFunded event from the escrow in this transaction");
+        }
+        EscrowChainClient.JobFundedEvent event = found.get();
+        if (!event.externalRefIs(expectedExternalRef)) {
+            return FundingCheck.contradicted("externalRef mismatch: event=" + event.externalRef());
+        }
+        if (!event.clientIs(expectedClient)) {
+            return FundingCheck.contradicted("client mismatch: event=" + event.client());
+        }
+        if (!event.providerIs(expectedProvider)) {
+            return FundingCheck.contradicted("provider mismatch: event=" + event.provider()
+                    + " expected=" + expectedProvider);
+        }
+        if (expectedPriceWei == null || expectedPriceWei.compareTo(event.priceWei()) != 0) {
+            return FundingCheck.contradicted("price mismatch: event=" + event.priceWei()
+                    + " expected=" + expectedPriceWei);
+        }
+
+        // 이벤트는 "그때 예치됐다"이고, 지금 상태는 따로 본다 -- 그 사이 cancelJob 으로
+        // 되찾아 갔을 수 있다. 되찾아 간 예치를 근거로 매칭을 돌리면 공급자는 공짜로 일한다.
+        Optional<EscrowChainClient.OnChainJob> now = chain.readJob(event.escrowJobId());
+        if (now.isEmpty()) {
+            return FundingCheck.unknown("jobs() lookup failed after event matched");
+        }
+        if (now.get().state() != EscrowJobState.FUNDED) {
+            return FundingCheck.contradicted("escrow job " + event.escrowJobId()
+                    + " is " + now.get().state() + " (not FUNDED)");
+        }
+        return FundingCheck.confirmed(event);
     }
 
     /**
@@ -59,8 +137,8 @@ public class EscrowVerification {
      * 트랜잭션 영수증이 아니라 <b>지금 상태</b>로 확인한다 -- 영수증은 되돌려진
      * 트랜잭션에도 붙고, 우리가 알고 싶은 것은 "그래서 지금 이 Job 은 누구 것인가"다.
      */
-    public Verdict acceptedOnChain(String escrowJobId, String operatorAddress) {
-        Optional<EscrowChainClient.OnChainJob> found = chain.readJob(escrowJobId);
+    public Verdict acceptedOnChain(String contractAddress, String escrowJobId, String operatorAddress) {
+        Optional<EscrowChainClient.OnChainJob> found = read(contractAddress, escrowJobId);
         if (found.isEmpty()) {
             return Verdict.UNKNOWN;
         }
@@ -85,9 +163,9 @@ public class EscrowVerification {
      * Backend 가 오브젝트를 직접 해시한 값이어야 한다. 워커의 말을 워커의 말과
      * 대조하면 아무것도 검증되지 않는다.
      */
-    public Verdict resultOnChain(String escrowJobId, String operatorAddress,
+    public Verdict resultOnChain(String contractAddress, String escrowJobId, String operatorAddress,
                                  String expectedResultHash) {
-        Optional<EscrowChainClient.OnChainJob> found = chain.readJob(escrowJobId);
+        Optional<EscrowChainClient.OnChainJob> found = read(contractAddress, escrowJobId);
         if (found.isEmpty()) {
             return Verdict.UNKNOWN;
         }
@@ -109,9 +187,9 @@ public class EscrowVerification {
         return Verdict.CONFIRMED;
     }
 
-    /** JOB_FAILED · JOB_CANCELLED: 예치금이 정말 돌아갔는가. */
-    public Verdict cancelledOnChain(String escrowJobId) {
-        Optional<EscrowChainClient.OnChainJob> found = chain.readJob(escrowJobId);
+    /** JOB_FAILED · JOB_CANCELLED · keeper: 예치금이 정말 돌아갔는가. */
+    public Verdict cancelledOnChain(String contractAddress, String escrowJobId) {
+        Optional<EscrowChainClient.OnChainJob> found = read(contractAddress, escrowJobId);
         if (found.isEmpty()) {
             return Verdict.UNKNOWN;
         }
@@ -121,6 +199,11 @@ public class EscrowVerification {
             return Verdict.CONTRADICTED;
         }
         return Verdict.CONFIRMED;
+    }
+
+    /** reconciliation: 지금 온체인 상태 그대로. 읽지 못했으면 비어 있다. */
+    public Optional<EscrowChainClient.OnChainJob> stateOnChain(String contractAddress, String escrowJobId) {
+        return read(contractAddress, escrowJobId);
     }
 
     /**
@@ -145,13 +228,32 @@ public class EscrowVerification {
     }
 
     /**
-     * 체인이 이 예치에 붙인 jobId.
-     *
-     * <p>프런트가 준 값을 정본으로 쓰지 않기 위한 것이다. 비어 있으면 확인하지
-     * 못한 것이고, 그때는 기존대로 받은 값을 쓴다 -- 확인 못 했다는 사실은 로그에
-     * 남는다.
+     * 체인이 이 예치에 붙인 jobId. txHash 없이 externalRef 만 있을 때(reconciliation) 쓴다.
      */
     public Optional<String> escrowJobIdFor(String externalRef) {
-        return chain.findFundedJob(externalRef).map(EscrowChainClient.FundedJob::escrowJobId);
+        return chain.findFundedJob(externalRef).map(EscrowChainClient.JobFundedEvent::escrowJobId);
+    }
+
+    /** Job 에 기록된 주소가 있으면 그 컨트랙트를, 없으면(예전 데이터) 지금 설정된 것을 읽는다. */
+    private Optional<EscrowChainClient.OnChainJob> read(String contractAddress, String escrowJobId) {
+        String target = contractAddress == null || contractAddress.isBlank()
+                ? chain.contractAddress() : contractAddress;
+        return chain.readJob(target, escrowJobId);
+    }
+
+    /** 예치 확인의 답. CONFIRMED 면 이벤트가, 아니면 사유가 있다. */
+    public record FundingCheck(Verdict verdict, EscrowChainClient.JobFundedEvent event, String reason) {
+
+        static FundingCheck confirmed(EscrowChainClient.JobFundedEvent event) {
+            return new FundingCheck(Verdict.CONFIRMED, event, null);
+        }
+
+        static FundingCheck contradicted(String reason) {
+            return new FundingCheck(Verdict.CONTRADICTED, null, reason);
+        }
+
+        static FundingCheck unknown(String reason) {
+            return new FundingCheck(Verdict.UNKNOWN, null, reason);
+        }
     }
 }

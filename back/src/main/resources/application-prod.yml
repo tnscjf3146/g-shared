@@ -32,3 +32,7 @@ logging:
       max-history: 14
 storage:
   root: /app/storage     # compose 볼륨(./storage) — 컨테이너를 지워도 결과물이 남는다
+
+# 운영은 체인 확인 없이 아무것도 확정하지 않는다. 환경변수로도 끌 수 없게 값을 박아 둔다.
+escrow:
+  verification-required: true

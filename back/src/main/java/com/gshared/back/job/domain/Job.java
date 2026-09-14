@@ -54,6 +54,10 @@ public class Job extends BaseTimeEntity {
     private String schedulerModelVersion;   // 어느 모델이 예측했나 — 실측 대조·개선 평가용
     @Column(length = 64)
     private String recommendedWorkerId;     // 추천 ≠ 배정 확정 (배정은 assignedWorkerId)
+    // 견적 시점에 확정한 공급자 정산 지갑 = 온체인 createAndFundJob 의 provider. 예치 뒤에는 체인이 이 값을 잠그므로
+    // 매칭도 이 지갑의 워커에게만 배정한다. 지갑이 바뀌면 새 견적을 받아야 한다.
+    @Column(length = 42)
+    private String providerWallet;
 
     // 단위: TOKEN(GSC, 사람 단위). wei(×10^18)는 절대 저장하지 않는다 — BIGINT는 9 GSC에서 넘친다.
     // 온체인 전송 시에만 TokenUnits.toWei 로 변환하고, 체인에서 읽은 uint256은 long이 아니라 BigInteger로 받는다.
@@ -67,9 +71,17 @@ public class Job extends BaseTimeEntity {
     // 온체인 createAndFundJob(externalRef, price, provider) 에 넣는 참조값. 생성 시 발급, 이후 불변.
     @Column(length = 66, unique = true)
     private String externalRef;
-    // 온체인 jobId (uint256). 예치 확인 때 기록. JSON 에서는 문자열 — JS 정수 정밀도 문제 회피.
+    // 이 Job 이 예치된 체인·컨트랙트. 예치 확인 시점의 설정값을 박아 둔다 — 에스크로를 재배포해도
+    // 예전 Job 은 예전 주소에서 읽는다. 온체인 유일 식별자는 (escrowChainId, escrowContractAddress, escrowJobId).
+    private Long escrowChainId;
+    @Column(length = 42)
+    private String escrowContractAddress;
+    // 온체인 jobId (uint256). 예치 확인 때 JobFunded 이벤트에서 읽어 기록. JSON 에서는 문자열 — JS 정수 정밀도 문제 회피.
     @Column(length = 78)
     private String escrowJobId;
+    // createAndFundJob() 트랜잭션. CREATED 인데 이 값이 있으면 "체인 확인 보류" — reconciliation 이 다시 확인한다.
+    @Column(length = 66, unique = true)
+    private String fundTxHash;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
@@ -132,9 +144,49 @@ public class Job extends BaseTimeEntity {
                              Double learningRate, Integer maxLength,
                              Double predictedRuntimeSec, String schedulerModelVersion,
                              String recommendedWorkerId, Long estimatedCost) {
-        return new Job(owner, workloadId, baseModelId, datasetId,
+        return create(owner, workloadId, baseModelId, datasetId,
+                trainingMode, epochs, batchSize, learningRate, maxLength,
+                predictedRuntimeSec, schedulerModelVersion, recommendedWorkerId, null, estimatedCost);
+    }
+
+    /** providerWallet 까지 확정하는 생성. 견적(create API)은 항상 이쪽이다 — 예치 대조에 provider 가 필요하다. */
+    public static Job create(User owner, Long workloadId, Long baseModelId, Long datasetId,
+                             String trainingMode, Integer epochs, Integer batchSize,
+                             Double learningRate, Integer maxLength,
+                             Double predictedRuntimeSec, String schedulerModelVersion,
+                             String recommendedWorkerId, String providerWallet, Long estimatedCost) {
+        Job job = new Job(owner, workloadId, baseModelId, datasetId,
                 trainingMode, epochs, batchSize, learningRate, maxLength,
                 predictedRuntimeSec, schedulerModelVersion, recommendedWorkerId, estimatedCost);
+        job.providerWallet = providerWallet == null ? null : providerWallet.toLowerCase();
+        return job;
+    }
+
+    /**
+     * 예치 트랜잭션은 받았지만 체인 확인을 아직 못 한 상태(fail closed 보류). 상태는 CREATED 그대로이고,
+     * reconciliation 이 이 txHash 로 다시 확인한다. 같은 txHash 재전송이 멱등이 되는 근거이기도 하다.
+     */
+    public void holdFunding(String txHash) {
+        this.fundTxHash = txHash.toLowerCase();
+    }
+
+    /** 예치 보류가 걸려 있는가 (CREATED 인데 txHash 가 있음). */
+    public boolean isFundingPending() {
+        return status == JobStatus.CREATED && fundTxHash != null;
+    }
+
+    /**
+     * 보류했던 예치가 체인 대조에서 거부됐다. txHash 를 비워 사용자가 올바른 트랜잭션으로 다시 시도할 수 있게 하고,
+     * 왜 거부됐는지는 남긴다. 상태는 CREATED 그대로다.
+     */
+    public void rejectFunding(String reason) {
+        this.fundTxHash = null;
+        this.reconciliationReason = "FUND rejected: " + reason;
+    }
+
+    /** 체인을 다시 읽어 DB 와 맞는 것을 확인했다 -- 대조 필요 표시를 걷는다. */
+    public void clearReconciliation() {
+        this.reconciliationReason = null;
     }
 
     /**

@@ -87,8 +87,11 @@ public class WorkerJobService {
                 new ExecutionContextResponse.TrainingConfig(
                         job.getEpochs(), job.getBatchSize(), job.getLearningRate(), job.getMaxLength()),
                 new ExecutionContextResponse.Escrow(
-                        walletAuthProperties.chainId(),
-                        escrowProperties.contractAddressOrNull(),
+                        // 예치 확인 때 Job 에 박아 둔 체인·컨트랙트. 에스크로를 재배포해도 이 Job 은 예전 주소에 있다.
+                        // 없으면(예치 확인 전 데이터) 지금 설정값.
+                        job.getEscrowChainId() != null ? job.getEscrowChainId() : walletAuthProperties.chainId(),
+                        job.getEscrowContractAddress() != null
+                                ? job.getEscrowContractAddress() : escrowProperties.contractAddressOrNull(),
                         job.getEscrowJobId(),
                         job.getExternalRef(),
                         job.getOwner().getWalletAddress(),      // client = 예치한 의뢰자

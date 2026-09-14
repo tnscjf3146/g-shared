@@ -69,6 +69,14 @@ storage:
 escrow:
   contract-address: ${ESCROW_CONTRACT_ADDRESS:}
   # 온체인 값을 읽을 노드. 주소와 함께 둘 다 채워져야 Backend 가 워커의 말을
-  # 체인에 대고 확인한다. 비어 있으면 확인하지 않고 예전처럼 동작한다 --
-  # 대조할 대상이 없는데 통과했다고 기록하는 것이 확인하지 않는 것보다 나쁘다.
+  # 체인에 대고 확인한다. 하나만 채워진 상태는 기동 시 거부한다(EscrowStartupValidator).
   rpc-url: ${ESCROW_RPC_URL:}
+  # 결제 토큰(GSC). 작업 생성 응답에 실려 프런트가 approve 대상으로 쓰고,
+  # 기동 검사에서 에스크로의 paymentToken() 과 같은지 대조한다.
+  token-address: ${GSC_TOKEN_ADDRESS:0xaCe3c977A539C16668528619F9417589f12C7B22}
+  # 체인 확인 없이는 상태를 확정하지 않는다(fail closed). 운영은 반드시 true —
+  # prod 프로필이 덮어쓴다. 로컬에서 체인 없이 돌릴 때만 false.
+  verification-required: ${ESCROW_VERIFICATION_REQUIRED:false}
+  # 만료 Job 을 settleTimeout 으로 정리하는 keeper 지갑 개인키. 비어 있으면 keeper 는 돌지 않는다.
+  # 코드·DB 가 아니라 배포 Secret 으로만 주입한다. SSAFY 체인은 가스비 0 이라 잔액이 필요 없다.
+  keeper-private-key: ${ESCROW_KEEPER_PRIVATE_KEY:}

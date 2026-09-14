@@ -56,7 +56,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = {
         "storage.root=${java.io.tmpdir}/gshared-test-storage",
         "storage.public-base-url=http://localhost:8080",
-        "escrow.contract-address=0x" + "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0"
+        "escrow.contract-address=0x" + "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
+        // 주소만 있는 반쪽 설정은 기동이 거부한다(EscrowStartupValidator). 닫힌 포트를 함께 줘서
+        // "설정은 됐지만 노드가 없다"로 만든다 — verification-required=false 라 경고만 남기고 뜬다.
+        "escrow.rpc-url=http://127.0.0.1:9"
 })
 class WorkerJobIntegrationTest {
 
@@ -115,7 +118,7 @@ class WorkerJobIntegrationTest {
         // CREATED → FUNDED(escrowJobId=17) → ASSIGNED(이 워커) — 매칭이 끝나 JOB_ASSIGN 을 받은 시점.
         // 조건부 UPDATE 는 clearAutomatically 라 그 전에 지갑 연결 등 대기 중인 변경을 먼저 DB 로 보낸다.
         em.flush();
-        jobRepository.fundIfCreated(job.getId(), client.getId(), "17");
+        jobRepository.fundIfCreated(job.getId(), 31221L, null, "17", null);
         jobRepository.assignIfFunded(job.getId(), workerId);
         em.clear();
     }
