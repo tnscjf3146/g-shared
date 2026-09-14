@@ -152,3 +152,19 @@ export const jobDetailSchema = z.object({
   startedAt: z.nullable(z.string()),
   finishedAt: z.nullable(z.string()),
 })
+
+/** GET /jobs/{jobId}/escrow-terms — 예치 조건(0914 연동 규격 §2). 백엔드 미구현 — 계약 고정, MSW 목업 응답.
+ *  값은 전부 백엔드가 확정한다: 프론트가 externalRef·priceWei·provider 를 만들거나 계산하지 않는다.
+ *  priceWei 는 정밀도 때문에 문자열 — Number() 금지, BigInt(priceWei) 로만 다룬다 */
+const hexAddress = z.string().check(z.regex(/^0x[0-9a-fA-F]{40}$/))
+export const escrowTermsSchema = z.object({
+  jobId: z.number(),
+  externalRef: z.string().check(z.regex(/^0x[0-9a-fA-F]{64}$/)),
+  priceWei: z.string().check(z.regex(/^[0-9]+$/)),
+  providerWallet: hexAddress, // 공급자 정산 지갑(Worker operator 아님)
+  clientWallet: hexAddress, // 로그인 사용자의 연결 지갑 — MetaMask 현재 계정과 대조용
+  chainId: z.number(),
+  tokenAddress: hexAddress,
+  escrowAddress: hexAddress,
+  escrowJobId: z.nullable(z.string().check(z.regex(/^[0-9]{1,78}$/))), // FUNDED 취소용 온체인 번호 — CREATED(예치 전)면 null
+})

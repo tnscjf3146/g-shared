@@ -14,7 +14,7 @@ export const STATUS_META: Record<JobStatus, { label: string; tone: 'success' | '
 }
 /** 상태 → 상세에 보이는 한 문장 */
 export const STATUS_SENTENCE: Record<JobStatus, string> = {
-  CREATED: '예치 대기 — 지갑에서 예치하면 워커 배정이 시작됩니다. (예치 기능은 준비 중)',
+  CREATED: '예치 대기 — 아래에서 GSC를 예치하면 워커 배정이 시작됩니다.',
   FUNDED: '예치 확인됨. 조건에 맞는 워커에 배정되는 중입니다.',
   ASSIGNED: '워커에 배정됐습니다. 곧 학습이 시작됩니다.',
   RUNNING: '학습이 진행 중입니다.',

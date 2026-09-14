@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { unlinkWallet } from '../api'
 import { walletMessageFor } from '../errors'
-import { GSC_TOKEN, SSAFY_CHAIN, formatUnits, getGscBalance, getNativeBalance, shortAddress } from '../ethereum'
+import { GSC_TOKEN, SSAFY_CHAIN, formatUnits, getGscBalance, getNativeBalance, getProvider, shortAddress, watchGsc } from '../ethereum'
 
 // 지갑 있음 화면(wallet.md §5): 서버에 연결된 주소 기준. MetaMask 의 현재 계정/체인은 보지 않는다
 type Balances = { gsc: bigint; native: bigint }
@@ -75,6 +75,12 @@ export function WalletDashboard({ address, onUnlinked }: { address: string; onUn
         <BalanceRow label={GSC_TOKEN.symbol} value={balances} pick={(b) => b.gsc} />
         <BalanceRow label={SSAFY_CHAIN.nativeCurrency.symbol} value={balances} pick={(b) => b.native} />
       </dl>
+      {/* MetaMask 자산 목록에 GSC 표시 — 사용자 승인 1회(정책상 강제 등록 불가). 거절해도 무해 */}
+      {getProvider() && (
+        <button type="button" onClick={() => watchGsc(getProvider()!).catch(() => {})} className="self-start text-[13px] text-primary hover:underline">
+          MetaMask에 GSC 추가 →
+        </button>
+      )}
       {balances === 'error' && (
         <button type="button" onClick={retryBalances} className="self-start text-[13px] text-primary hover:underline">
           잔액을 불러오지 못했습니다. 다시 시도 →

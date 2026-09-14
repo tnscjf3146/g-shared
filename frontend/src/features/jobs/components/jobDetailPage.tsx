@@ -4,10 +4,12 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/fetcher'
-import { cancelJob, getCatalog, getDataset, getJob } from '../api'
+import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
+import { cancelJob, getCatalog, getDataset, getEscrowTerms, getJob } from '../api'
 import { jobMessageFor } from '../errors'
 import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, STATUS_META, STATUS_SENTENCE, formatBytes, formatCost, formatDateTime, formatDuration } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
+import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
 import { JobDetailSkeleton } from './jobSkeleton'
@@ -95,15 +97,35 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     model: catalog?.baseModels.find((m) => m.id === job.baseModelId)?.name ?? `#${job.baseModelId}`,
   }
 
+  // FUNDED 는 에스크로 금고에 GSC 가 잠겨 있다 — 온체인 cancelJob 으로 환불을 먼저 받고(MetaMask 서명 1회),
+  // 그 다음 기존 취소 API 로 서버 상태를 맞춘다. 그 외 상태(CREATED·ASSIGNED)는 서버 취소만
+  const cancelOnChain = async () => {
+    const terms = await getEscrowTerms(job.jobId)
+    if (!terms.escrowJobId) throw new Error('온체인 예치 번호를 찾을 수 없습니다. 팀에 문의해 주세요.')
+    const p = getProvider()
+    if (!p) throw new Error('MetaMask가 설치되어 있지 않습니다.')
+    const account = await requestAccount(p)
+    if (account.toLowerCase() !== terms.clientWallet.toLowerCase())
+      throw new Error(`연결된 지갑(${shortAddress(account)})이 예치한 지갑(${shortAddress(terms.clientWallet)})과 다릅니다.`)
+    await ensureSsafyChain(p)
+    const hash = await cancelEscrowJob(p, account, terms.escrowAddress, BigInt(terms.escrowJobId))
+    const receipt = await waitForReceipt(hash)
+    if (receipt.status !== '0x1') throw new Error('환불 트랜잭션이 실패했습니다. 이미 수락된 작업일 수 있습니다.')
+  }
+
   const cancel = async () => {
-    if (!confirm(`작업 #${job.jobId} 을(를) 취소할까요?`)) return
+    const funded = job.status === 'FUNDED'
+    if (!confirm(funded ? `작업 #${job.jobId} 을(를) 취소할까요? 예치한 GSC 가 지갑으로 환불됩니다. (MetaMask 서명 1회)` : `작업 #${job.jobId} 을(를) 취소할까요?`)) return
     setPending(true)
     setError(null)
     try {
+      if (funded) await cancelOnChain()
       await cancelJob(job.jobId)
       await load()
     } catch (e) {
-      setError(jobMessageFor(e))
+      if ((e as { code?: number })?.code === 4001) setError('서명을 거절했습니다. 다시 시도할 수 있습니다.')
+      else if (e instanceof Error && !(e instanceof ApiError) && e.message) setError(e.message)
+      else setError(jobMessageFor(e))
       if (e instanceof ApiError && e.status === 409) void load(true) // 상태가 이미 바뀜 → 최신으로
     } finally {
       setPending(false)
@@ -145,6 +167,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
         <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
+        {job.status === 'CREATED' && <FundPanel job={job} onFunded={() => void load()} />}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
         {job.assignedWorkerId && (
           <p className="text-[14px] tabular-nums text-text-muted" title={job.assignedWorkerId}>
