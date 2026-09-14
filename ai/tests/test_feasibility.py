@@ -8,7 +8,13 @@ import pytest
 
 from app.schemas.recommendation import JobRequirements
 from app.schemas.runtime import GpuCandidate
-from app.scheduler.feasibility import NoFeasibleGpuError, filter_feasible_candidates
+from app.scheduler.feasibility import (
+    NOMINAL_CAPACITY_TOLERANCE_MIB,
+    VRAM_CAPACITY_STEP_MIB,
+    NoFeasibleGpuError,
+    filter_feasible_candidates,
+    nominal_vram_mib,
+)
 
 
 def candidate(worker_id, vram_mb, benchmark=36521.7):
@@ -39,9 +45,12 @@ class TestWhatSurvives:
         assert [entry.worker_id for entry in survivors] == ["worker-exact"]
 
     def test_a_gpu_one_mib_short_does_not(self):
+        # 공칭 용량으로 읽은 뒤에도 요구량보다 1 MiB 모자라면 탈락이다. (예전에는
+        # 12287 대 12288로 적었지만, 12287은 이제 12 GiB 카드의 보고값으로 읽힌다 --
+        # TestNominalCapacity 참고. 경계의 뜻은 그대로 12288 대 12289로 옮겼다.)
         with pytest.raises(NoFeasibleGpuError):
             filter_feasible_candidates(
-                requiring(12288), [candidate("worker-short", 12287)])
+                requiring(12289), [candidate("worker-short", 12288)])
 
     def test_only_the_ones_that_fit(self):
         survivors = filter_feasible_candidates(requiring(12000), [
@@ -66,6 +75,85 @@ class TestWhatSurvives:
         given = candidate("worker-a", 12288)
 
         assert filter_feasible_candidates(requiring(8000), [given]) == (given,)
+
+
+class TestNominalCapacity:
+    """드라이버 보고값을 판매 용량(GiB 단위)으로 읽고 비교한다. 비교할 때만.
+
+    쓰인 숫자는 지어낸 값이 아니라 이 프로젝트가 받은 보고값이다(data/ 의 실측·
+    부트스트랩 행): RTX 4070 Laptop·RTX 4060 8188, RTX 3060 12288, RTX 4080 16376,
+    RTX 4090 24564.
+    """
+
+    def test_an_8_gib_gpu_reporting_8188_runs_an_8192_job(self):
+        survivors = filter_feasible_candidates(
+            requiring(8192), [candidate("worker-4070-laptop", 8188)])
+
+        assert [entry.worker_id for entry in survivors] == ["worker-4070-laptop"]
+
+    def test_an_exact_8192_still_runs_an_8192_job(self):
+        assert filter_feasible_candidates(
+            requiring(8192), [candidate("worker-8g", 8192)])
+
+    @pytest.mark.parametrize("reported, nominal", [
+        (8188, 8192),      # RTX 4070 Laptop, RTX 4060
+        (12288, 12288),    # RTX 3060 -- 이미 경계
+        (16376, 16384),    # RTX 4080
+        (24564, 24576),    # RTX 4090
+        (24576, 24576),
+    ])
+    def test_the_reports_this_project_has_seen(self, reported, nominal):
+        assert nominal_vram_mib(reported) == nominal
+
+    def test_the_tolerance_edge_is_included(self):
+        edge = 8192 - NOMINAL_CAPACITY_TOLERANCE_MIB
+
+        assert nominal_vram_mib(edge) == 8192
+
+    def test_one_mib_past_the_tolerance_is_left_alone(self):
+        outside = 8192 - NOMINAL_CAPACITY_TOLERANCE_MIB - 1
+
+        assert nominal_vram_mib(outside) == outside
+
+    def test_a_gpu_just_outside_the_tolerance_does_not_run_an_8192_job(self):
+        outside = 8192 - NOMINAL_CAPACITY_TOLERANCE_MIB - 1
+
+        with pytest.raises(NoFeasibleGpuError):
+            filter_feasible_candidates(requiring(8192), [candidate("worker-a", outside)])
+
+    @pytest.mark.parametrize("reported", [7600, 8100, 12000, 3000, 5238])
+    def test_a_gpu_that_is_really_smaller_is_not_rounded_up(self, reported):
+        assert nominal_vram_mib(reported) == reported
+
+    def test_a_really_short_gpu_still_fails_an_8192_job(self):
+        with pytest.raises(NoFeasibleGpuError):
+            filter_feasible_candidates(requiring(8192), [candidate("worker-a", 7600)])
+
+    def test_it_never_lowers_a_value(self):
+        for reported in range(1, 40000, 97):
+            assert nominal_vram_mib(reported) >= reported
+
+    def test_it_never_adds_more_than_the_tolerance(self):
+        for reported in range(1, 40000, 97):
+            assert nominal_vram_mib(reported) - reported <= NOMINAL_CAPACITY_TOLERANCE_MIB
+
+    def test_an_8188_gpu_is_not_treated_as_a_12_gib_gpu(self):
+        with pytest.raises(NoFeasibleGpuError):
+            filter_feasible_candidates(
+                requiring(12288), [candidate("worker-4070-laptop", 8188)])
+
+    def test_the_reported_value_is_not_rewritten(self):
+        # 원래 vramMb는 예측 feature이자 실측 기록이다. 걸러내기가 고쳐 쓰지 않는다.
+        given = candidate("worker-4070-laptop", 8188)
+
+        survivors = filter_feasible_candidates(requiring(8192), [given])
+
+        assert survivors == (given,)
+        assert survivors[0].vram_mb == 8188
+
+    def test_the_named_constants(self):
+        assert VRAM_CAPACITY_STEP_MIB == 1024
+        assert NOMINAL_CAPACITY_TOLERANCE_MIB == 32
 
 
 class TestTheOrderIsNotARanking:

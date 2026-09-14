@@ -14,9 +14,31 @@ Backend에도 같은 비교를 두면 같은 판단이 두 곳에 살게 되고,
 질문에 XGBoost를 부르는 일이고, 그렇게 나온 숫자가 순위에 섞이면 Backend는 실행할
 수 없는 GPU를 1위로 추천받는다.
 
-지금 규칙은 하나다: ``vramMb >= minVramMb``. Rule Engine이나 Strategy를 미리 만들지
-않는다 -- 규칙이 하나일 때 그런 뼈대는 읽는 사람에게 규칙이 여럿인 것처럼 보이게 할
-뿐이고, 두 번째 규칙이 실제로 어떤 모양일지는 아직 모른다.
+지금 규칙은 하나다: ``nominal(vramMb) >= minVramMb``. Rule Engine이나 Strategy를
+미리 만들지 않는다 -- 규칙이 하나일 때 그런 뼈대는 읽는 사람에게 규칙이 여럿인 것처럼
+보이게 할 뿐이고, 두 번째 규칙이 실제로 어떤 모양일지는 아직 모른다.
+
+**왜 보고값이 아니라 공칭 용량과 비교하는가.** Worker가 보내는 ``vramMb`` 는
+``nvidia-smi --query-gpu=memory.total`` 을 그대로 옮긴 값이고, 드라이버는 판매 용량보다
+몇 MiB 적게 보고한다. 이 프로젝트가 실제로 받은 값이 그렇다(``data/`` 의 실측·부트스트랩
+행): RTX 4070 Laptop과 RTX 4060은 8 GiB 카드인데 8188, RTX 4080은 16 GiB인데 16376,
+RTX 4090은 24 GiB인데 24564 -- 4·8·12 MiB 모자라다. RTX 3060은 12288로 딱 맞게 온다.
+카탈로그의 요구량은 8192(8 GiB)처럼 공칭 용량으로 적히므로, 보고값을 그대로 비교하면
+8188 MiB로 실제 Job을 끝까지 돌린 GPU가 8 GiB 요구에서 탈락한다.
+
+그래서 **비교할 때만** 보고값을 공칭 용량으로 읽는다. 규칙은 좁다:
+
+* 공칭 용량은 1 GiB(1024 MiB) 단위다. GPU VRAM은 6·8·10·11·12·16·20·24·32·40·48·80
+  GiB처럼 전부 GiB 단위로 만들어지므로, 지원 GPU 표를 따로 두지 않는다 -- 표를 두면
+  새 GPU가 들어온 날 표가 틀린다.
+* 보고값이 바로 위 GiB 경계보다 :data:`NOMINAL_CAPACITY_TOLERANCE_MIB` 이하로 모자랄
+  때만 그 경계로 올린다. 관측된 부족분은 최대 12 MiB이고, 허용치는 그 두 배 남짓인 32
+  MiB다. 32 MiB는 1 GiB 간격의 3%라 서로 다른 용량을 섞을 수 없다 -- 8100(92 모자람)
+  이나 12000(288 모자람)은 그대로 비교된다.
+* 이미 GiB 경계인 값, 경계보다 많이 모자란 값은 손대지 않는다. 항상 더하는 보정은 없다.
+
+후보 자체는 바꾸지 않는다. 원래 ``vramMb`` 는 예측 feature이자 Worker의 실측 기록이고,
+공칭 용량은 "이 Job을 돌릴 수 있는가"라는 질문에만 쓰인다.
 """
 
 from __future__ import annotations
@@ -25,6 +47,28 @@ from typing import Sequence
 
 from app.schemas.recommendation import JobRequirements
 from app.schemas.runtime import GpuCandidate
+
+#: GPU VRAM이 만들어지는 단위. 공칭 용량은 이 값의 배수다.
+VRAM_CAPACITY_STEP_MIB = 1024
+
+#: 보고값이 공칭 용량보다 이만큼까지 모자라도 그 용량의 GPU로 본다.
+#: 실측 부족분(4·8·12 MiB)의 두 배 남짓이고, 1 GiB 간격의 3%다.
+NOMINAL_CAPACITY_TOLERANCE_MIB = 32
+
+
+def nominal_vram_mib(reported_mib: int) -> int:
+    """드라이버가 보고한 VRAM을 판매 용량(공칭, GiB 단위)으로 읽은 값.
+
+    바로 위 GiB 경계와의 차이가 :data:`NOMINAL_CAPACITY_TOLERANCE_MIB` 이하일 때만 그
+    경계를 돌려주고, 아니면 보고값을 그대로 돌려준다. 절대 줄이지 않는다.
+    """
+    remainder = reported_mib % VRAM_CAPACITY_STEP_MIB
+    if remainder == 0:
+        return reported_mib
+    shortfall = VRAM_CAPACITY_STEP_MIB - remainder
+    if shortfall <= NOMINAL_CAPACITY_TOLERANCE_MIB:
+        return reported_mib + shortfall
+    return reported_mib
 
 
 class NoFeasibleGpuError(ValueError):
@@ -54,7 +98,9 @@ def filter_feasible_candidates(
     빠른지는 예측이 답할 일이고, 여기서 정렬해 두면 다음 단계가 이미 정해진 줄을
     물려받는 것처럼 보인다. 실행 가능 여부와 순위는 다른 질문이다.
 
-    비교는 ``>=`` 다. 요구량과 정확히 같은 VRAM은 모자란 것이 아니다.
+    비교는 공칭 용량(:func:`nominal_vram_mib`)과 ``>=`` 다. 요구량과 정확히 같은
+    VRAM은 모자란 것이 아니다. 돌려주는 후보는 받은 객체 그대로다 -- 보고값을 고쳐
+    쓰지 않는다.
 
     하나도 남지 않으면 빈 튜플을 돌려주지 않고 :class:`NoFeasibleGpuError` 를 던진다.
     빈 목록을 받은 쪽은 예측기에 빈 행렬을 넣거나 순위에서 1위를 꺼내다 터지고, 그때
@@ -65,7 +111,7 @@ def filter_feasible_candidates(
     feasible = tuple(
         candidate
         for candidate in candidates
-        if candidate.vram_mb >= requirements.min_vram_mb
+        if nominal_vram_mib(candidate.vram_mb) >= requirements.min_vram_mb
     )
     if not feasible:
         raise NoFeasibleGpuError(requirements.min_vram_mb, len(candidates))
