@@ -54,7 +54,12 @@ export function AccountView() {
             <Row label="지갑">
               <div className="flex min-w-0 flex-wrap items-center gap-3">
                 {wallet.status === 'loading' && <span className="h-5 w-40 animate-pulse rounded-xs bg-neutral-tint" />}
-                {wallet.status === 'error' && <span className="text-[15px] text-text-muted">지갑 정보를 불러오지 못했습니다.</span>}
+                {wallet.status === 'error' && (
+                  <span className="text-[15px] text-text-muted">
+                    지갑 정보를 불러오지 못했습니다.{' '}
+                    <button type="button" onClick={() => { setWallet({ status: 'loading' }); load() }} className="text-primary hover:underline">다시 시도 →</button>
+                  </span>
+                )}
                 {wallet.status === 'ready' &&
                   (wallet.data.walletAddress ? (
                     <span className="min-w-0 truncate font-mono text-[15px] text-dark" title={wallet.data.walletAddress}>{wallet.data.walletAddress}</span>
