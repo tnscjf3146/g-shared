@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
+  ReceiptTimeoutError,
   SSAFY_CHAIN,
   approveGsc,
   createAndFundJob,
@@ -100,7 +101,7 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
       await report(escrowJobId, hash)
     } catch (e) {
       if (isRejected(e)) setPhase({ s: 'error', message: '서명을 거절했습니다. 다시 시도할 수 있습니다.' })
-      else if (e instanceof Error && e.message === 'receipt timeout') setPhase({ s: 'error', message: '블록 확인이 지연되고 있습니다. 잠시 후 다시 시도해 주세요. 트랜잭션을 다시 보내지 마세요.' })
+      else if (e instanceof ReceiptTimeoutError) setPhase({ s: 'error', message: '블록 확인이 지연되고 있습니다. 잠시 후 다시 시도해 주세요. 트랜잭션을 다시 보내지 마세요.' })
       else setPhase({ s: 'error', message: '예치 처리 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.' })
     }
   }

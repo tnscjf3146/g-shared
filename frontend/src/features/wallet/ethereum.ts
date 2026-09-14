@@ -139,6 +139,13 @@ export function cancelEscrowJob(p: Eip1193Provider, from: string, escrowAddress:
 }
 
 export type TxReceipt = { status: string; logs: { address: string; topics: string[] }[] }
+/** 영수증 폴링이 제한 시간 안에 안 잡힌 경우 — 호출부가 문자열 비교 없이 instanceof 로 분기 */
+export class ReceiptTimeoutError extends Error {
+  constructor() {
+    super('receipt timeout')
+    this.name = 'ReceiptTimeoutError'
+  }
+}
 /** 영수증 폴링(2초 간격, 기본 90초) — 없으면 null 유지, 채굴되면 성공 여부까지 확인해서 반환 */
 export async function waitForReceipt(hash: string, timeoutMs = 90_000): Promise<TxReceipt> {
   const until = Date.now() + timeoutMs
@@ -150,7 +157,7 @@ export async function waitForReceipt(hash: string, timeoutMs = 90_000): Promise<
     })
     const body = (await res.json().catch(() => null)) as { result?: TxReceipt | null } | null
     if (body?.result) return body.result
-    if (Date.now() > until) throw new Error('receipt timeout')
+    if (Date.now() > until) throw new ReceiptTimeoutError()
     await new Promise((r) => setTimeout(r, 2_000))
   }
 }
