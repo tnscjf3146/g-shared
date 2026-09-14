@@ -2,6 +2,7 @@ import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
 import { CATALOG_PATHS, DATASETS_PATH, JOBS_PATH, createDatasetRequestSchema, createJobRequestSchema, datasetSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema } from '../schema'
 import type { AutoMode, Dataset, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
+import { getLinkedWallet } from '@/features/wallet/mocks/handlers'
 import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_DATASETS, MOCK_JOBS } from './data'
 import * as z from 'zod/mini'
 
@@ -249,13 +250,16 @@ export const jobHandlers = [
     const job = find(Number(params.jobId))
     if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
     if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.') // CREATED=예치용, FUNDED=온체인 취소용
+    // clientWallet 은 실제 연결된 지갑(지갑 목업 상태) — 진짜 MetaMask 계정으로 예치 검사를 통과할 수 있게
+    const clientWallet = getLinkedWallet()
+    if (!clientWallet) return error(409, 'WALLET_NOT_LINKED', '지갑이 연결되어 있지 않습니다. 지갑을 먼저 연결해 주세요.')
     return HttpResponse.json({
       jobId: job.jobId,
       escrowJobId: job.status === 'FUNDED' ? String(job.jobId) : null,
       externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
       priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
       providerWallet: '0x1111111111111111111111111111111111111111',
-      clientWallet: '0x2222222222222222222222222222222222222222',
+      clientWallet,
       chainId: 31221,
       tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
       escrowAddress: process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x3333333333333333333333333333333333333333',
