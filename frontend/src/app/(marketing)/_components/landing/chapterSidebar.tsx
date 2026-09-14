@@ -24,7 +24,7 @@ export function ChapterSidebar() {
             >
               <span className={styles.label}>
                 <span className={styles.index}>{String(i + 1).padStart(2, '0')}</span>
-                <span>{label}</span>
+                <span className={styles.word}>{label}</span>
               </span>
               <span className={styles.marker} aria-hidden />
             </button>

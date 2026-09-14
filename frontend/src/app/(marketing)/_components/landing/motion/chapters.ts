@@ -9,19 +9,34 @@ const I = { top: 0, toFront: 1400, dark: 1650, hero: 2000, reveal: 3400, end: 50
 /** 스크롤 챕터 트리거(landingScene 챕터 스텝 + 오른쪽 챕터 사이드바 공용): 스크롤이 at(ms) 를 넘으면 타임라인을 to(ms) 까지 제 속도로 재생.
  *  실제 재생 시간은 거리×STEP_RATE 를 STEP_MIN~STEP_MAX 로 묶되 duration 이 있으면 그 값(landingScene). label 은 사이드바 표기 */
 export const CHAPTERS: { label: string; at: number; to: number; duration?: number; ease?: string }[] = []
-/** 사이드바 항목 7개 = 카드(index 0, 인트로 직후 조립 상태) + CHAPTERS 6개 */
+/** 사이드바 항목 7개 = 표지(index 0, 인트로 직후 조립 상태) + CHAPTERS 6개.
+ *  라벨은 부품 이름이 아니라 서비스 챕터다(2026-09-14 사용자 결정): 01 G-shared(표지) · 02~06 서비스 5장 · 07 시작하기(CTA 자리, 내용 없음).
+ *  어느 모션인지는 각 줄 끝 주석(팬 분리·오빗·히트싱크·탑뷰·구조도·조립)으로 남긴다 */
 export const CHAPTER_LABELS: string[] = []
 /** 스크롤 챕터 시작 시각(ms) */
 export const T = { hold: 1000, fans: 1000, fansEnd: 3000, smoke: 1000, smokeEnd: 2500, shroud: 1000, shroudEnd: 3000, orbit: 3500, orbitEnd: 4500, hsLift: 5000, hsLiftEnd: 5500, hsOff: 5500, hsOffEnd: 6100, top: 7500, topEnd: 9000, stack: 9500, stackEnd: 12000, assemble: 12500, assembleEnd: 14500, end: 15000 } // 챕터별 시작/끝(ms). 0–hold(1000) 는 인트로 직후 정지(조립 상태 그대로, 살짝 스크롤해도 부품이 반응하지 않게 — 이 구간 스크롤은 배경 판 1 의 밝기만 올린다). 그 뒤 챕터 사이 정지는 전부 500, ASSEMBLE 뒤에도 500 정지 후 완료(end). 팬·연기·쉬라우드는 한 챕터(같이 분해)
 CHAPTERS.push(
-  { label: '팬 분리', at: T.fans, to: T.fansEnd }, // 3 팬·연기·쉬라우드
-  { label: '오빗', at: T.orbit, to: T.orbitEnd }, // 4 카메라
-  { label: '히트싱크 분리', at: T.hsLift, to: T.hsOffEnd, duration: 1000, ease: 'linear' }, // 5+6 들림 → 이탈을 한 챕터로(2026-09-11 합침, 사이 공백 제거). 1초: 들림 ~0.45초 뒤 이탈 ~0.55초(in(3) 가속) — 이탈을 더 빠르게 한 최종값. 커서는 선형 — 이탈 트윈의 가속(in(3))이 그대로 보이게
-  { label: '탑뷰', at: T.top, to: T.topEnd }, // 7
-  { label: '구조도', at: T.stack, to: T.stackEnd }, // 8
-  { label: '조립', at: T.assemble, to: T.end }, // 9 조립 + 로고 스윕
+  { label: '잠든카드', at: T.fans, to: T.fansEnd }, // 3 팬·연기·쉬라우드
+  { label: '사용자', at: T.orbit, to: T.orbitEnd }, // 4 카메라(오빗)
+  { label: '공급자', at: T.hsLift, to: T.hsOffEnd, duration: 1000, ease: 'linear' }, // 5+6 들림 → 이탈을 한 챕터로(2026-09-11 합침, 사이 공백 제거). 1초: 들림 ~0.45초 뒤 이탈 ~0.55초(in(3) 가속) — 이탈을 더 빠르게 한 최종값. 커서는 선형 — 이탈 트윈의 가속(in(3))이 그대로 보이게
+  { label: '에스크로', at: T.top, to: T.topEnd }, // 7 탑뷰
+  { label: '블록체인', at: T.stack, to: T.stackEnd }, // 8 구조도
+  { label: '시작하기', at: T.assemble, to: T.end }, // 9 조립 + 로고 스윕 — 내용이 아니라 마무리(CTA 자리)
 )
-CHAPTER_LABELS.push('카드', ...CHAPTERS.map((c) => c.label))
+CHAPTER_LABELS.push('G-shared', ...CHAPTERS.map((c) => c.label))
+/** 챕터별 설명(사이드바 라벨과 같은 순서 7개) — chapterCopy.tsx 가 화면 왼쪽 아래에 띄운다.
+ *  `\n` 은 줄바꿈으로 그대로 나온다(chapterCopy.module.css 의 white-space: pre-line) — 끊을 자리를 카피가 직접 정한다.
+ *  05·06 은 지금 구현된 범위까지만 말한다(에스크로 컨트랙트는 SSAFY 체인 미배포, fund API 는 브랜치) — 배포되면 문구를 올린다.
+ *  온체인에 남는 것은 참조값·금액·양쪽 지갑·상태·결과 해시뿐이라 06 은 "정산 기록" 이라고만 한다(데이터셋·학습 설정은 백엔드 DB) */
+export const CHAPTER_COPY: { title: string; body: string }[] = [
+  { title: '남는 GPU를 빌려주고,\n필요한 GPU를 활용해 보세요.', body: '유휴 그래픽카드로 AI 학습을 돌리는 연산 마켓.' },
+  { title: 'AI의 발전,\n그에 따른 그래픽카드의 가격 상승', body: '고가의 GPU 카드, 혹시 지금 어떤 작업을 하고 있나요?' },
+  { title: '더 이상 비싼 초기비용 고민은 그만!', body: '유형, 베이스 모델, 데이터셋만 고르면,\n공급자가 제공하는 GPU에서 작업 가능!' },
+  { title: '사용하지 않는 GPU 자원,\n필요한 사람에게 잠시 빌려주세요', body: '놀리면 0원, 빌려주면 수익.\nPC를 켜 두는 것만으로 돈이 벌립니다!' },
+  { title: '모두가 믿을 수 있는 결제 시스템', body: 'AI 견적대로 미리 예치, 끝나면 자동 지급.\n작업이 취소되면 전액 환불됩니다!' },
+  { title: '투명한 계약\n거래의 신뢰성', body: '블록체인 기술을 접목해\n정산에 쓰인 기록을 블록에 남깁니다.\n지울 수도, 바꿀 수도 없습니다.' },
+  { title: '지금 놀고 있는 카드부터', body: '등록은 프로그램 한 번 실행, 학습은 주문서 한 장.' },
+]
 
 const CAM_INTRO_TOP = { yaw: Math.PI / 2, tilt: 0.315, dist: 3.3, lookY: -0.12 } // lookY 를 낮춰(타깃을 카드 아래로) 카드가 화면 위쪽에 오게 // 인트로 첫 컷: +X 끝 위 낮은 각(18°)에서 카드 길이 방향으로 내려다봄 — 가까운 팬이 크게, 나머지가 멀어지는 구도(Blender 레퍼런스)
 const CAM_HERO = { yaw: Math.PI / 2, tilt: 0, dist: 2.35, lookY: 0.0225, shift: -0.05 } // 끝 캡 정면, G 원이 화면 정중앙
@@ -78,18 +93,26 @@ export function shroudOff(scroll: Timeline) {
  *  anime.js 는 첫 트윈 전에는 값을 안 건드리고 되감기 뒤에는 가장 이른 트윈의 from 값을 남기므로, 정지 구간도 상수 트윈으로 채워
  *  어느 시점·어느 방향으로 스크롤해도 카메라가 한 값으로 정해지게 한다. 시작값 = REVEAL 끝 값. 다른 챕터 함수는 카메라를 만지지 않는다.
  *  (yaw: π/2 = +X 끝 캡 정면, 1.0 = 우하단 3/4, π−1.0 = 좌하단 3/4, 0 = 카메라가 +Z(PCIe 엣지) 쪽) */
-const CAM0 = { yaw: 1.0, tilt: 0.55, dist: 6.5 }
-const CAM_ORBIT = { yaw: Math.PI - 1.0, tilt: 0.55, dist: 6.5 } // 4 ORBIT: 끝 캡이 좌하단
-const CAM_TOP = { yaw: 0, tilt: 0.785, dist: 5.6 } // 7 TOP VIEW: 위에서 −Y 쪽으로 45° 기울여, 살짝 확대
-const CAM_STACK = { yaw: Math.PI * 2 - 0.9, tilt: 0.42, dist: 8.0 } // 8 STACK: 낮은 각으로 한 바퀴 돌아 멀리서
-const CAM_END = { yaw: Math.PI * 2.5, tilt: 0.22, dist: 4.5 } // 9 ASSEMBLE: 끝 캡(로고) 정면 쪽, 살짝 위
+const SCROLL_SHIFT = 0.45 // 02~06 에서 카드가 오른쪽으로 밀리는 양(+ = 오른쪽, 1424px 화면에서 약 100px). 표지(01)와 조립 뒤(07)는 0 = 중앙(2026-09-14 사용자 결정). 왼쪽 카피는 카드가 중앙일 때 기준으로 폭을 잡으므로(chapterCopy.module.css) 밀리면 여유만 늘어난다
+export const CAM0 = { yaw: 1.0, tilt: 0.55, dist: 6.5 }
+export const CAM_ORBIT = { yaw: Math.PI - 1.0, tilt: 0.55, dist: 6.5 } // 4 ORBIT: 끝 캡이 좌하단
+export const CAM_TOP = { yaw: 0, tilt: 0.785, dist: 5.6 } // 7 TOP VIEW: 위에서 −Y 쪽으로 45° 기울여, 살짝 확대
+export const CAM_STACK = { yaw: Math.PI * 2 - 0.9, tilt: 0.42, dist: 8.0 } // 8 STACK: 낮은 각으로 한 바퀴 돌아 멀리서
+export const CAM_END = { yaw: Math.PI * 2.5, tilt: 0.22, dist: 4.5 } // 9 ASSEMBLE: 끝 캡(로고) 정면 쪽, 살짝 위
 type Cam = typeof CAM0
 export function cameraTrack(scroll: Timeline) {
   const hold = (c: Cam, from: number, to: number) => scroll.add(P, { yaw: [c.yaw, c.yaw], tilt: [c.tilt, c.tilt], dist: [c.dist, c.dist], duration: to - from, ease: 'linear' }, from)
   const move = (a: Cam, b: Cam, from: number, to: number) => scroll.add(P, { yaw: [a.yaw, b.yaw], tilt: [a.tilt, b.tilt], dist: [a.dist, b.dist], duration: to - from, ease: 'inOut(2)' }, from)
   // 트랙은 1ms 부터 시작: 스크롤 0(=시간 0)에서 sync 렌더가 카메라를 쓰지 않아야 인트로가 카메라를 온전히 소유한다(첫 스크롤에 인트로는 완료되므로 이후엔 트랙이 소유)
   const START = 1
-  scroll.add(P, { lookY: [0, 0], shift: [0, 0], duration: T.end - START, ease: 'linear' }, START)
+  scroll.add(P, { lookY: [0, 0], duration: T.end - START, ease: 'linear' }, START)
+  // 카드 가로 위치: 표지(01)는 중앙 → 02(팬·쉬라우드 분리)가 재생되는 동안 SCROLL_SHIFT 만큼 오른쪽으로 → 06 까지 유지 → 07(조립)이 재생되는 동안 다시 중앙으로(2026-09-14 사용자 결정).
+  // 정지 구간도 상수 트윈으로 채워 어느 방향으로 되감아도 한 값으로 정해진다
+  scroll.add(P, { shift: [0, 0], duration: T.fans - START, ease: 'linear' }, START)
+  scroll.add(P, { shift: [0, SCROLL_SHIFT], duration: T.fansEnd - T.fans, ease: 'inOut(2)' }, T.fans)
+  scroll.add(P, { shift: [SCROLL_SHIFT, SCROLL_SHIFT], duration: T.assemble - T.fansEnd, ease: 'linear' }, T.fansEnd)
+  scroll.add(P, { shift: [SCROLL_SHIFT, 0], duration: T.assembleEnd - T.assemble, ease: 'inOut(2)' }, T.assemble)
+  scroll.add(P, { shift: [0, 0], duration: T.end - T.assembleEnd, ease: 'linear' }, T.assembleEnd)
   hold(CAM0, START, T.orbit)
   move(CAM0, CAM_ORBIT, T.orbit, T.orbitEnd)
   hold(CAM_ORBIT, T.orbitEnd, T.top)

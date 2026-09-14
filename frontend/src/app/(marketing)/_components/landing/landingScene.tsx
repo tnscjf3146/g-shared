@@ -4,6 +4,7 @@ import { animate, createScope, createTimeline } from 'animejs'
 import dynamic from 'next/dynamic'
 import { useEffect, useRef } from 'react'
 import { chapterStore } from './chapter-store'
+import { ChapterCopy } from './chapterCopy'
 import { ChapterSidebar } from './chapterSidebar'
 import { CHAPTERS, assemble, cameraTrack, fansOut, hero, hsLift, hsOff, introTop, reveal, shroudOff, smoke, stack, topView } from './motion/chapters'
 import { GPU_READY_EVENT } from './progress'
@@ -65,7 +66,7 @@ export function LandingScene() {
         if (index === current) return
         current = index
         el.dataset.chapter = String(index) // 디버그·검증용(어느 챕터까지 재생됐는지)
-        if (!introPlaying) chapterStore.set(index) // 사이드바 현재 표시
+        if (!introPlaying) chapterStore.set(index) // 사이드바 + 왼쪽 아래 카피 현재 표시(카피는 트리거 즉시 — 2026-09-14 사용자 결정)
         if (instant) {
           cursor.t = to
           tl.seek(to)
@@ -125,7 +126,7 @@ export function LandingScene() {
       const lock = () => {
         scrollTo({ top: el.offsetTop, behavior: 'auto' }) // 챕터 스텝이 정확히 0 에서 시작하도록 섹션 상단에 맞춤. 'auto' = 즉시(html 에 scroll-behavior:smooth 없음). 'instant' 는 표준이지만 옛 엔진에서 TypeError 위험
         introPlaying = true
-        chapterStore.set(-1) // 인트로 동안 사이드바 숨김
+        chapterStore.set(-1) // 인트로 동안 사이드바·카피 숨김
         setNav(false) // 인트로 동안 네비 숨김
         html.style.overflow = 'hidden'
         addEventListener('touchmove', block, { passive: false })
@@ -134,7 +135,7 @@ export function LandingScene() {
         html.style.overflow = ''
         removeEventListener('touchmove', block)
         introPlaying = false
-        chapterStore.set(current) // 사이드바 표시
+        chapterStore.set(current) // 사이드바·카피 표시
         updateNav() // 인트로가 끝난 맨 위 → 네비 슬라이드 인
       }
       let readyTimer: ReturnType<typeof setTimeout> | undefined
@@ -179,6 +180,8 @@ export function LandingScene() {
         <GpuCanvas />
         {/* 인트로 암전용 검은 오버레이(팬 컷 → 로고 컷 사이). 인트로 타임라인이 opacity 를 움직인다 */}
         <div id="blackout" className="pointer-events-none absolute inset-0 bg-black opacity-0" />
+        {/* 왼쪽 아래 챕터 설명 — 현재 챕터의 제목·본문, 마지막 챕터엔 CTA. 인트로 중엔 숨김 */}
+        <ChapterCopy />
         {/* 오른쪽 챕터 목록 — 호버 시 초록·왼쪽으로 밀림, 현재 챕터 상시 강조, 클릭으로 점프. 인트로 중엔 숨김 */}
         <ChapterSidebar />
       </div>

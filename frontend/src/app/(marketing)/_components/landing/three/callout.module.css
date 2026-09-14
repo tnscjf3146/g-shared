@@ -1,0 +1,185 @@
+/* 3D 위 지시선 콜아웃(callout.tsx) — 02 핀(finCallout) · 03 GPU 등급(gpuFitCallout) 이 같이 쓴다.
+   drei <Html> 이 앵커의 화면 좌표에 이 .root 의 (0,0) 을 놓는다.
+   전체는 visibility 로 숨겨 두고 켜질 때만 .on — 선(polyline)은 dash 로만 숨겨지는데 그건 JS 가 붙은 뒤라, CSS 단계에서 통째로 가려야 첫 페인트에 선이 보이지 않는다.
+   안쪽 요소의 opacity 0 은 켜진 뒤 anime 가 [0,1] 로 올릴 시작값 */
+.root {
+  position: relative;
+  width: 0;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  font-family: var(--font-sans);
+  color: rgba(247, 249, 244, 0.92);
+}
+.on {
+  visibility: visible;
+}
+.svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+.line {
+  fill: none;
+  stroke: var(--color-primary);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* pathLength=1 로 정규화된 길이 기준. offset 1 = 하나도 안 그려짐 → anime 가 0 으로(앵커에서부터 그려짐), 지울 땐 0 → -1(앵커에서부터 지워짐) */
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+.dot {
+  fill: var(--color-primary);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  filter: drop-shadow(0 0 6px rgba(118, 185, 0, 0.7));
+}
+.panel {
+  position: absolute;
+  transform: translateY(-7px); /* 캡션(11px) 줄의 가운데가 수평선 높이에 오고, 항목들은 그 아래로 내려간다 */
+  /* 3D 부품 위에 바로 얹히는 글자 — 자막식 외곽 그림자(chapterCopy 와 같은 결). 배지 상자에도 같이 먹는다(2026-09-14) */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9)) drop-shadow(0 0 8px rgba(0, 0, 0, 0.7));
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+/* 왼쪽으로 뻗는 콜아웃 — 패널이 선 끝의 왼쪽에 붙고 글자는 오른끝 정렬 */
+.left .panel {
+  align-items: flex-end;
+  text-align: right;
+}
+.caption:empty {
+  display: none; /* 항목 하나짜리 핀은 캡션이 없다 — 빈 span 이 간격을 먹지 않게 */
+}
+.caption {
+  opacity: 0;
+  font-size: 12px; /* 11 → 12, 랜딩 글자 한 단계씩(2026-09-14) */
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: rgba(247, 249, 244, 0.5);
+}
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.left .list {
+  align-items: flex-end;
+}
+.item {
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 15px; /* 14 → 15 */
+  font-weight: 500;
+  line-height: 1.3;
+}
+.left .item {
+  flex-direction: row-reverse;
+}
+.tick {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  flex: none;
+}
+
+/* ── 03 GPU 등급 적합도 행 ── */
+.dim {
+  color: rgba(247, 249, 244, 0.6); /* 추천이 아닌 등급은 한 톤 죽인다 */
+}
+.dim .tick {
+  background: rgba(247, 249, 244, 0.35);
+}
+.fit {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.fit[data-tone='good'],
+.fit[data-tone='ok'] {
+  color: var(--color-primary);
+  background: rgba(118, 185, 0, 0.14);
+}
+.fit[data-tone='tight'] {
+  color: var(--color-warning, #e0b23c);
+  background: rgba(224, 178, 60, 0.14);
+}
+/* 추천 행의 견적 — 등급 아래 둘째 줄로 내려 라벨 폭을 반으로(한 줄로 두면 오른쪽 챕터 사이드바에 닿았다, 2026-09-14). 숫자는 카운트업(tabular 로 폭 고정) */
+.stack {
+  flex-wrap: wrap;
+  row-gap: 0.15rem;
+}
+.stack .est {
+  flex-basis: 100%;
+  margin-left: calc(5px + 0.55rem); /* 점(5px) + gap 만큼 들여 글자 시작선에 맞춘다 */
+}
+.est {
+  margin-left: 0.35rem;
+  font-size: 13px;
+  color: rgba(247, 249, 244, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+.est b {
+  font-weight: 600;
+  color: rgba(247, 249, 244, 0.95);
+}
+
+/* ── 04 워커: 온라인 점이 숨쉬듯 ── */
+.live .tick {
+  animation: live-pulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 6px rgba(118, 185, 0, 0.7);
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.gain {
+  color: var(--color-primary);
+}
+
+/* ── 05 에스크로 장부: 이름 칸 폭을 맞춰 숫자가 한 줄로 정렬 ── */
+.who {
+  min-width: 3.6em;
+  color: rgba(247, 249, 244, 0.7);
+}
+.amt {
+  min-width: 2.4em;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.left .amt {
+  text-align: left;
+}
+
+/* ── 06 tx 해시·블록 번호 ── */
+.mono {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 768px) {
+  .item {
+    font-size: 14px;
+  }
+}
