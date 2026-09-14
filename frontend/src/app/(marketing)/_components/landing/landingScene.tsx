@@ -6,7 +6,7 @@ import { useEffect, useRef } from 'react'
 import { chapterStore } from './chapter-store'
 import { ChapterSidebar } from './chapterSidebar'
 import { CHAPTERS, assemble, cameraTrack, fansOut, hero, hsLift, hsOff, introTop, reveal, shroudOff, smoke, stack, topView } from './motion/chapters'
-import { GPU_READY_EVENT, P } from './progress'
+import { GPU_READY_EVENT } from './progress'
 
 const GpuCanvas = dynamic(() => import('./three/gpuCanvas').then((m) => m.GpuCanvas), { ssr: false })
 
@@ -22,6 +22,7 @@ const SCROLL_PER_CHAPTER_VH = 150 // 챕터 하나당 스크롤 거리(뷰포트
 const STEP_MIN = 1300 // 사용자 요청(2026-09-10)으로 한 단계 느리게: 900/1800/0.6 → 1300/2800/0.9
 const STEP_MAX = 2800
 const STEP_RATE = 0.9 // 타임라인 1ms 당 실제 0.9ms
+const REDUCED_RATE = 0.35 // prefers-reduced-motion 일 때의 재생 시간 배율(정지가 아니라 빠르게). 윈도우 "애니메이션 효과" 끄기(PC방 기본값)가 이 미디어쿼리로 오므로 완전 정지시키면 화면이 안 움직인다(2026-09-14)
 
 export function LandingScene() {
   const root = useRef<HTMLElement>(null)
@@ -30,6 +31,7 @@ export function LandingScene() {
     const el = root.current
     if (!el) return
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+    const rate = reduce ? REDUCED_RATE : 1 // 모든 지속 시간에 곱해진다
     const scope = createScope({ root: el }).add(() => {
       // 스크롤 타임라인 (챕터 3~). autoplay 없이 seek 로만 움직인다. composition:'none' — 같은 P 속성을 만지는 인트로 타임라인이 이쪽 트윈을 취소하지 않게
       const tl = createTimeline({ defaults: { ease: 'inOut(2)', composition: 'none' }, autoplay: false })
@@ -64,7 +66,7 @@ export function LandingScene() {
         current = index
         el.dataset.chapter = String(index) // 디버그·검증용(어느 챕터까지 재생됐는지)
         if (!introPlaying) chapterStore.set(index) // 사이드바 현재 표시
-        if (instant || reduce) {
+        if (instant) {
           cursor.t = to
           tl.seek(to)
           return
@@ -74,7 +76,7 @@ export function LandingScene() {
           cursor.t = at
           tl.seek(at)
         }
-        const duration = fixed ?? Math.min(STEP_MAX, Math.max(STEP_MIN, Math.abs(to - cursor.t) * STEP_RATE))
+        const duration = (fixed ?? Math.min(STEP_MAX, Math.max(STEP_MIN, Math.abs(to - cursor.t) * STEP_RATE))) * rate
         // ease 는 out: 트리거를 넘거나 사이드바를 누른 순간 바로 움직이기 시작하고 끝에서 감속(inOut 은 초반 30% 가 거의 멈춰 있어 느리게 느껴졌다, 2026-09-11)
         animate(cursor, { t: to, duration, ease: ease ?? 'out(3)', onUpdate: () => tl.seek(cursor.t) })
       }
@@ -88,21 +90,18 @@ export function LandingScene() {
 
       // 인트로 타임라인 (챕터 0~2, 시간 기반) — 스크롤 tl 뒤에 만들어 첫 프레임 우선권을 가진다.
       // 페이지 로드 직후 스크롤을 잠그고, 모델이 준비되면 1회 재생한다(빈 검정 화면에 빔만 지나가는 일이 없게).
-      const intro = createTimeline({ defaults: { ease: 'inOut(2)', composition: 'none' }, autoplay: false })
+      const intro = createTimeline({ defaults: { ease: 'inOut(2)', composition: 'none' }, autoplay: false, playbackRate: 1 / rate }) // reduced-motion 이면 생략이 아니라 배속 재생
       introTop(intro)
       hero(intro)
       reveal(intro)
       const skip = () => intro.complete()
-      if (reduce) {
-        skip()
-        P.spin = 0
-      }
       // 네비 표시 규칙: 인트로 동안 숨김 → 인트로가 끝난 맨 위(스크롤 0)에서 보임 → 스크롤 스토리 내내 숨김 → 마지막 챕터가 끝나 Footer 가 보이면 다시 보임.
       // 배경이 전부 어두우니 테마는 dark 고정. 상태는 body[data-nav] 로 넘기고 실제 슬라이드는 siteNav 의 CSS 가 담당(리렌더 0)
       const setNav = (shown: boolean) => (document.body.dataset.nav = shown ? 'shown' : 'hidden')
       document.body.dataset.navTheme = 'dark'
       const updateNav = () => {
         const f = fraction()
+        // 배경판은 차콜 한 장 고정(2026-09-14 사용자 결정) — 스크롤로 기록하던 P.scroll/plate/plate2W/light 을 전부 제거했다. 여긴 네비 규칙만 남는다
         const atEnd = f >= 0.985
         setNav((f <= 0.001 && !introPlaying) || atEnd)
         document.body.dataset.atEnd = atEnd ? '1' : '0' // "맨 위로" 버튼은 끝 구간에서만(globals.css .back-to-top)
@@ -149,13 +148,11 @@ export function LandingScene() {
       const startedMid = fraction() * BANDS >= 1
       step(true)
       updateNav()
-      if (!reduce) {
-        if (startedMid) skip()
-        else {
-          lock()
-          addEventListener(GPU_READY_EVENT, start)
-          readyTimer = setTimeout(start, READY_TIMEOUT_MS)
-        }
+      if (startedMid) skip()
+      else {
+        lock()
+        addEventListener(GPU_READY_EVENT, start)
+        readyTimer = setTimeout(start, READY_TIMEOUT_MS)
       }
       return () => {
         removeEventListener(GPU_READY_EVENT, start)
@@ -176,10 +173,9 @@ export function LandingScene() {
 
   return (
     <section ref={root} style={{ height: `${100 + BANDS * SCROLL_PER_CHAPTER_VH}vh` }} className="relative bg-black text-white">
-      {/* 바닥은 우주(검정 #0d0f0b) — 캔버스 안 Stars 가 별을 그린다(2026-09-10, 이전엔 dark #333) */}
+      {/* 바닥 검정 + 배경은 캔버스 안 차콜 금속판 한 장 고정(three/backdrop.tsx kind="shroud") — 로고가 화면 정중앙에 박혀 있고 스크롤해도 흐르지 않는다(2026-09-14 사용자 결정).
+          밝기는 씬 조명(P.env)만 따르므로 암전인 인트로에선 검정. 검정 와이프·스틸판 조명(kind black/lit)과 별(three/starfield)·DOM 배경 레이어는 마운트하지 않는다 */}
       <div className="sticky top-0 h-screen overflow-hidden bg-black">
-        {/* INTRO TOP 전용 딥 블랙 바닥(캔버스 뒤). 인트로 타임라인이 opacity 1→0 으로 걷어낸다 — 바닥이 검정이 된 뒤론 시각적 차이는 없고 인트로 타이밍 호환용 */}
-        <div id="deep" className="pointer-events-none absolute inset-0 bg-black" />
         <GpuCanvas />
         {/* 인트로 암전용 검은 오버레이(팬 컷 → 로고 컷 사이). 인트로 타임라인이 opacity 를 움직인다 */}
         <div id="blackout" className="pointer-events-none absolute inset-0 bg-black opacity-0" />
