@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   SSAFY_CHAIN,
@@ -34,9 +34,14 @@ type Phase =
 const isRejected = (e: unknown) => (e as { code?: number })?.code === 4001
 
 export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => void }) {
-  const [phase, setPhase] = useState<Phase>({ s: 'idle' })
+  const [phase, setPhaseRaw] = useState<Phase>({ s: 'idle' })
   const [txHash, setTxHash] = useState<string | null>(null)
   const busy = phase.s === 'busy'
+
+  // 예치는 서명·채굴 대기로 오래 걸린다 — 도중에 벗어나면(작업 상태 폴링으로 리렌더/언마운트) setState 를 건너뛴다
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+  const setPhase = (p: Phase) => { if (alive.current) setPhaseRaw(p) }
 
   const report = async (escrowJobId: string, hash: string) => {
     setPhase({ s: 'busy', label: '서버 확인 중' })
@@ -63,6 +68,7 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
 
       setPhase({ s: 'busy', label: '지갑 확인 중' })
       const account = await requestAccount(p)
+      if (!account) return setPhase({ s: 'error', message: '지갑 계정을 확인하지 못했습니다. MetaMask에서 계정을 연결해 주세요.' })
       if (account.toLowerCase() !== terms.clientWallet.toLowerCase())
         return setPhase({ s: 'error', message: `연결된 지갑(${shortAddress(account)})이 계정에 등록된 지갑(${shortAddress(terms.clientWallet)})과 다릅니다. MetaMask에서 계정을 바꿔 주세요.` })
       await ensureSsafyChain(p)
