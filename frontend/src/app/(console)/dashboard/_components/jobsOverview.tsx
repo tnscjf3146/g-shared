@@ -36,29 +36,20 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
 
   return (
     <>
-      {/* 1행: 히어로 + 상태 분포. 히어로는 "처음 온 사람에겐 안내, 쓰는 사람에겐 데이터" — 작업이 생기면 한 줄로 얇아진다 */}
+      {/* 1행: 히어로 배너 + 상태 분포 */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         {/* 히어로 — 연한 그린 틴트 단색. 브랜드 색은 배경 틴트와 "수익" 강조, CTA 에만 */}
-        {jobList.length > 0 ? (
-          <section className="animate-enter relative flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-hairline bg-primary/10 p-6 shadow-2">
-            <h2 className="text-[20px] font-extrabold tracking-heading text-dark">
+        <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-2xl border border-hairline bg-primary/10 p-8 shadow-2">
+          <div className="relative flex flex-col gap-3">
+            <h2 className="max-w-[420px] text-[32px] leading-[1.2] font-extrabold tracking-display text-dark">
               유휴 GPU가 <span className="text-primary">수익</span>이 되는 곳
             </h2>
+            <p className="max-w-[400px] text-[15px] leading-relaxed text-text-muted">워크로드를 등록하면 네트워크의 유휴 GPU에 배정되고, 진행 상황과 비용을 여기서 지켜볼 수 있습니다.</p>
+          </div>
+          <div className="relative">
             <Button href="/jobs/new">작업 만들기 +</Button>
-          </section>
-        ) : (
-          <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-2xl border border-hairline bg-primary/10 p-8 shadow-2">
-            <div className="relative flex flex-col gap-3">
-              <h2 className="max-w-[420px] text-[32px] leading-[1.2] font-extrabold tracking-display text-dark">
-                유휴 GPU가 <span className="text-primary">수익</span>이 되는 곳
-              </h2>
-              <p className="max-w-[400px] text-[15px] leading-relaxed text-text-muted">워크로드를 등록하면 네트워크의 유휴 GPU에 배정되고, 진행 상황과 비용을 여기서 지켜볼 수 있습니다.</p>
-            </div>
-            <div className="relative">
-              <Button href="/jobs/new">작업 만들기 +</Button>
-            </div>
-          </section>
-        )}
+          </div>
+        </section>
 
         <section className="card animate-enter flex flex-col gap-5" style={{ animationDelay: '40ms' }}>
           <span className="text-[13px] font-semibold tracking-eyebrow text-text-muted">작업 상태 분포</span>
@@ -103,7 +94,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
       </div>
 
       {/* 3행: 진행 중 작업 — 이 화면의 주인공. card-featured(그린 테두리 + 글로우, 화면당 하나)로 위계를 준다 */}
-      <section className="card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
+      <section className="card card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
           <header className="flex items-center justify-between gap-3">
             <h2 className="text-[17px] font-bold tracking-heading text-dark">진행 중 작업</h2>
             <div className="flex items-center gap-3">
