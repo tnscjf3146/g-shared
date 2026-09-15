@@ -66,10 +66,12 @@ class CatalogIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").isNumber())
                 .andExpect(jsonPath("$[0].name").isString())
-                // 7000000000 이 아니라 "7B" — 자릿수 세는 일을 화면에 넘기지 않는다
-                .andExpect(jsonPath("$[0].params").value("7B"))
+                // 600000000 이 아니라 "600M" — 자릿수 세는 일을 화면에 넘기지 않는다
+                .andExpect(jsonPath("$[0].params").value("600M"))
                 .andExpect(jsonPath("$[0].workloadIds").isArray())
-                .andExpect(jsonPath("$[0].workloadIds[0]").isNumber());
+                .andExpect(jsonPath("$[0].workloadIds[0]").isNumber())
+                // Runtime 이 학습할 수 없는 모델(qwen2.5-7b, V14 에서 enabled=false)은 메뉴판에 나오지 않는다
+                .andExpect(jsonPath("$[?(@.name == 'Qwen 2.5 7B')]").isEmpty());
     }
 
     @Test

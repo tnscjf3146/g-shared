@@ -159,8 +159,12 @@ class WorkerJobIntegrationTest {
                 // 카탈로그가 revision 없이 다시 seed 되면 여기서 걸린다.
                 .andExpect(jsonPath("$.model.modelRevision")
                         .value(org.hamcrest.Matchers.matchesPattern("[0-9a-f]{40}")))
-                .andExpect(jsonPath("$.runtimeImage.imageRef").value(org.hamcrest.Matchers.startsWith("gshared/qlora-sft-runtime@sha256:")))
-                .andExpect(jsonPath("$.runtimeImage.digest").value(org.hamcrest.Matchers.startsWith("sha256:")))
+                // Worker 는 승인된 canonical 이미지만 실행한다 (system/worker/gshared_worker/runtime_image.py).
+                // 카탈로그가 placeholder digest 로 다시 seed 되면 여기서 걸린다.
+                .andExpect(jsonPath("$.runtimeImage.imageRef").value(
+                        "le3560/gshared-qlora-sft-runtime@sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"))
+                .andExpect(jsonPath("$.runtimeImage.digest").value(
+                        "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"))
                 .andExpect(jsonPath("$.dataset.sha256").value(DATASET_HASH))          // 0x 벗긴 64자
                 .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/storage/datasets/1/dataset.jsonl?")))
                 .andExpect(jsonPath("$.dataset.effectiveTokens").value(1_800_000))

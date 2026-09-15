@@ -28,7 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
- * Job 생성의 검증·오류 경로 테스트. (카탈로그 qlora-sft-v1 / qwen3-0.6b 를 slug 로 조회해 사용 — qwen2.5-7b 는 V12 에서 비활성화됐다)
+ * Job 생성의 검증·오류 경로 테스트. (카탈로그 qlora-sft-v1 / qwen3-0.6b 를 slug 로 조회해 사용 — qwen2.5-7b 는 V14 에서 비활성화됐다)
  * SchedulerClient 는 목으로 대체 — 외부 AI 없이 오류 매핑을 검증한다.
  */
 @SpringBootTest

@@ -160,7 +160,7 @@ public class WorkerJobService {
         return "jobs/" + jobId + "/";
     }
 
-    /** "gshared/qlora-sft-runtime@sha256:..." — 저장소가 비어 있으면 digest 만 준다 (풀 수 없는 참조보다는 낫다). */
+    /** "le3560/gshared-qlora-sft-runtime@sha256:..." — 저장소가 비어 있으면 digest 만 준다 (풀 수 없는 참조보다는 낫다). */
     private static String imageRef(Workload image) {
         return image.getImageRepository() == null
                 ? image.getImageDigest()
