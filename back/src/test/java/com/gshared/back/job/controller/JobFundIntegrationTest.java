@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -240,5 +241,36 @@ class JobFundIntegrationTest {
 
         assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus())
                 .isEqualTo(JobStatus.CANCELLED);   // CANCELLED 유지
+    }
+
+    // ── GET /api/jobs/{jobId} — 예치 입력값 (escrow-terms 창구 대신 상세 응답이 싣는다) ──
+
+    @Test
+    @DisplayName("상세 응답은 CreateJobResponse 와 같은 예치 입력값을 싣는다 — 새로고침 뒤에도 예치를 이어갈 수 있게")
+    void detail_carries_escrow_terms() throws Exception {
+        owner.linkWallet("0x" + "a".repeat(40));
+        Job job = saveJob(owner);
+
+        mockMvc.perform(get("/api/jobs/" + job.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.externalRef").value(job.getExternalRef()))
+                .andExpect(jsonPath("$.priceWei").value("3000000000000000000000"))   // 3000 TOKEN → wei, 10진 문자열
+                .andExpect(jsonPath("$.clientWallet").value("0x" + "a".repeat(40)))
+                .andExpect(jsonPath("$.chainId").value(31221))
+                .andExpect(jsonPath("$.tokenAddress").isString())
+                .andExpect(jsonPath("$.escrowAddress").isEmpty())   // 이 테스트는 체인 미설정 → null
+                .andExpect(jsonPath("$.escrowJobId").isEmpty());    // CREATED — 예치 전
+
+        mockMvc.perform(post(fundUrl(job.getId()))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/jobs/" + job.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.escrowJobId").value("17"));   // FUNDED 뒤 취소 화면이 쓰는 온체인 번호
     }
 }

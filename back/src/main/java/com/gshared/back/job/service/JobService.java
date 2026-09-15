@@ -198,7 +198,8 @@ public class JobService {
     public JobDetailResponse getJob(Long ownerId, Long jobId) {
         Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
-        return JobDetailResponse.from(job);
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
     }
 
     /**

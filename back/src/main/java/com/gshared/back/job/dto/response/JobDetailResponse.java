@@ -1,5 +1,6 @@
 package com.gshared.back.job.dto.response;
 
+import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.domain.JobStatus;
 
@@ -8,6 +9,11 @@ import java.time.LocalDateTime;
 /**
  * Job 단건 상세 응답. 대시보드에서 진행 상황·결과·실패 사유 확인용.
  * 에스크로 참조(externalRef·escrowJobId)와 트랜잭션 해시도 실어 화면이 탐색기 링크를 걸 수 있게 한다.
+ *
+ * <p>예치 입력값(priceWei·clientWallet·chainId·tokenAddress·escrowAddress)은 {@link CreateJobResponse} 와
+ * 같은 이름·의미로 여기에도 싣는다 — 프런트가 상세 화면에서(새로고침 뒤에도) 예치를 이어갈 수 있게, 별도
+ * escrow-terms 창구 없이 이 응답 하나로 끝낸다. chainId·tokenAddress·escrowAddress 는 <b>지금</b> 설정값이고,
+ * 예치가 끝난 Job 의 실제 체인·컨트랙트는 escrowChainId·escrowContractAddress 에 따로 박혀 있다.
  */
 public record JobDetailResponse(
         Long jobId,
@@ -30,6 +36,11 @@ public record JobDetailResponse(
         String escrowJobId,
         String fundTxHash,
         String providerWallet,
+        String priceWei,               // estimatedCost 의 wei 표현 — JS 정수 범위를 넘으므로 10진 문자열
+        String clientWallet,           // 의뢰자 등록 지갑 — MetaMask 현재 계정과 대조용
+        Long chainId,                  // 예치할 체인 (현재 설정값)
+        String tokenAddress,           // GSC 토큰 (현재 설정값)
+        String escrowAddress,          // 에스크로 컨트랙트 (현재 설정값, 체인 미설정이면 null)
         String assignedWorkerId,
         String acceptTxHash,
         String submitTxHash,
@@ -49,7 +60,7 @@ public record JobDetailResponse(
         LocalDateTime startedAt,
         LocalDateTime finishedAt
 ) {
-    public static JobDetailResponse from(Job job) {
+    public static JobDetailResponse from(Job job, Long chainId, String tokenAddress, String escrowAddress) {
         return new JobDetailResponse(
                 job.getId(),
                 job.getStatus(),
@@ -71,6 +82,11 @@ public record JobDetailResponse(
                 job.getEscrowJobId(),
                 job.getFundTxHash(),
                 job.getProviderWallet(),
+                TokenUnits.toWei(job.getEstimatedCost()).toString(),
+                job.getOwner().getWalletAddress(),
+                chainId,
+                tokenAddress,
+                escrowAddress,
                 job.getAssignedWorkerId(),
                 job.getAcceptTxHash(),
                 job.getSubmitTxHash(),
