@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
@@ -25,6 +26,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   const [dataset, setDataset] = useState<Dataset | null>(null) // GET /datasets/{id} — 상세 응답엔 메타가 없어 따로
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false) // 작업 취소 확인 대화상자
 
   const load = useCallback(
     (silent = false) =>
@@ -114,9 +116,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     if (receipt.status !== '0x1') throw new Error('환불 트랜잭션이 실패했습니다. 이미 수락된 작업일 수 있습니다.')
   }
 
+  const funded = job.status === 'FUNDED'
   const cancel = async () => {
-    const funded = job.status === 'FUNDED'
-    if (!confirm(funded ? `작업 #${job.jobId} 을(를) 취소할까요? 예치한 GSC 가 지갑으로 환불됩니다. (MetaMask 서명 1회)` : `작업 #${job.jobId} 을(를) 취소할까요?`)) return
+    setConfirmOpen(false)
     setPending(true)
     setError(null)
     try {
@@ -151,7 +153,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
               블록체인 거래 흐름 보기 →
             </Button>
             {CANCELLABLE_STATUSES.has(job.status) && (
-              <Button variant="secondary" size="sm" disabled={pending} onClick={cancel}>
+              <Button variant="secondary" size="sm" disabled={pending} onClick={() => setConfirmOpen(true)}>
                 {pending ? '취소 중…' : '작업 취소'}
               </Button>
             )}
@@ -248,6 +250,16 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           </div>
         </section>
       )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        message={funded ? `작업 #${job.jobId} 을(를) 취소할까요? 예치한 GSC 가 지갑으로 환불됩니다. (MetaMask 서명 1회)` : `작업 #${job.jobId} 을(를) 취소할까요?`}
+        confirmLabel="작업 취소"
+        danger
+        pending={pending}
+        onConfirm={cancel}
+        onCancel={() => !pending && setConfirmOpen(false)}
+      />
     </div>
   )
 }

@@ -71,13 +71,20 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
-  const onCancel = async (id: number) => {
-    if (!confirm(`작업 #${id} 을(를) 취소할까요?`)) return
+  // 작업 취소: 네이티브 confirm 대신 접근성 있는 ConfirmDialog(Esc·backdrop·포커스 트랩). 목록 행의 취소 버튼이 대상 id 를 넘긴다
+  const [cancelTarget, setCancelTarget] = useState<number | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  const onCancel = (id: number) => setCancelTarget(id)
+  const confirmCancel = async () => {
+    if (cancelTarget == null) return
+    setCancelling(true)
     try {
-      await cancelJob(id)
-      load(true)
+      await cancelJob(cancelTarget)
     } catch (e) {
       setNotice(jobMessageFor(e))
+    } finally {
+      setCancelling(false)
+      setCancelTarget(null)
       load(true)
     }
   }
@@ -183,6 +190,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
           )}
         </section>
       )}
+      <ConfirmDialog open={cancelTarget !== null} message={`작업 #${cancelTarget} 을(를) 취소할까요?`} confirmLabel="작업 취소" danger pending={cancelling} onConfirm={confirmCancel} onCancel={() => !cancelling && setCancelTarget(null)} />
       <ConfirmDialog open={unlinkTarget !== null} message="정말 해제할까요?" confirmLabel="해제" danger pending={unlinking} onConfirm={confirmUnlink} onCancel={() => !unlinking && setUnlinkTarget(null)} />
     </>
   )
