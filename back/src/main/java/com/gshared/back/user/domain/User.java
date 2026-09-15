@@ -53,4 +53,9 @@ public class User extends BaseTimeEntity {
     public void unlinkWallet() {
         this.walletAddress = null;
     }
+
+    /** 표시 이름 변경. 형식 검증은 요청 DTO 가 한다. */
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
 }
