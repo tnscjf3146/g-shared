@@ -105,11 +105,6 @@ const SEL = {
 /** 주소·정수·bytes32 → 32바이트 hex(0x 없이). 인자가 전부 정적 타입이라 이어붙이면 끝 */
 const pad = (hexOrBig: string | bigint) => (typeof hexOrBig === 'bigint' ? hexOrBig.toString(16) : hexOrBig.replace(/^0x/, '').toLowerCase()).padStart(64, '0')
 
-/** TOKEN 정수(예: 60) → wei(60 × 10^18). 백엔드 estimatedCost 가 TOKEN 단위라 이 변환을 빠뜨리면 10^18배 틀린다 */
-export function toWei(token: number | string): bigint {
-  return BigInt(token) * BigInt(10) ** BigInt(GSC_TOKEN.decimals)
-}
-
 /** ERC-20 allowance(owner, spender) — 공개 RPC 읽기 */
 export async function getGscAllowance(owner: string, spender: string): Promise<bigint> {
   const data = SEL.allowance + pad(owner) + pad(spender)
