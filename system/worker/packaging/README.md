@@ -76,12 +76,24 @@ WSL2 · NVIDIA Driver · Docker Engine · NVIDIA Container Toolkit.
 
 ## 화면과 로그
 
-- 콘솔 창이 없다. 사용자에게 보이는 것은 로그인 창과, 실행이 실패했을 때 마지막 안내를 보여주는 오류 창뿐이다.
+- 콘솔 창이 없다. 실행하면 **상태 창**이 먼저 뜬다 (`gui/status_window.py`).
+
+| 영역 | 내용 |
+|---|---|
+| 상태 | 시작 · 환경 확인 · 런타임 준비 · 인증 · 등록 필요 · 연결 중 · 온라인 · 작업 준비/실행 · 종료 중 · 오류 |
+| 정보 | GPU(모델·VRAM), Worker(연결 상태, 축약 ID), 현재 작업, 진행률(JOB_PROGRESS가 있을 때) |
+| 로그 | 기존 진행 문구 최근 200줄. 토큰·JWT·키·서명 URL 쿼리는 가림 |
+| [종료] / X | 같은 처리. 작업이 없으면 바로 종료, 작업 중이면 "작업을 마치고 결과를 보낸 뒤 종료"를 묻고 새 작업은 받지 않음. 기다리는 중 한 번 더 누르면 "지금 종료"를 다시 확인 |
+
+- Worker는 별도 스레드에서 돈다. Tk는 창 스레드에서만 다루고, Worker는 `status_events` 큐에 값만 넣는다. 로그인 창도 창 스레드에서 연다.
+- 종료는 기존 stop 신호(`InterruptibleStop`)를 쓴다. 단계 사이·연결 루프에서 멈추며 강제 kill은 없다. 설치·벤치마크 같은 단계 도중에는 그 단계가 끝난 뒤 멈춘다.
+- 실패하면 기존과 같은 오류 문구를 창 위 오류 대화상자로 보여주고, 창은 "오류" 상태로 남는다.
+- 터미널에서 `python -m gshared_worker`로 실행하면 창 없이 기존처럼 콘솔에 출력한다.
 - `gshared-debug.log` 기본 수준은 WARNING. 정상 진행은 기록하지 않고, 실패·거절·연결 오류·예외와 실패한 실행의 종료 코드·빌드·설정 요약만 남긴다.
 - 토큰·비밀번호·private key·서명 URL은 기록하지 않는다.
 
 ## 알려진 제약
 
-- **GPU Job 실행이 exe에 연결되어 있지 않다.** `connect_to_backend`가 `JobAcceptance()`를 escrow·runtime·settlement·cancellation 없이 만든다. `runtime_pipeline`, `runtime_image`, `execution_context`, `dataset_fetch`, `model_prep`와 `escrow_decider`·`escrow_cleaner`·`runtime_waiter`는 구현·테스트되어 있지만 진입점에서 호출되지 않는다. 연결은 기능 추가라 정리 작업에서 하지 않았다.
+- 작업 중 "지금 종료"를 고르면 학습 컨테이너(`docker run --rm`, 이 프로세스에 붙어 실행)가 정리되지 않고 남을 수 있다. Worker가 스스로 작업을 반환하는 계약은 없으므로 기본 종료는 작업 완료 후 종료다.
 
 - pynvml은 선언된 의존성이 아니라 번들되지 않는다. GPU 조회는 드라이버에 포함된 `nvidia-smi`로 한다.

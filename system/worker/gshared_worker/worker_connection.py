@@ -35,6 +35,16 @@ from typing import Any, Callable, Iterator, Protocol
 from .config import WorkerSettings
 from .exit_codes import WorkerExitCode
 from .logging_setup import LOGGER_NAME
+from . import status_events
+from .status_events import (
+    JobChanged,
+    JobEnd,
+    JobEnded,
+    JobStage,
+    StageChanged,
+    WorkerOnline,
+    WorkerStage,
+)
 from .worker_credentials import WorkerCredentials, load_credentials
 from .escrow import AcceptOutcome, AcceptResult, JobState
 from .job_cancellation import JobCancelledReady
@@ -525,6 +535,7 @@ def send_terminal(
 
     acceptance.terminal.done(terminal)
     _say_settled(terminal, say)
+    status_events.publish(JobEnded(terminal.job_id, _ending_of(terminal)))
     # Only now. The GPU has been free since the container stopped, but the
     # Job was not finished until the service had been told.
     slot.release()
@@ -543,6 +554,15 @@ def _say_settled(terminal: Any, say: Callable[..., None] | None) -> None:
         say(f"  작업 {terminal.job_id}: 취소되어 예치금이 반환되었습니다.")
         return
     say(f"  작업 {terminal.job_id}: 종료 ({terminal.code})")
+
+
+def _ending_of(terminal: Any) -> JobEnd:
+    """Which of the three endings a terminal answer that went out was."""
+    if isinstance(terminal, JobResultReady):
+        return JobEnd.COMPLETED
+    if isinstance(terminal, JobCancelledReady):
+        return JobEnd.CANCELLED
+    return JobEnd.FAILED
 
 
 def _settle(
@@ -1050,6 +1070,12 @@ def stay_connected(
     # signing key it is the refusing acceptance every earlier build had.
     acceptance = (acceptance if acceptance is not None
                   else build_job_acceptance(settings, credentials))
+    # A stop that can wait for the Job in hand has to be able to ask whether
+    # there is one, and only the slot knows. A plain stop signal has no use
+    # for it and is left as it is.
+    watch_work = getattr(stop, "watch_work", None)
+    if callable(watch_work):
+        watch_work(lambda: slot.held is not None)
 
     try:
         return _connect_until_stopped(
@@ -1074,6 +1100,7 @@ def _connect_until_stopped(
     acceptance: JobAcceptance,
     delays: Any,
 ) -> int:
+    watcher = _JobWatcher()
     while not stop.is_set():
         result, socket = open_registered_socket(
             settings, credentials, open_socket=open_socket)
@@ -1084,6 +1111,7 @@ def _connect_until_stopped(
             delay = next(delays)
             _debug.warning(
                 "websocket: %s -- retrying in %gs", result.outcome.value, delay)
+            status_events.publish(StageChanged(WorkerStage.RECONNECTING))
             say(f"  연결되지 않았습니다 ({result.detail}). {delay:g}초 후 다시 시도합니다...")
             if stop.wait(delay):
                 break
@@ -1094,6 +1122,8 @@ def _connect_until_stopped(
         delays = backoff_delays()
         say("  연결되었습니다. 이 PC가 서비스에 등록되어 있습니다.")
         _debug.debug("websocket: registered as %s", socket.worker_id)
+        status_events.publish(WorkerOnline(socket.worker_id or credentials.worker_id))
+        status_events.publish(StageChanged(WorkerStage.CONNECTED))
         # A training run carried on while the line was down. The Backend's
         # view of it stopped at whatever last got through, so the newest
         # snapshot is offered once on the new connection. Only the newest:
@@ -1104,9 +1134,10 @@ def _connect_until_stopped(
             outcome, detail = keep_alive(
                 socket, stop, interval=interval, ack_timeout=ack_timeout,
                 on_message=on_message or _dispatch_to(
-                    socket, slot, say, acceptance),
+                    socket, slot, say, acceptance,
+                    accepting_work=getattr(stop, "accepting_work", None)),
                 monotonic=monotonic,
-                each_turn=lambda: _every_turn(acceptance, socket, slot, say))
+                each_turn=_turn_and_tell(acceptance, socket, slot, say, watcher))
         finally:
             # The one place a socket this function opened is closed.
             socket.close()
@@ -1115,6 +1146,7 @@ def _connect_until_stopped(
             _debug.debug("websocket: closed on request")
             break
         _debug.warning("websocket: connection lost -- %s", detail)
+        status_events.publish(StageChanged(WorkerStage.RECONNECTING))
         say(f"  연결이 끊겼습니다 ({detail}). 다시 연결하는 중...")
 
     say("")
@@ -1143,11 +1175,69 @@ def _every_turn(
     send_terminal(acceptance, socket, slot, say)
 
 
+def _turn_and_tell(
+    acceptance: JobAcceptance,
+    socket: RegisteredSocket,
+    slot: JobSlot,
+    say: Callable[..., None],
+    watcher: "_JobWatcher",
+) -> Callable[[], None]:
+    """One turn of the loop, then tell whoever is watching what the slot holds."""
+    def turn() -> None:
+        _every_turn(acceptance, socket, slot, say)
+        watcher.look(slot, acceptance)
+
+    return turn
+
+
+def job_view(slot: JobSlot, acceptance: Any) -> JobChanged:
+    """What the slot holds, in the terms a watcher is given. Reads, never takes.
+
+    Progress is **peeked**, not taken. The box belongs to :func:`send_progress`,
+    and a window that took the percentage would be a window that stole it from
+    the Backend.
+    """
+    held = slot.held
+    if held is None:
+        return JobChanged(None, JobStage.IDLE)
+    if slot.state is not SlotState.ASSIGNED:
+        return JobChanged(held.job_id, JobStage.ACCEPTING)
+    terminal = acceptance.terminal_for
+    if (terminal is not None and terminal.job_id == held.job_id
+            and terminal.cancel_requested):
+        return JobChanged(held.job_id, JobStage.CANCELLING)
+    latest = acceptance.progress.peek()
+    percent = (latest.progress_percent
+               if latest is not None and latest.job_id == held.job_id else None)
+    return JobChanged(held.job_id, JobStage.WORKING, percent)
+
+
+class _JobWatcher:
+    """Publishes the slot's view when it changes, and only then."""
+
+    def __init__(self) -> None:
+        self._last: JobChanged | None = None
+
+    def look(self, slot: JobSlot, acceptance: Any) -> None:
+        try:
+            view = job_view(slot, acceptance)
+        except Exception:
+            # An acceptance without progress or a terminal -- a test double,
+            # most likely. The loop does not stop over a view of it.
+            _debug.debug("status: the job view could not be read", exc_info=True)
+            return
+        if view != self._last:
+            self._last = view
+            status_events.publish(view)
+
+
 def _dispatch_to(
     socket: RegisteredSocket,
     slot: JobSlot,
     say: Callable[..., None],
     acceptance: JobAcceptance,
+    *,
+    accepting_work: Callable[[], bool] | None = None,
 ) -> OnMessage:
     """What to do with a message that did not answer a heartbeat.
 
@@ -1159,6 +1249,15 @@ def _dispatch_to(
     """
     def dispatch(message: dict[str, Any]) -> None:
         if message["type"] == JOB_ASSIGN:
+            if (accepting_work is not None and slot.held is None
+                    and not accepting_work()):
+                # The supplier asked this Worker to stop. Taking a new Job now
+                # would sign an acceptJob for work nobody is going to run.
+                # Staying quiet is what a busy Worker already answers; a Job
+                # that is already held still gets its reply below.
+                _debug.warning("job: an assignment arrived while stopping -- not taken")
+                say("  종료 중이라 새 작업을 받지 않았습니다.")
+                return
             take_the_job(message, socket, slot, say, acceptance)
             return
         if message["type"] == JOB_CANCEL:
