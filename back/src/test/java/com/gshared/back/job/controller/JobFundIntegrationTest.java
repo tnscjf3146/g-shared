@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -72,7 +73,16 @@ class JobFundIntegrationTest {
                 prefix + "-" + UUID.randomUUID() + "@gshared.io", "encoded", "펀드테스터"));
     }
 
+    /** 예치 가능한 Job — 데이터셋 원본 업로드가 검증된 상태 (없으면 /fund 가 409 DATASET_NOT_UPLOADED). */
     private Job saveJob(User jobOwner) {
+        Job job = jobRepository.save(Job.create(
+                jobOwner, workloadId, baseModelId, datasetId,
+                "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
+        job.recordDatasetUpload("jobs/" + job.getId() + "/input/dataset.jsonl", 52_428_800L, "9".repeat(64), LocalDateTime.now());
+        return job;
+    }
+
+    private Job saveJobWithoutDataset(User jobOwner) {
         return jobRepository.save(Job.create(
                 jobOwner, workloadId, baseModelId, datasetId,
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
@@ -109,6 +119,17 @@ class JobFundIntegrationTest {
         assertThat(funded.getEscrowJobId()).isEqualTo("17");   // 온체인 jobId 기록
         assertThat(funded.getFundTxHash()).isEqualTo(TX);
         assertThat(funded.getEscrowChainId()).isEqualTo(31221L);
+    }
+
+    @Test
+    @DisplayName("데이터셋 원본이 업로드되지 않은 Job 은 409 DATASET_NOT_UPLOADED — 예치금이 묶인 채 워커가 받을 파일이 없는 상황을 막는다")
+    void fund_without_dataset_upload() throws Exception {
+        Job job = saveJobWithoutDataset(owner);
+
+        fund(job.getId(), ESCROW_BODY)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DATASET_NOT_UPLOADED"));
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
     }
 
     @Test
@@ -240,5 +261,36 @@ class JobFundIntegrationTest {
 
         assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus())
                 .isEqualTo(JobStatus.CANCELLED);   // CANCELLED 유지
+    }
+
+    // ── GET /api/jobs/{jobId} — 예치 입력값 (escrow-terms 창구 대신 상세 응답이 싣는다) ──
+
+    @Test
+    @DisplayName("상세 응답은 CreateJobResponse 와 같은 예치 입력값을 싣는다 — 새로고침 뒤에도 예치를 이어갈 수 있게")
+    void detail_carries_escrow_terms() throws Exception {
+        owner.linkWallet("0x" + "a".repeat(40));
+        Job job = saveJob(owner);
+
+        mockMvc.perform(get("/api/jobs/" + job.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.externalRef").value(job.getExternalRef()))
+                .andExpect(jsonPath("$.priceWei").value("3000000000000000000000"))   // 3000 TOKEN → wei, 10진 문자열
+                .andExpect(jsonPath("$.clientWallet").value("0x" + "a".repeat(40)))
+                .andExpect(jsonPath("$.chainId").value(31221))
+                .andExpect(jsonPath("$.tokenAddress").isString())
+                .andExpect(jsonPath("$.escrowAddress").isEmpty())   // 이 테스트는 체인 미설정 → null
+                .andExpect(jsonPath("$.escrowJobId").isEmpty());    // CREATED — 예치 전
+
+        mockMvc.perform(post(fundUrl(job.getId()))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(ESCROW_BODY))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/jobs/" + job.getId())
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.escrowJobId").value("17"));   // FUNDED 뒤 취소 화면이 쓰는 온체인 번호
     }
 }

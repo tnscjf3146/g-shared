@@ -30,11 +30,11 @@ import java.nio.file.Path;
 @RequiredArgsConstructor
 public class StorageController {
 
-    private static final String PREFIX = "/storage/";
+    private static final String PREFIX = "/api/storage/";
 
     private final LocalObjectStorage storage;
 
-    @PutMapping("/storage/**")
+    @PutMapping("/api/storage/**")
     public ResponseEntity<Void> upload(
             @RequestParam("expires") long expires,
             @RequestParam("sig") String signature,
@@ -48,7 +48,7 @@ public class StorageController {
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/storage/**")
+    @GetMapping("/api/storage/**")
     public ResponseEntity<Resource> download(
             @RequestParam("expires") long expires,
             @RequestParam("sig") String signature,

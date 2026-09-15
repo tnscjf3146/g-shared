@@ -25,7 +25,7 @@ public record ExecutionContextResponse(
 
     public record RuntimeImage(
             Long dockerImageId,
-            String imageRef,        // "gshared/qlora-sft-runtime@sha256:..."
+            String imageRef,        // "le3560/gshared-qlora-sft-runtime@sha256:..."
             String digest           // "sha256:..."
     ) {
     }

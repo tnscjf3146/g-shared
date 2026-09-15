@@ -32,6 +32,13 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # 서명 URL 스토리지(/api/storage/**) — 데이터셋 업로드·결과물 업/다운로드가 이 경로로 지나간다.
+        # 기본값(1M 본문·60s)이면 큰 파일이 413 이나 타임아웃으로 끊긴다.
+        client_max_body_size    5G;
+        proxy_request_buffering off;
+        proxy_read_timeout      3600s;
+        proxy_send_timeout      3600s;
     }
 
     # Worker WebSocket — 연결 업그레이드(Upgrade/Connection) + 장시간 유지(read_timeout)

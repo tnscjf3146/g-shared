@@ -42,6 +42,23 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     java.util.List<Job> findFundedWithOwner();
 
     /**
+     * 데이터셋 원본 cleanup 순찰용: 파일이 아직 스토리지에 있는데(업로드됨·미삭제) 더는 필요 없는 Job.
+     * ① 끝난 Job(COMPLETED/FAILED/CANCELLED) — 워커는 이미 받아갔거나 받을 일이 없다.
+     * ② 예치 없이 방치된 CREATED Job — createdAt 이 기준 시각보다 오래됐으면 버려진 견적으로 본다.
+     */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.datasetUploadedAt IS NOT NULL
+               AND j.datasetDeletedAt IS NULL
+               AND (j.status IN (com.gshared.back.job.domain.JobStatus.COMPLETED,
+                                 com.gshared.back.job.domain.JobStatus.FAILED,
+                                 com.gshared.back.job.domain.JobStatus.CANCELLED)
+                    OR (j.status = com.gshared.back.job.domain.JobStatus.CREATED
+                        AND j.createdAt < :abandonedBefore))
+            """)
+    java.util.List<Job> findDatasetFilesToClean(@Param("abandonedBefore") LocalDateTime abandonedBefore);
+
+    /**
      * 원자적 취소 ①: 아직 워커 손에 가지 않은 Job(CREATED/FUNDED)은 바로 CANCELLED.
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).
      * @return 영향받은 행 수 (1=취소 성공, 0=상태가 이미 바뀜 — ②를 시도하거나 409)

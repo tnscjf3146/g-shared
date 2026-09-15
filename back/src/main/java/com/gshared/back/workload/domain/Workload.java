@@ -38,7 +38,7 @@ public class Workload extends BaseTimeEntity {
     private String imageDigest;      // Worker 에 실제로 보낼 이미지 지문 (sha256:...)
 
     @Column(length = 255)
-    private String imageRepository;  // "gshared/qlora-sft-runtime" — imageRef = repository@digest (V10)
+    private String imageRepository;  // "le3560/gshared-qlora-sft-runtime" — imageRef = repository@digest (V10, 공식값은 V14)
 
     @Column(nullable = false)
     private Integer minVramMb;       // Scheduler 에 값만 전달 — Backend 가 직접 거르지 않는다

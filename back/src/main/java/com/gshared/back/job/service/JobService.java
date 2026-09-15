@@ -12,6 +12,7 @@ import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.domain.JobStatus;
+import com.gshared.back.workload.domain.Workload;
 import com.gshared.back.workload.exception.WorkloadErrorCode;
 import com.gshared.back.workload.repository.BaseModelRepository;
 import com.gshared.back.workload.repository.WorkloadRepository;
@@ -77,16 +78,19 @@ public class JobService {
     /**
      * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
      *
-     * 의도적으로 메서드 트랜잭션 없음 — Scheduler(외부 HTTP) 호출을 트랜잭션 안에 두면
-     * DB 커넥션을 쥔 채 응답을 기다리게 된다. 쓰기는 마지막 save() 한 번뿐이라 원자성도 충분.
+     * <p>쓰기 트랜잭션을 명시한다 — 클래스의 {@code readOnly = true} 가 그대로 적용되면 마지막 save() 의
+     * INSERT 가 읽기 전용 트랜잭션에서 실행되어 거절된다. Scheduler(외부 HTTP) 호출이 트랜잭션 안에 들어가는 건
+     * 감수한다: 트랜잭션을 아예 빼면(NOT_SUPPORTED) 후보 워커의 owner 지연 로딩이 깨지고 테스트 트랜잭션 안의
+     * 데이터도 보이지 않으며, 클래스 기본값(readOnly)으로도 이미 커넥션을 쥔 채 기다리고 있었으므로 달라지는 것은 없다.
      */
+    @Transactional
     public CreateJobResponse create(Long ownerId, CreateJobRequest request) {
-        // ① 컨텍스트 로드 (각 조회는 짧은 자체 트랜잭션)
+        // ① 컨텍스트 로드
         User owner = userRepository.findById(ownerId)
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
         Dataset dataset = datasetRepository.findByIdAndOwnerId(request.datasetId(), ownerId)
                 .orElseThrow(() -> new BusinessException(DatasetErrorCode.DATASET_NOT_FOUND));
-        workloadRepository.findByIdAndEnabledTrue(request.workloadId())
+        Workload workload = workloadRepository.findByIdAndEnabledTrue(request.workloadId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
         var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
@@ -100,7 +104,7 @@ public class JobService {
                 dataset.getTotalTokens(), dataset.getEffectiveTokens(),
                 dataset.getAvgSeqLength(), dataset.getMaxSeqLength());
 
-        // ② 학습 설정 확정 — CUSTOM 은 사용자 값 검증, AUTO 는 Scheduler 가 결정 (트랜잭션 밖)
+        // ② 학습 설정 확정 — CUSTOM 은 사용자 값 검증, AUTO 는 Scheduler 가 결정 (외부 HTTP)
         SchedulerTrainingConfig config = resolveTrainingConfig(request, datasetMeta);
 
         // ③ GPU 후보 (규격 §28) — 운영 조건(연결·하트비트·미배정·operator/지갑)은 쿼리가 걸렀고,
@@ -124,9 +128,10 @@ public class JobService {
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);   // 409 — 기다리면 해결
         }
 
-        // ④ Scheduler 추천 (트랜잭션 밖 — 외부 HTTP)
+        // ④ Scheduler 추천 (외부 HTTP) — VRAM 하한은 카탈로그 값을 그대로 전달, 거르는 건 Scheduler 몫
         SchedulerRecommendResponse rec = schedulerClient.recommend(new SchedulerRecommendRequest(
-                request.baseModelId(), request.workloadId(), datasetMeta, config, candidates));
+                request.baseModelId(), request.workloadId(), datasetMeta, config,
+                new SchedulerRecommendRequest.Requirements(workload.getMinVramMb()), candidates));
         // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
         if (rec.recommendedWorkerId() == null || rec.rankings() == null || rec.rankings().isEmpty()) {
             throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);
@@ -193,7 +198,8 @@ public class JobService {
     public JobDetailResponse getJob(Long ownerId, Long jobId) {
         Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
-        return JobDetailResponse.from(job);
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
     }
 
     /**
@@ -235,6 +241,10 @@ public class JobService {
                 return FundJobResponse.funded(job);
             }
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+        // 데이터셋 원본이 올라와 검증된 뒤에만 예치를 받는다 — 예치금이 묶인 채 워커가 내려받을 파일이 없는 상황을 막는다.
+        if (!job.hasDatasetFile()) {
+            throw new BusinessException(JobErrorCode.DATASET_NOT_UPLOADED);
         }
         // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
         jobRepository.findByFundTxHash(hash)

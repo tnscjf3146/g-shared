@@ -80,7 +80,7 @@ public class WorkerJobService {
                 new ExecutionContextResponse.Model(model.getId(), model.getModelRef(), model.getModelRevision()),
                 new ExecutionContextResponse.RuntimeImage(image.getId(), imageRef(image), image.getImageDigest()),
                 new ExecutionContextResponse.Dataset(
-                        dataset.getId(), datasetDownloadUrl(dataset), fileSha256(dataset.getDataHash()),
+                        dataset.getId(), datasetDownloadUrl(job), job.getDatasetSha256(),   // 해시는 업로드 완료 때 실제 파일에서 계산한 값
                         dataset.getSizeBytes(), dataset.getSampleCount(),
                         dataset.getTotalTokens(), dataset.getEffectiveTokens(),
                         dataset.getAvgSeqLength(), dataset.getMaxSeqLength()),
@@ -160,7 +160,7 @@ public class WorkerJobService {
         return "jobs/" + jobId + "/";
     }
 
-    /** "gshared/qlora-sft-runtime@sha256:..." — 저장소가 비어 있으면 digest 만 준다 (풀 수 없는 참조보다는 낫다). */
+    /** "le3560/gshared-qlora-sft-runtime@sha256:..." — 저장소가 비어 있으면 digest 만 준다 (풀 수 없는 참조보다는 낫다). */
     private static String imageRef(Workload image) {
         return image.getImageRepository() == null
                 ? image.getImageDigest()
@@ -168,27 +168,14 @@ public class WorkerJobService {
     }
 
     /**
-     * 데이터셋 내려받기 URL. storageUri 가 우리 스토리지의 오브젝트 키면 서명 URL 로 바꾸고,
-     * 이미 완전한 URL(http…)이면 그대로 준다. 아직 올라간 파일이 없으면 null —
+     * 데이터셋 내려받기 URL. 원본은 Job 에 묶여 있다(jobs/{id}/input/…, V15) — 업로드 완료 검증을 거친 키로 서명 URL 을 만든다.
+     * /fund 가 업로드 전에는 거절하므로 배정된 Job 에는 항상 있어야 하지만, cleanup 이 지웠거나 옛 데이터면 null —
      * 워커는 이 경우 INVALID_INPUT 으로 실패를 알린다.
      */
-    private String datasetDownloadUrl(Dataset dataset) {
-        String uri = dataset.getStorageUri();
-        if (uri == null || uri.isBlank()) {
+    private String datasetDownloadUrl(Job job) {
+        if (!job.hasDatasetFile()) {
             return null;
         }
-        if (uri.startsWith("http://") || uri.startsWith("https://")) {
-            return uri;
-        }
-        return objectStorage.presignDownload(uri, storageProperties.downloadTtl()).url();
-    }
-
-    /** 파일 검증용 표기(§1.4)는 0x 없는 64자리 hex. 저장된 값이 0x 붙은 bytes32 표기라면 벗긴다. */
-    private static String fileSha256(String dataHash) {
-        if (dataHash == null) {
-            return null;
-        }
-        String hex = dataHash.startsWith("0x") || dataHash.startsWith("0X") ? dataHash.substring(2) : dataHash;
-        return hex.toLowerCase(Locale.ROOT);
+        return objectStorage.presignDownload(job.getDatasetObjectKey(), storageProperties.downloadTtl()).url();
     }
 }

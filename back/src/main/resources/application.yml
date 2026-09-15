@@ -57,7 +57,7 @@ scheduler:
 # 지금은 Backend 가 파일을 직접 보관한다(LocalObjectStorage). S3 로 옮겨도 이 키 이름은 유지.
 storage:
   root: ${STORAGE_ROOT:./storage-data}
-  # 워커가 바깥에서 접속하는 Backend 주소. 서명 URL 앞에 그대로 붙는다.
+  # 워커가 바깥에서 접속하는 Backend 주소. 서명 URL 앞에 그대로 붙는다. (기본값은 로컬 전용 — prod 프로필은 필수로 덮어쓴다)
   public-base-url: ${STORAGE_PUBLIC_BASE_URL:http://localhost:8080}
   # URL 서명 키. 따로 두지 않으면 JWT 키를 겸용한다 — 운영에서는 분리 권장.
   signing-secret: ${STORAGE_SIGNING_SECRET:${JWT_SECRET}}

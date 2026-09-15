@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -26,7 +27,12 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private static final int MAX_REQUESTS = 100;               // 1분 허용 횟수
+    /**
+     * 1분 허용 횟수. 운영 기본 100. 로컬·테스트는 모든 요청이 127.0.0.1 하나에서 오므로 application-local.yml 이
+     * 사실상 끈다 — 통합 테스트 스위트 하나가 100회를 넘기면 뒤쪽 테스트가 429 로 깨진다.
+     */
+    @Value("${rate-limit.max-requests-per-minute:100}")
+    private int maxRequests;
     private static final Duration WINDOW = Duration.ofMinutes(1);   // 카운트 창
     private static final Duration BLOCK_DURATION = Duration.ofMinutes(5); // 차단 시간
 
@@ -56,7 +62,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         // ③ 한도 초과 → 차단 등록 후 429
-        if (count != null && count > MAX_REQUESTS) {
+        if (count != null && count > maxRequests) {
             redisTemplate.opsForValue().set(blockKey, "1", BLOCK_DURATION);
             writeTooManyRequests(response);
             return;

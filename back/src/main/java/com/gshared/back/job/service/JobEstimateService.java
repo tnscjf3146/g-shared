@@ -141,7 +141,8 @@ public class JobEstimateService {
         }
 
         SchedulerRecommendResponse response = schedulerClient.recommend(new SchedulerRecommendRequest(
-                request.baseModelId(), workload.getId(), datasetMeta, config, candidates));
+                request.baseModelId(), workload.getId(), datasetMeta, config,
+                new SchedulerRecommendRequest.Requirements(workload.getMinVramMb()), candidates));
         // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
         if (response.rankings() == null || response.rankings().isEmpty()) {
             throw new BusinessException(SchedulerErrorCode.NO_FEASIBLE_GPU);

@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 /**
  * Backend 자신이 파일을 보관하는 스토리지. 외부 S3/MinIO 없이 MVP 를 돌리기 위한 구현이다.
  *
- * <p>"서명 URL" 은 {@code {publicBaseUrl}/storage/{objectKey}?method=PUT&expires=..&sig=..} 꼴이고,
+ * <p>"서명 URL" 은 {@code {publicBaseUrl}/api/storage/{objectKey}?method=PUT&expires=..&sig=..} 꼴이고,
  * {@link StorageController} 가 서명·만료를 확인한 뒤 파일을 받거나 내준다. 서명은 HMAC-SHA256 이라
  * 비밀키를 모르면 URL 을 위조하거나 만료를 늘릴 수 없다 — S3 presigned URL 과 같은 성질이다.
  *
@@ -63,7 +63,7 @@ public class LocalObjectStorage implements ObjectStorage {
         long expires = Instant.now().plus(ttl).getEpochSecond();
         String signature = sign(method, objectKey, expires);
         String url = stripTrailingSlash(properties.publicBaseUrl())
-                + "/storage/" + objectKey
+                + "/api/storage/" + objectKey
                 + "?method=" + method + "&expires=" + expires + "&sig=" + signature;
         return new SignedUrl(url, Instant.ofEpochSecond(expires));
     }
@@ -85,6 +85,32 @@ public class LocalObjectStorage implements ObjectStorage {
         } catch (IOException | GeneralSecurityException e) {
             log.error("[Storage] stat 실패 key={}", objectKey, e);
             throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    @Override
+    public void delete(String objectKey) {
+        Path file = resolve(objectKey);
+        try {
+            Files.deleteIfExists(file);
+            // 비어 있는 상위 디렉터리(jobs/{id}/input)는 같이 정리 — Job 마다 빈 폴더가 쌓이지 않게. root 는 남긴다.
+            Path dir = file.getParent();
+            while (dir != null && !dir.equals(root) && dir.startsWith(root) && isEmptyDir(dir)) {
+                Files.delete(dir);
+                dir = dir.getParent();
+            }
+        } catch (IOException e) {
+            log.error("[Storage] delete 실패 key={}", objectKey, e);
+            throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    private static boolean isEmptyDir(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var entries = Files.list(dir)) {
+            return entries.findAny().isEmpty();
         }
     }
 
