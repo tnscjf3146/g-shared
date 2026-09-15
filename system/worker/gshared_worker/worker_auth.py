@@ -59,6 +59,14 @@ class WorkerAuthState(Enum):
     #: The Backend refused the token and will keep refusing it.
     AUTH_FAILED = "AUTH_FAILED"
 
+    #: The Backend said in as many words that this Worker token is not valid
+    #: (401 ``INVALID_WORKER_TOKEN``) -- the Worker was deleted from the account
+    #: and its token went with it. The identity on disk is dead, and it is the
+    #: **only** refusal that is: it may be forgotten and the machine enrolled
+    #: again, once, by the auth stage. Everything else -- an outage, a 5xx, a
+    #: bare 401 without that code -- leaves the identity where it is.
+    CREDENTIALS_INVALIDATED = "CREDENTIALS_INVALIDATED"
+
     #: The Backend said in as many words that it has no record of this Worker
     #: (``WORKER_NOT_FOUND``). Distinct from REVOKED, which is being told no by
     #: an account that knows this machine. Nothing is deleted and nobody is

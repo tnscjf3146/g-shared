@@ -50,6 +50,10 @@ _debug = logging.getLogger(LOGGER_NAME)
 #: The one 404 body that means the service really did look for this Worker.
 WORKER_NOT_FOUND = "WORKER_NOT_FOUND"
 
+#: The one 401 body that means the stored Worker token is dead -- what the
+#: Backend answers once the Worker has been deleted from the account.
+INVALID_WORKER_TOKEN = "INVALID_WORKER_TOKEN"
+
 REGISTER_PATH = "/api/workers/register"
 AUTHENTICATE_PATH = "/api/workers/authenticate"
 
@@ -200,6 +204,14 @@ class HttpWorkerRegistry:
              "workerToken": credentials.worker_token},
         )
         if not answered.succeeded:
+            if answered.status == 401 and answered.code == INVALID_WORKER_TOKEN:
+                # Only here, and only with this code, is the stored identity
+                # known to be dead. A 401 on registration is about the person's
+                # access token, and a 401 without the code says nothing certain.
+                _debug.warning("worker api: 401 %s", INVALID_WORKER_TOKEN)
+                return RegistryAnswer(
+                    WorkerAuthState.CREDENTIALS_INVALIDATED,
+                    "the service no longer accepts the stored Worker token")
             return _refused(answered, "this Worker")
 
         named = (answered.body or {}).get("workerId")

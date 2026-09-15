@@ -168,5 +168,45 @@ def store_credentials(
     return path
 
 
+def clear_credentials(directory: Path | None = None) -> bool:
+    """Forget the Worker identity, and nothing else. True when one was removed.
+
+    For one situation only: the Backend said the stored token is no longer
+    valid (``INVALID_WORKER_TOKEN``), so the identity is dead and keeping it
+    would refuse every start. ``workerId`` and the sealed token go together --
+    half an identity is never left behind -- through the same temporary-file
+    move :func:`store_credentials` uses. Every other setting stays, and so does
+    ``worker-wallet.json``, a separate file this never opens: the signing key
+    is this machine's on-chain identity and outlives any Worker registration.
+
+    A file that cannot be read is left exactly as it is. That is not a dead
+    identity, it is an unknown one, and :func:`load_credentials` already
+    reports it as UNUSABLE.
+    """
+    path = config_file_path(directory)
+    if not path.is_file():
+        return False
+    try:
+        values = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(values, dict):
+        return False
+
+    forgotten = values.get("workerId")
+    removed = [key for key in ("workerId", "workerTokenProtected", "workerToken")
+               if values.pop(key, None) is not None]
+    if not removed:
+        return False
+
+    temporary = path.with_suffix(path.suffix + ".new")
+    temporary.write_text(json.dumps(values, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+    # The identity that was dropped, never the token.
+    _debug.warning("cleared stored credentials for %s at %s",
+                   forgotten.strip() if _filled(forgotten) else "(no id)", path)
+    return True
+
+
 def _filled(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
