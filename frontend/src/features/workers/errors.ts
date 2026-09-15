@@ -4,7 +4,7 @@ import { ApiError } from '@/lib/fetcher'
 const MESSAGES: Record<string, string> = {
   WORKER_NOT_FOUND: '이미 해제된 워커입니다. 목록을 새로 고칩니다.',
   WORKER_BUSY: '작업 중인 워커는 해제할 수 없습니다. 작업을 먼저 취소해 주세요.',
-  FORBIDDEN: '내 워커만 해제할 수 있습니다.',
+  WORKER_FORBIDDEN: '내 워커만 해제할 수 있습니다.', // back WorkerErrorCode — FORBIDDEN 으로 적혀 있어 폴백으로 빠졌다(2026-09-15)
 }
 const FALLBACK = '잠시 후 다시 시도해 주세요.'
 

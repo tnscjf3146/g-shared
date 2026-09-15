@@ -2,7 +2,7 @@ import * as z from 'zod/mini'
 
 // 경로 상수는 여기(React 의존 없음) — mocks/handlers 가 api.ts 를 import 하면 auth store 가 서버(instrumentation MSW) 번들로 끌려감(wallet.md §3)
 export const WORKERS_PATH = '/workers'
-// 네트워크 전체 워커 현황(대시보드 지표) — 백엔드 미구현, 계약 먼저 고정(MSW 목업이 응답). 구현되면 목업 핸들러만 지우면 된다
+// 네트워크 전체 워커 현황(대시보드 지표) — back NetworkController(NetworkStatsResponse) 와 같은 모양
 export const NETWORK_STATS_PATH = '/network/stats'
 
 // 다운로드는 같은 오리진 /downloads/G-shared.exe(worker.md §8) — 프론트 이미지가 저장소 system/G-shared/G-shared.exe 를 public/downloads 로 담아 내려준다.
@@ -30,7 +30,7 @@ export const workerSchema = z.object({
 
 export const workerListSchema = z.array(workerSchema)
 
-/** GET /network/stats — 네트워크 전체 워커 현황(소비자 대시보드용). 계약 확정 2026-09-11, 백엔드 구현 전까지 MSW 목업 응답 */
+/** GET /network/stats — 네트워크 전체 워커 현황(소비자 대시보드용) */
 export const networkStatsSchema = z.object({
   onlineWorkers: z.number(), // 지금 작업을 받을 수 있는(ONLINE·RUNNING) 워커 수
   totalWorkers: z.number(), // 등록된 전체 워커 수

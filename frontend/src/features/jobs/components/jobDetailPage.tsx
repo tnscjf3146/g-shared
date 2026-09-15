@@ -170,7 +170,15 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
         <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
-        {job.status === 'CREATED' && <FundPanel job={job} onFunded={() => void load()} />}
+        {job.status === 'CREATED' &&
+          (job.datasetUploaded === false ? (
+            // 등록 도중 업로드가 끊긴 작업 — 서버는 /fund 를 409 DATASET_NOT_UPLOADED 로 거절하고, 상세에는 재업로드가 없다(파일은 브라우저 메모리에만 있었다)
+            <p role="alert" className="rounded-md bg-warning-tint px-4 py-3 text-[14px] text-warning">
+              데이터셋 파일 업로드가 끝나지 않아 예치할 수 없습니다. 위의 [작업 취소]로 이 작업을 닫고 워크로드 등록을 다시 진행해 주세요.
+            </p>
+          ) : (
+            <FundPanel job={job} onFunded={() => void load()} />
+          ))}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
         {job.assignedWorkerId && (
           <p className="text-[14px] tabular-nums text-text-muted" title={job.assignedWorkerId}>

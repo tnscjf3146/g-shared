@@ -32,6 +32,7 @@ const base = {
   workloadId: 1,
   baseModelId: 11,
   datasetId: 101,
+  datasetUploaded: true,
   trainingMode: 'AUTO',
   epochs: 3,
   batchSize: 16,

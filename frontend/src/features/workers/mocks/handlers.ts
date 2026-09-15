@@ -17,7 +17,7 @@ const withFreshHeartbeat = (w: Worker): Worker => ({
 })
 
 export const workerHandlers = [
-  // 네트워크 전체 워커 현황 — 백엔드 미구현 stub(계약: schema.ts networkStatsSchema). 구현되면 이 핸들러만 삭제
+  // 네트워크 전체 워커 현황 — back NetworkController 와 같은 응답(로컬 목업용)
   http.get(`${API_BASE_URL}${NETWORK_STATS_PATH}`, async ({ request }) => {
     await delay()
     if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')

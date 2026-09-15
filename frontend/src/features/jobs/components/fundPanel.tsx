@@ -17,6 +17,7 @@ import {
   waitForReceipt,
 } from '@/features/wallet/ethereum'
 import { fundJob } from '../api'
+import { isTransientFundError, jobMessageFor } from '../errors'
 import type { JobDetail } from '../types'
 
 // GSC 예치(Escrow_Fund_계약_정리 2026-09-15) — CREATED 작업 상세에 붙는 패널. MetaMask 서명이 두 번 뜬다: 1/2 승인(approve) → 2/2 예치(createAndFundJob).
@@ -26,7 +27,8 @@ import type { JobDetail } from '../types'
 type Phase =
   | { s: 'idle' }
   | { s: 'busy'; label: string } // 검사·서명 대기·채굴 대기 — 버튼 잠금
-  | { s: 'pendingConfirm'; txHash: string; message: string } // 체인 성공, 서버 확인 대기(PENDING)·실패 — 같은 해시로 재시도
+  | { s: 'pendingConfirm'; txHash: string; message: string } // 체인 성공, 서버 확인 대기(PENDING)·일시 실패 — 같은 해시로 재시도
+  | { s: 'rejected'; txHash: string; message: string } // 체인 성공, 서버가 확정 거절(4xx) — 재시도도 재예치도 안 된다. 해시를 남기고 팀 문의
   | { s: 'error'; message: string }
   | { s: 'done' }
 
@@ -55,8 +57,9 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
         setPhase({ s: 'pendingConfirm', txHash: hash, message: '예치는 체인에 접수됐고 서버가 영수증을 기다리는 중입니다. 잠시 후 다시 확인해 주세요.' })
       }
     } catch (e) {
-      console.error('예치 서버 확인 실패', e) // 체인은 성공 — 원인 파악용 로그(사용자 흐름은 재시도로 복구)
-      setPhase({ s: 'pendingConfirm', txHash: hash, message: '예치는 체인에서 처리되었습니다. 서버 확인이 지연되고 있습니다 — 트랜잭션을 다시 보내지 마세요.' })
+      console.error('예치 서버 확인 실패', e) // 체인은 성공 — 원인 파악용 로그
+      if (isTransientFundError(e)) setPhase({ s: 'pendingConfirm', txHash: hash, message: '예치는 체인에서 처리되었습니다. 서버 확인이 지연되고 있습니다 — 트랜잭션을 다시 보내지 마세요.' })
+      else setPhase({ s: 'rejected', txHash: hash, message: `${jobMessageFor(e)} 예치 트랜잭션은 체인에 남아 있습니다 — 아래 해시와 함께 팀에 문의해 주세요.` })
     }
   }
 
@@ -123,14 +126,14 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
             {job.estimatedCost.toLocaleString('ko-KR')} GSC를 에스크로 금고에 맡기면 워커 배정이 시작됩니다. MetaMask 서명이 두 번(승인·예치) 필요합니다.
           </span>
         </div>
-        {phase.s !== 'pendingConfirm' && (
+        {phase.s !== 'pendingConfirm' && phase.s !== 'rejected' && (
           <Button disabled={busy} onClick={fund}>
             {busy ? phase.label + '…' : phase.s === 'error' ? '다시 예치 시도' : `${job.estimatedCost.toLocaleString('ko-KR')} GSC 예치`}
           </Button>
         )}
       </div>
 
-      {phase.s === 'error' && (
+      {(phase.s === 'error' || phase.s === 'rejected') && (
         <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">{phase.message}</p>
       )}
       {phase.s === 'pendingConfirm' && (

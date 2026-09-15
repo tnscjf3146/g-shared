@@ -153,7 +153,7 @@ export function WorkloadWizard() {
       setSubmitting('업로드 확인 중…')
       const verified = await completeDatasetUpload(jobId)
       if (!verified) {
-        setError('데이터셋 업로드 검증에 실패했습니다. 파일을 다시 올려 주세요.')
+        setError(`데이터셋 업로드 검증에 실패했습니다. 작업 #${jobId} 은(는) 예치 대기로 남아 있으니 상세에서 취소한 뒤, 분석한 파일을 그대로 다시 등록해 주세요.`)
         setSubmitting(null)
         return
       }
