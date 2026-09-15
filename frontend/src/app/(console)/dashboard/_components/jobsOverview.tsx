@@ -139,9 +139,11 @@ function Donut({ counts, total }: { counts: number[]; total: number }) {
   // 조각 i 의 시작 위치 = 앞 조각 길이의 누적 합
   const lens = counts.map((n) => (total ? (n / total) * C : 0))
   const starts = lens.map((_, i) => lens.slice(0, i).reduce((a, b) => a + b, 0))
+  // 스크린리더용 요약 — 색으로만 구분되는 조각을 글자로: "전체 7개 · 진행 2, 대기 1, 완료 3, 종료 1"
+  const label = total ? `작업 상태 분포, 전체 ${total}개 · ${SEGMENTS.map((s, i) => `${s.key} ${counts[i]}`).join(', ')}` : '작업 없음'
   return (
     <div className="relative size-[120px] flex-none">
-      <svg viewBox="0 0 120 120" className="-rotate-90">
+      <svg viewBox="0 0 120 120" className="-rotate-90" role="img" aria-label={label}>
         {total === 0 && <circle cx="60" cy="60" r={R} fill="none" strokeWidth="12" className="stroke-neutral-tint" />}
         {counts.map(
           (n, i) =>

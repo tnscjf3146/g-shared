@@ -71,13 +71,20 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
-  const onCancel = async (id: number) => {
-    if (!confirm(`작업 #${id} 을(를) 취소할까요?`)) return
+  // 작업 취소: 네이티브 confirm 대신 접근성 있는 ConfirmDialog(Esc·backdrop·포커스 트랩). 목록 행의 취소 버튼이 대상 id 를 넘긴다
+  const [cancelTarget, setCancelTarget] = useState<number | null>(null)
+  const [cancelling, setCancelling] = useState(false)
+  const onCancel = (id: number) => setCancelTarget(id)
+  const confirmCancel = async () => {
+    if (cancelTarget == null) return
+    setCancelling(true)
     try {
-      await cancelJob(id)
-      load(true)
+      await cancelJob(cancelTarget)
     } catch (e) {
       setNotice(jobMessageFor(e))
+    } finally {
+      setCancelling(false)
+      setCancelTarget(null)
       load(true)
     }
   }
@@ -124,12 +131,10 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
         </p>
       )}
 
-      {/* 작업 탭: 히어로·도넛·최근 활동·노드 지도·KPI 카드(대시보드.png 구조) → 목록. CTA 는 히어로 배너에, 지표는 JobsOverview 의 KPI 카드가 담당 */}
-      {tab === 'jobs' ? (
-        <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
-      ) : (
-        <StatTiles items={stats} loading={workers.status === 'loading'} />
-      )}
+      {/* 요약(도넛·KPI·진행 중 / 지표 4칸)은 데이터가 있을 때만 — 0건이면 빈 카드만 잔뜩 뜨므로, 아래 빈 상태 안내에 맡긴다 */}
+      {tab === 'jobs'
+        ? (jobs.status === 'loading' || jobList.length > 0) && <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
+        : (workers.status === 'loading' || workerList.length > 0) && <StatTiles items={stats} loading={workers.status === 'loading'} />}
 
       {tab === 'jobs' ? (
         <section className="flex flex-col gap-4">
@@ -183,6 +188,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
           )}
         </section>
       )}
+      <ConfirmDialog open={cancelTarget !== null} message={`작업 #${cancelTarget} 을(를) 취소할까요?`} confirmLabel="작업 취소" danger pending={cancelling} onConfirm={confirmCancel} onCancel={() => !cancelling && setCancelTarget(null)} />
       <ConfirmDialog open={unlinkTarget !== null} message="정말 해제할까요?" confirmLabel="해제" danger pending={unlinking} onConfirm={confirmUnlink} onCancel={() => !unlinking && setUnlinkTarget(null)} />
     </>
   )
