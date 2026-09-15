@@ -243,7 +243,7 @@ export const jobHandlers = [
     const est = estimate(dataset, 2, cfg) // 추천 GPU 는 4070 등급으로 고정
     const job: JobDetail = {
       jobId: nextId++, status: 'CREATED',
-      workloadId: body.workloadId, baseModelId: body.baseModelId, datasetId: body.datasetId,
+      workloadId: body.workloadId, baseModelId: body.baseModelId, datasetId: body.datasetId, datasetUploaded: false,
       trainingMode: body.trainingMode, epochs: cfg.epochs, batchSize: cfg.batchSize, learningRate: cfg.learningRate, maxLength: cfg.maxLength,
       predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, actualRuntimeSec: null, actualCost: null, assignedWorkerId: null,
       progressPercent: null, progressEpoch: null, progressTotalEpochs: cfg.epochs, resultHash: null, resultUrl: null, failReason: null,
@@ -255,7 +255,7 @@ export const jobHandlers = [
     return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1' }, { status: 201 })
   }),
 
-  // ── Dataset 원본 업로드(Dataset_Upload_Handoff) — 백엔드 미구현 stub. 구현되면 이 세 핸들러만 삭제 ──
+  // ── Dataset 원본 업로드(Dataset_Upload_Handoff) — back JobController·StorageController 와 같은 흐름(로컬 목업용) ──
   http.post(`${URL}/:jobId/dataset-upload`, async ({ request, params }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
@@ -270,7 +270,9 @@ export const jobHandlers = [
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
     if (!find(Number(params.jobId))) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
-    return HttpResponse.json({ verified: uploaded.has(Number(params.jobId)) })
+    const verified = uploaded.has(Number(params.jobId))
+    if (verified) set(Number(params.jobId), { datasetUploaded: true }) // back: 검증 통과 시 Job.datasetUploaded 가 true 로
+    return HttpResponse.json({ verified })
   }),
 
   // 예치 확인 — 백엔드 규격 { txHash } (영수증 검증은 실서버 몫, 목업은 형식만 보고 FUNDED). 멱등: 이미 FUNDED 면 같은 답
@@ -283,6 +285,7 @@ export const jobHandlers = [
     const body = (await request.json().catch(() => null)) as { txHash?: string } | null
     if (!body?.txHash || !/^0x[0-9a-fA-F]{64}$/.test(body.txHash)) return error(400, 'INVALID_INPUT', 'txHash는 0x로 시작하는 64자리 16진수여야 합니다.')
     if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    if (job.status === 'CREATED' && job.datasetUploaded === false) return error(409, 'DATASET_NOT_UPLOADED', '데이터셋 파일이 아직 업로드되지 않았습니다. 업로드를 마친 뒤 예치해주세요.')
     if (job.status === 'CREATED') {
       set(id, { status: 'FUNDED' })
       resume(find(id)!)

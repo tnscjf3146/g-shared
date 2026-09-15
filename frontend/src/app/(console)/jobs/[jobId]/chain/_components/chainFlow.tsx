@@ -84,29 +84,31 @@ const GLOW_CSS = `
 @media (prefers-reduced-motion: reduce){.jf-glow,.jf-glow-bad,.jf-halo{animation:none}}
 `
 
-// 결정적 별배경 (SSR/클라 동일 → 하이드레이션 안전)
-function useStars(n: number) {
-  return useMemo(() => {
-    let s = 987654321
-    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
-    return Array.from({ length: n }, () => ({ x: rnd() * W, y: rnd() * H, r: rnd() * 1.1 + 0.3, o: rnd() * 0.55 + 0.15 }))
-  }, [n])
+// 결정적 별배경 (SSR/클라 동일 → 하이드레이션 안전).
+// 시드를 굴리는 rnd 는 렌더 밖(모듈 스코프)에 둔다 — useMemo 안에 두면 "렌더가 끝난 뒤 변수 재할당"으로 잡힌다(react-hooks/immutability).
+// Array.from 이 콜백을 즉시 부르므로 실제로 새어 나가지 않지만, 린터는 그걸 못 따라간다
+function makeStars(n: number) {
+  let s = 987654321
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff }
+  return Array.from({ length: n }, () => ({ x: rnd() * W, y: rnd() * H, r: rnd() * 1.1 + 0.3, o: rnd() * 0.55 + 0.15 }))
 }
+const useStars = (n: number) => useMemo(() => makeStars(n), [n])
 
 type State = { s: 'loading' } | { s: 'notfound' } | { s: 'error' } | { s: 'ready'; job: JobDetail }
 
 export function ChainFlow({ jobId }: { jobId: number }) {
   const [state, setState] = useState<State>({ s: 'loading' })
 
+  // async/await 대신 then 체인 — 대시보드·계정 화면과 같은 모양이고, effect 에서 부를 때 setState 가
+  // 동기 호출로 잡히지 않는다(react-hooks/set-state-in-effect). 실제 동작은 await 와 같다(응답 뒤에 setState)
   const load = useCallback(
-    async (silent = false) => {
-      try {
-        setState({ s: 'ready', job: await getJob(jobId) })
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) setState({ s: 'notfound' })
-        else if (!silent) setState({ s: 'error' })
-      }
-    },
+    (silent = false) =>
+      getJob(jobId)
+        .then((job) => setState({ s: 'ready', job }))
+        .catch((e) => {
+          if (e instanceof ApiError && e.status === 404) setState({ s: 'notfound' })
+          else if (!silent) setState({ s: 'error' })
+        }),
     [jobId],
   )
 

@@ -7,7 +7,7 @@ export async function getMyWorkers(): Promise<Worker[]> {
   return workerListSchema.parse(await authFetch<unknown>(`${WORKERS_PATH}/me`))
 }
 
-/** GET /network/stats → 네트워크 전체 워커 현황. 백엔드 미구현 — 계약만 확정, MSW 목업이 응답(handlers.ts) */
+/** GET /network/stats → 네트워크 전체 워커 현황(back NetworkController) */
 export async function getNetworkStats(): Promise<NetworkStats> {
   return networkStatsSchema.parse(await authFetch<unknown>(NETWORK_STATS_PATH))
 }

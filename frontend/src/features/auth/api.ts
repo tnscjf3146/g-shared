@@ -112,12 +112,12 @@ function toLogin(): never {
   throw new ApiError(401, 'UNAUTHORIZED', '인증이 필요합니다.')
 }
 
-/** GET /users/me — 내 프로필. 백엔드 미구현: 계약만 확정(schema.ts meSchema), MSW 목업이 응답 */
+/** GET /users/me — 내 프로필(back UserController) */
 export async function getMe(): Promise<Me> {
   return meSchema.parse(await authFetch<unknown>(USERS_ME_PATH))
 }
 
-/** PATCH /users/me { nickname } → 204. 백엔드 미구현 — 목업 응답 */
+/** PATCH /users/me { nickname } → 204(back UserController) */
 export function updateNickname(nickname: string): Promise<void> {
   return authFetch<void>(USERS_ME_PATH, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify({ nickname }) })
 }

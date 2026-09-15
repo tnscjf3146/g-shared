@@ -17,7 +17,7 @@ const tokenJson = (setCookie: boolean) =>
   )
 
 export const authHandlers = [
-  // 내 계정 — 백엔드 미구현 stub(계약: schema.ts meSchema). 구현되면 이 두 핸들러만 삭제
+  // 내 계정 — back UserController 와 같은 응답(로컬 목업용)
   http.get(`${API_BASE_URL}${USERS_ME_PATH}`, async ({ request }) => {
     await delay()
     if (!request.headers.get('Authorization')?.startsWith('Bearer ')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')

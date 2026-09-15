@@ -39,7 +39,7 @@ export const loginSchema = z.object({
 
 export const tokenResponseSchema = z.object({ accessToken: z.string().check(z.minLength(1)) })
 
-// 내 계정 — 백엔드 미구현, 계약 먼저 고정(MSW 목업이 응답). 구현되면 목업 핸들러만 지우면 된다
+// 내 계정 — back UserController(MeResponse) 와 같은 모양
 export const USERS_ME_PATH = '/users/me'
 /** GET /users/me — 내 프로필 */
 export const meSchema = z.object({

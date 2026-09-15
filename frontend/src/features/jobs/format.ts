@@ -19,7 +19,7 @@ export const STATUS_SENTENCE: Record<JobStatus, string> = {
   ASSIGNED: '워커에 배정됐습니다. 곧 학습이 시작됩니다.',
   RUNNING: '학습이 진행 중입니다.',
   COMPLETED: '학습이 끝났습니다. 아래에서 결과를 받을 수 있습니다.',
-  FAILED: '학습이 실패했습니다. (실패 사유 표시는 백엔드 응답 추가 후)',
+  FAILED: '학습이 실패했습니다.',
   CANCELLED: '취소된 작업입니다.',
 }
 /** 아직 끝나지 않은 상태 — 상세 폴링 대상 */

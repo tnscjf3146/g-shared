@@ -142,6 +142,7 @@ export const jobDetailSchema = z.object({
   // 예치가 끝난 Job 은 예치 당시 값이 따로 박힌다 — 예치 후 화면(취소·탐색기 링크)은 이쪽 우선
   escrowChainId: z.optional(z.nullable(z.number())),
   escrowContractAddress: z.optional(z.nullable(hexAddress)),
+  datasetUploaded: z.optional(z.boolean()), // 원본 파일이 올라와 검증됐는가 — false 면 /fund 가 409 DATASET_NOT_UPLOADED 로 거절한다(예치 버튼을 열면 안 된다)
   status: jobStatusSchema,
   workloadId: z.number(),
   baseModelId: z.number(),

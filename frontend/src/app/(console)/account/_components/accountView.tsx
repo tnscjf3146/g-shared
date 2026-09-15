@@ -11,7 +11,7 @@ import { getWallet } from '@/features/wallet/api'
 import type { Me } from '@/features/auth/types'
 import type { Wallet } from '@/features/wallet/types'
 
-// 내 계정 — 프로필 카드(닉네임 인라인 수정) + 지갑 연결 상태 카드. 데이터는 GET /users/me(목업)·GET /users/me/wallet(실 API 계약)
+// 내 계정 — 프로필 카드(닉네임 인라인 수정) + 지갑 연결 상태 카드. 데이터는 GET /users/me · GET /users/me/wallet
 type Loaded<T> = { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: T }
 
 export function AccountView() {
