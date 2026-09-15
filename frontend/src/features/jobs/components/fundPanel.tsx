@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   ReceiptTimeoutError,
+  SSAFY_CHAIN,
   approveGsc,
   createAndFundJob,
   ensureSsafyChain,
@@ -68,6 +69,8 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
       if (!clientWallet) return setPhase({ s: 'error', message: '계정에 연결된 지갑이 없습니다. 지갑 페이지에서 먼저 연결해 주세요.' })
       if (!externalRef || !priceWei || !providerWallet || !escrowAddress || chainId == null)
         return setPhase({ s: 'error', message: '예치 정보가 아직 준비되지 않았습니다. 새로고침 후에도 반복되면 팀에 문의해 주세요.' })
+      // 백엔드가 준 체인이 프론트가 지원하는 체인과 다르면 중단 — ensureSsafyChain 이 엉뚱한 체인에 예치하지 않게
+      if (chainId !== SSAFY_CHAIN.id) return setPhase({ s: 'error', message: '지원하지 않는 네트워크 조건입니다. 관리자에게 문의해 주세요.' })
       const price = BigInt(priceWei) // Number() 금지 — 정밀도 손실
 
       const p = getProvider()

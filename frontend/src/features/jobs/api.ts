@@ -1,10 +1,13 @@
 import { authFetch } from '@/features/auth/api'
+import { ApiError } from '@/lib/fetcher'
 import {
   CATALOG_PATHS,
   DATASETS_PATH,
   JOBS_PATH,
   baseModelSchema,
   createJobResponseSchema,
+  datasetUploadCompleteSchema,
+  datasetUploadSchema,
   datasetSchema,
   estimateSchema,
   gpuOptionSchema,
@@ -79,4 +82,22 @@ export async function getCatalog(): Promise<Catalog> {
  *  멱등: 같은 txHash 재전송 시 같은 답. PENDING 이면 잠시 후 같은 txHash 로 재시도(새 트랜잭션 금지) */
 export async function fundJob(jobId: number, txHash: string): Promise<FundResponse> {
   return fundResponseSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/fund`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ txHash }) }))
+}
+
+/** POST /jobs/{jobId}/dataset-upload → 서명 uploadUrl. Job 생성 직후, 원본 파일 업로드 전에 호출 */
+export async function requestDatasetUpload(jobId: number): Promise<string> {
+  const res = datasetUploadSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/dataset-upload`, { method: 'POST' }))
+  return res.uploadUrl
+}
+
+/** 서명 URL 에 원본 파일 PUT — 서명이 곧 인증이라 Authorization 없이 원본 fetch. 실패는 상태코드로만 판단 */
+export async function uploadDatasetFile(uploadUrl: string, file: File): Promise<void> {
+  const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
+  if (!res.ok) throw new ApiError(res.status, 'UPLOAD_FAILED', '데이터셋 업로드에 실패했습니다.')
+}
+
+/** POST /jobs/{jobId}/dataset-upload/complete → verified. false 면 Job 진행(예치)을 중단해야 한다 */
+export async function completeDatasetUpload(jobId: number): Promise<boolean> {
+  const res = datasetUploadCompleteSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/dataset-upload/complete`, { method: 'POST' }))
+  return res.verified
 }
