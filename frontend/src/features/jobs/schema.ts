@@ -174,3 +174,9 @@ export const fundResponseSchema = z.object({
   txHash: z.string(),
   escrowJobId: z.nullable(z.string()),
 })
+
+/** POST /jobs/{id}/dataset-upload — Dataset 원본 업로드용 서명 URL 발급(Dataset_Upload_Handoff).
+ *  objectKey·storageUri 는 프론트가 만들지 않는다 — URL 에 담긴 서명이 곧 인증 */
+export const datasetUploadSchema = z.object({ uploadUrl: z.string().check(z.minLength(1)) })
+/** POST /jobs/{id}/dataset-upload/complete — 업로드 검증 결과. verified=true 여야 다음 단계 진행 */
+export const datasetUploadCompleteSchema = z.object({ verified: z.boolean() })

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Stepper } from '@/components/ui/stepper'
-import { createDataset, createJob, getCatalog } from '../api'
+import { completeDatasetUpload, createDataset, createJob, getCatalog, requestDatasetUpload, uploadDatasetFile } from '../api'
 import { hashFile } from '../dataset-analysis'
 import { jobMessageFor } from '../errors'
 import { hasEnough, useWalletFunds } from '../hooks/use-wallet-funds'
@@ -123,8 +123,8 @@ export function WorkloadWizard() {
     }
   }
 
-  // 마지막: 데이터셋 메타 등록(POST /datasets: 5값 + effectiveTokens + 파일 해시) → POST /jobs → 상세로.
-  // 원본 파일(데이터셋·어댑터·내 모델)은 저장 위치가 정해질 때까지 보내지 않는다(백엔드 안내 2026-09-10 §4). 견적·GPU 는 서버가 Scheduler 로 다시 계산
+  // 마지막: 데이터셋 메타 등록 → POST /jobs → 원본 파일 업로드(서명 URL) → 검증 → 상세로. (Dataset_Upload_Handoff 2026-09-15)
+  // 업로드·검증에 실패하면 상세로 보내지 않는다 — 예치까지 진행되면 Worker 가 파일을 못 받아 실행을 거부하기 때문
   const submit = async () => {
     if (!spec || !state.gpuId || !state.estimate || !state.datasetFile) return
     setError(null)
@@ -146,6 +146,17 @@ export function WorkloadWizard() {
         trainingPriority: spec.trainingMode === 'AUTO' ? state.level : undefined, // 견적의 autoMode 와 같은 값, 이름만 다름
         trainingConfig: spec.trainingMode === 'CUSTOM' ? state.estimate.trainingConfig : undefined,
       })
+      // 원본 파일 업로드 — objectKey·storageUri 는 백엔드 몫, 프론트는 발급받은 서명 URL 에 PUT 만
+      setSubmitting('데이터셋 업로드 중…')
+      const uploadUrl = await requestDatasetUpload(jobId)
+      await uploadDatasetFile(uploadUrl, state.datasetFile)
+      setSubmitting('업로드 확인 중…')
+      const verified = await completeDatasetUpload(jobId)
+      if (!verified) {
+        setError('데이터셋 업로드 검증에 실패했습니다. 파일을 다시 올려 주세요.')
+        setSubmitting(null)
+        return
+      }
       router.replace(`/jobs/${jobId}`)
     } catch (e) {
       setError(jobMessageFor(e))

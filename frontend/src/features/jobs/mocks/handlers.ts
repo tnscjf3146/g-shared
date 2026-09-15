@@ -50,6 +50,7 @@ function set(jobId: number, patch: Partial<JobDetail>) {
   persist()
 }
 const find = (jobId: number) => jobs.find((j) => j.jobId === jobId)
+const uploaded = new Set<number>() // dataset-upload 목업 상태 — PUT 이 다녀간 jobId
 
 // AUTO 방향 → 설정 (AI build_auto_config 를 단순화)
 const AUTO_CONFIG: Record<AutoMode, (maxSeq: number) => TrainingConfig> = {
@@ -252,6 +253,24 @@ export const jobHandlers = [
     persist()
     resume(job)
     return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1' }, { status: 201 })
+  }),
+
+  // ── Dataset 원본 업로드(Dataset_Upload_Handoff) — 백엔드 미구현 stub. 구현되면 이 세 핸들러만 삭제 ──
+  http.post(`${URL}/:jobId/dataset-upload`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    if (!find(Number(params.jobId))) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    return HttpResponse.json({ uploadUrl: `${API_BASE_URL}/storage/mock/datasets/${params.jobId}?expires=9999999999&sig=mock` })
+  }),
+  http.put(`${API_BASE_URL}/storage/mock/datasets/:jobId`, async ({ params }) => {
+    uploaded.add(Number(params.jobId)) // 본문은 버린다 — 목업 스토리지는 존재 여부만 기억
+    return new HttpResponse(null, { status: 200 })
+  }),
+  http.post(`${URL}/:jobId/dataset-upload/complete`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    if (!find(Number(params.jobId))) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    return HttpResponse.json({ verified: uploaded.has(Number(params.jobId)) })
   }),
 
   // 예치 확인 — 백엔드 규격 { txHash } (영수증 검증은 실서버 몫, 목업은 형식만 보고 FUNDED). 멱등: 이미 FUNDED 면 같은 답
