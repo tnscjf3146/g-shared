@@ -19,15 +19,25 @@ import { DRACO, MODEL } from './gpuModel'
 const CHAPTER = 5 // 사이드바 06 = 인덱스 5
 const SHOW_AT = 0.02 // 층이 벌어지기 시작하면(P.stack) tx 핀부터
 const LAYERS: { label: string; part: string[]; revealAt: number; lift?: number; side?: Side; offset?: Vec3 }[] = [
-  { label: '참조값', part: ['Backplate'], revealAt: 0.12, side: 'left' }, // 백플레이트·PCB 는 스택에서도 붙어 있어 같은 자리 — 금액(오른쪽)과 반대로
-  { label: '금액', part: ['PCB'], revealAt: 0.3, side: 'right' }, // 카드 중앙 — 왼쪽으로 뻗으면 카피와 겹친다
-  { label: '의뢰자 · 공급자 지갑', part: ['ColdPlate'], revealAt: 0.5, side: 'right', offset: [-0.6, 0, 0] }, // 카드 중앙 — 왼쪽으로 뻗으면 카피와 겹치고, 정중앙에서 오른쪽으로 뻗으면 긴 라벨이 tx 해시 패널을 친다 → −X 로 조금 비켜서
+  { label: '참조값', part: ['Backplate'], revealAt: 0.12, side: 'left', offset: [-0.5, 0, 0] }, // 백플레이트·PCB 는 스택에서도 붙어 있어 같은 자리 — 금액(오른쪽)과 반대로, 앵커도 −X 로 비켜 두 선이 X 자로 교차하지 않게(2026-09-15)
+  { label: '금액', part: ['PCB'], revealAt: 0.3, side: 'right', offset: [0.5, 0, 0] }, // 오른쪽으로 뻗는다(왼쪽은 카피). 앵커를 +X 로 옮겨 지갑(왼쪽으로 뻗음) 점의 오른쪽에서 출발 — 두 선이 X 자로 교차하지 않게(2026-09-15)
+  { label: '의뢰자 · 공급자 지갑', part: ['ColdPlate'], revealAt: 0.5, side: 'left', offset: [0.45, 0, 0] }, // 오른쪽으로 두면 tx 지시선이 이 라벨을 가로질렀다(2026-09-15) → 왼쪽으로. 앵커를 +X 로 조금 옮겨 라벨이 왼쪽 카피(x≤~520)에 닿지 않게
   { label: '상태', part: ['Fin_merged', 'Fin_'], revealAt: 0.7 },
   { label: '결과 해시', part: ['Shroud'], revealAt: 0.9 },
 ]
 const TX_AT = 200
 const HASH = '0x9f2c…f7a8' // 앞 4·뒤 4 — 20자로 두면 720 높이 화면에서 오른쪽 챕터 사이드바에 닿았다
-const BLOCK = { from: 11_212_000, to: 11_212_435, at: 700, duration: 1100 }
+const BLOCK = { from: 11_212_000, to: 11_212_435, at: 700, duration: 1100 } // 첫 등장: 블록 번호 카운트업
+// 그 뒤 챕터에 머무는 동안 살아 있는 체인처럼(2026-09-15 사용자 요청): 바퀴마다 블록 +1, 새 해시가 왼쪽부터 자리 잡는다
+const LIVE = { start: 2000, scramble: 900, hold: 900 } // ms, rate 반영 전
+const HEX = '0123456789abcdef'
+const randomHash = () => {
+  let h = '0x'
+  for (let i = 0; i < 4; i++) h += HEX[(Math.random() * 16) | 0]
+  h += '…'
+  for (let i = 0; i < 4; i++) h += HEX[(Math.random() * 16) | 0]
+  return h
+}
 
 
 export function ChainCallout() {
@@ -52,11 +62,13 @@ export function ChainCallout() {
   const shown = useRef(false)
   const layerOn = useRef<boolean[]>(LAYERS.map(() => false))
   const tl = useRef<Timeline | null>(null)
+  const live = useRef<Timeline | null>(null) // 해시·블록 순환(loop)
   const layerTl = useRef<(Timeline | null)[]>(LAYERS.map(() => null))
 
   useEffect(
     () => () => {
       tl.current?.pause()
+      live.current?.pause()
       layerTl.current.forEach((t) => t?.pause())
     },
     [],
@@ -70,10 +82,29 @@ export function ChainCallout() {
     if (on !== shown.current) {
       shown.current = on
       tl.current?.pause()
+      live.current?.pause()
       if (on) {
         const t = enterAll(txPins, rate, TX_AT)
         scrambleIn(t, hash, HASH, { at: BLOCK.at, duration: BLOCK.duration, rate })
         countUp(t, block, BLOCK.from, BLOCK.to, { at: BLOCK.at, duration: BLOCK.duration, rate, format: (v) => '#' + Math.round(v).toLocaleString('ko-KR') })
+        // 살아 있는 체인: 바퀴마다 블록 +1 · 새 해시 스크램블. 대상 문자열은 바퀴 시작 call 이 바꾸고, 같은 p 트윈이 그걸 읽어 쓴다(loop 로 p 는 매 바퀴 0 부터)
+        const st = { p: 0, text: HASH, block: BLOCK.to }
+        const isHex = [...HASH].map((ch) => /[0-9a-f]/.test(ch)) // 자리 모양은 항상 같다(0x····…····) — 매 프레임 정규식 대신 한 번만
+        const write = () => {
+          const k = Math.floor(st.p * st.text.length)
+          let out = ''
+          for (let i = 0; i < st.text.length; i++) out += i < k || !isHex[i] ? st.text[i] : HEX[(Math.random() * 16) | 0]
+          hash.textContent = out
+        }
+        const c = createTimeline({ loop: true, loopDelay: LIVE.hold * rate, autoplay: false })
+        c.call(() => {
+          st.text = randomHash()
+          st.block += 1
+          block.textContent = '#' + st.block.toLocaleString('ko-KR')
+        }, 0)
+        c.add(st, { p: [0, 1], duration: LIVE.scramble * rate, ease: 'linear', onUpdate: write }, 0)
+        t.call(() => c.play(), LIVE.start * rate) // 첫 등장(카운트업·첫 해시)이 끝난 뒤부터
+        live.current = c
         tl.current = t
       } else {
         tl.current = exitAll(txPins, rate)

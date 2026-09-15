@@ -13,7 +13,6 @@ import { GpuFitCallout } from './gpuFitCallout'
 import { GpuModel } from './gpuModel'
 import { ProviderCallout } from './providerCallout'
 import { Lights, Studio } from './lights'
-import { Smoke } from './smoke'
 import { StatusLeds } from './statusLeds'
 
 // r3f 캔버스 조립. 카메라는 cameraRig, 조명은 lights, 부품은 gpuModel — 모두 매 프레임 P 를 읽는다.
@@ -63,7 +62,7 @@ export function GpuCanvas() {
           <EscrowCallout />
           <ChainCallout />
           <StatusLeds />
-          <Smoke />
+          {/* 연기(three/smoke.tsx)는 02 재생 1.8초 동안 GPU fill 이 커서 뺐다(2026-09-15 사용자 결정, A/B 확인용). 되살리려면 import { Smoke } from './smoke' 와 <Smoke /> 두 줄 */}
           <Studio />
           <Lights />
         </Suspense>

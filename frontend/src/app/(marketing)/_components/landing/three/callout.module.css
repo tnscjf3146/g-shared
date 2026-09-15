@@ -108,6 +108,9 @@
   padding: 1px 6px;
   border-radius: 4px;
 }
+.fit:empty {
+  display: none; /* 05 장부 배지 — 타임라인이 글자를 넣기 전엔 자리도 안 차지한다(hidden 속성 대신) */
+}
 .fit[data-tone='good'],
 .fit[data-tone='ok'] {
   color: var(--color-primary);

@@ -18,16 +18,17 @@ const CHAPTER = 3 // 사이드바 04 = 인덱스 3
 const SHOW_AT = 0.6 // 히트싱크가 이만큼 빠져나갔을 때(P.hsOff) 켠다
 const GAIN = { minutes: 192, gsc: 1920, at: 300, duration: 1400 }
 const LED: Vec3 = [-0.89, -0.2 + 0.012, -0.44] // statusLeds.tsx 의 heartbeat LED(BIOS IC 옆)
+const CAP_O: Vec3 = [0.3, -0.1, 0.5] // tools/gpu_model.py Cap_O0 윗면(기판 -0.19 + 캡 높이)
 const fmtHours = (m: number) => {
   const v = Math.round(m)
   return `${Math.floor(v / 60)}시간 ${v % 60}분`
 }
-type Spec = { key: string; part?: string[]; at?: Vec3; lift?: number; side?: Side } // side: 카메라 판정 대신 고정 — 카드 중앙 부품이 왼쪽 카피와 겹칠 때
+type Spec = { key: string; part?: string[]; at?: Vec3; lift?: number; side?: Side; offset?: Vec3 } // side: 카메라 판정 대신 고정 — 카드 중앙 부품이 왼쪽 카피와 겹칠 때. offset: 앵커를 비켜설 때(월드 좌표)
 const SPECS: Spec[] = [
   { key: 'time', part: ['PWM_IC'], side: 'right' }, // 카드 중앙 근처 — 왼쪽으로 뻗으면 카피(x 64~640)와 겹친다
   { key: 'gain', part: ['Power_16pin'] },
   { key: 'online', at: LED },
-  { key: 'beat', part: ['Traces', 'Vias'], side: 'right' }, // PCB 배선 — "신호가 흐른다". 크리스털은 상태 LED 와 붙어 있어 720 높이 화면에서 라벨이 겹쳤다. 배선 중심은 카드 정중앙이라 카메라 판정이 왼쪽으로 기울어 카피에 닿는다 → 오른쪽 고정
+  { key: 'beat', at: CAP_O, side: 'right' }, // 출력단 커패시터(Cap_O0, 기판 아래쪽 가장자리·PWM IC 왼쪽) — 가동(PWM IC) 앵커보다 화면 왼쪽·위라 둘 다 오른쫽으로 뻗어도 선이 X 로 안 겹친다. Vias 에 두면 어느 해상도든 가동 선과 교차했고(2026-09-15), Cap_ 은 gpuModel 에서 병합돼 이름으로 못 찾는다
   { key: 'accept', part: ['IO_Bracket'] }, // 커넥터 쪽 끝 — "작업이 들어온다". 다이(GPU_Die)에 두면 LED 라벨과 겹쳤다
 ]
 
@@ -38,7 +39,7 @@ export function ProviderCallout() {
     return SPECS.map((s) => {
       const target: Object3D | Vec3 = s.at ?? partOf(scene, ...s.part!)
       const p = Array.isArray(target) ? target : topOf(target)
-      return { target, side: s.side ?? (sideFor(p, right) as Side), lift: s.lift ?? 0 }
+      return { target, side: s.side ?? (sideFor(p, right) as Side), lift: s.lift ?? 0, offset: s.offset }
     })
   }, [scene])
   const pins = usePins(SPECS.length)
@@ -69,7 +70,7 @@ export function ProviderCallout() {
   })
 
   const pin = (i: number, body: ReactNode, extra = '') => (
-    <Pointer key={SPECS[i].key} pin={pins[i]} target={targets[i].target} lift={targets[i].lift} side={targets[i].side}>
+    <Pointer key={SPECS[i].key} pin={pins[i]} target={targets[i].target} lift={targets[i].lift} offset={targets[i].offset} side={targets[i].side}>
       <li className={`${styles.item} ${extra}`}>
         <span className={styles.tick} />
         {body}
