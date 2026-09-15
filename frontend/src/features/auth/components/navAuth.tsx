@@ -6,9 +6,11 @@ import { useState } from 'react'
 import { logout } from '../api'
 import { useAuth } from '../store'
 
-// 네비 우측: 마이페이지 아이콘 하나(프론트 네브바.png). guest → 클릭 시 /login, authed → 클릭 시 [대시보드][로그아웃] 드롭다운
-// 지갑은 대시보드 안으로 들어가 네비에서 뺐다(2026-09-10 결정). URL 로 직접 오면 proxy.ts 가 /login?next= 로 보낸다
-// loading 중엔 깜빡임 방지로 guest 아이콘(로그인 링크) 유지
+// 네비 우측(2026-09-15): guest → [로그인] 글자. authed → [마이페이지 아이콘][로그아웃 아이콘].
+// 테두리·배경 없는 텍스트/아이콘 버튼 — currentColor 라 다크·라이트 테마 자동 대응, hover 로 불투명도만
+// 터치 타깃 최소 44px 확보(size-11) — 아이콘은 가운데. hover 로 불투명도만
+const ICON_BTN = 'inline-flex size-11 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40'
+const TEXT_BTN = 'text-[15px] font-medium opacity-75 transition-opacity hover:opacity-100'
 function UserIcon() {
   return (
     <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -17,56 +19,46 @@ function UserIcon() {
     </svg>
   )
 }
+function LogoutIcon() {
+  return (
+    <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h9" />
+      <path d="M10 12h11M17.5 8.5 21 12l-3.5 3.5" />
+    </svg>
+  )
+}
 
 export function NavAuth() {
   const { status } = useAuth()
+  const router = useRouter()
+  const [pending, setPending] = useState(false)
 
   if (status !== 'authed') {
     return (
-      <Link href="/login" aria-label="로그인" className="inline-flex items-center rounded-md p-1.5 opacity-70 transition-opacity hover:opacity-100">
-        <UserIcon />
+      <Link href="/login" className={TEXT_BTN}>
+        로그인
       </Link>
     )
   }
-  return <AuthedMenu />
-}
-
-function AuthedMenu() {
-  const router = useRouter()
-  const [open, setOpen] = useState(false)
-  const [pending, setPending] = useState(false)
 
   return (
-    <div className="relative">
-      <button type="button" aria-label="내 메뉴" aria-expanded={open} className="inline-flex items-center rounded-md p-1.5 opacity-70 transition-opacity hover:opacity-100" onClick={() => setOpen((v) => !v)}>
+    <div className="flex items-center gap-1">
+      <Link href="/dashboard" aria-label="대시보드" className={ICON_BTN}>
         <UserIcon />
+      </Link>
+      <button
+        type="button"
+        aria-label="로그아웃"
+        disabled={pending}
+        className={ICON_BTN}
+        onClick={async () => {
+          setPending(true)
+          await logout()
+          router.refresh() // 전환이 끝나며 리렌더 → 자연히 guest 로 바뀐다. setPending(false) 를 앞에 두면 잠깐 빈 상태가 보인다
+        }}
+      >
+        <LogoutIcon />
       </button>
-
-      {open && (
-        <>
-          {/* 바깥 클릭 시 닫힘 — 리스너 대신 투명 백드롭 (ponytail: 작은 메뉴엔 이걸로 충분) */}
-          <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} />
-          <div className="animate-enter-spring-l3 absolute right-0 top-[calc(100%+8px)] z-50 flex w-40 flex-col gap-1 rounded-xl border border-[var(--color-hairline)] bg-[var(--color-surface-2)] p-1.5 shadow-[var(--shadow-3)]">
-            <Link href="/dashboard" className="rounded-md px-3 py-2 text-left text-sm font-medium text-[var(--color-dark)] transition-colors hover:bg-[var(--color-white-dim)]" onClick={() => setOpen(false)}>
-              대시보드
-            </Link>
-            <button
-              type="button"
-              disabled={pending}
-              className="rounded-md px-3 py-2 text-left text-sm font-medium text-[var(--color-dark)] transition-colors hover:bg-[var(--color-white-dim)] disabled:opacity-60"
-              onClick={async () => {
-                setPending(true)
-                await logout()
-                setOpen(false)
-                setPending(false)
-                router.refresh()
-              }}
-            >
-              {pending ? '로그아웃 중…' : '로그아웃'}
-            </button>
-          </div>
-        </>
-      )}
     </div>
   )
 }
