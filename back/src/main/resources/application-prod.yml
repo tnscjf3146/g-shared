@@ -32,6 +32,9 @@ logging:
       max-history: 14
 storage:
   root: /app/storage     # compose 볼륨(./storage) — 컨테이너를 지워도 결과물이 남는다
+  # 운영은 기본값(localhost:8080) 을 쓰지 않는다 — 워커 PC 에서 localhost 는 자기 자신이라 서명 URL 이 전부 죽는다.
+  # 비어 있으면 기동을 거부해 설정 누락을 배포 시점에 드러낸다. 예: https://j15e204.p.ssafy.io (스킴 포함, 포트·끝 슬래시 없이)
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL}
 
 # 운영은 체인 확인 없이 아무것도 확정하지 않는다. 환경변수로도 끌 수 없게 값을 박아 둔다.
 escrow:

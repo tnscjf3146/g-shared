@@ -45,7 +45,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 워커가 워커 토큰으로 부르는 Job 창구(§11 execution-context · §17/§18 result-upload)와
- * 서명 URL 스토리지(/storage/**)를 보안 필터까지 거쳐 확인한다.
+ * 서명 URL 스토리지(/api/storage/**)를 보안 필터까지 거쳐 확인한다.
  *
  * <p>핵심은 "이 토큰의 워커에게 배정된 Job 인가" 검증과, 업로드 완료 검증이 신고값이 아니라
  * 실제 오브젝트를 보는지다.
@@ -166,7 +166,7 @@ class WorkerJobIntegrationTest {
                 .andExpect(jsonPath("$.runtimeImage.digest").value(
                         "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"))
                 .andExpect(jsonPath("$.dataset.sha256").value(DATASET_HASH))          // 0x 벗긴 64자
-                .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/storage/datasets/1/dataset.jsonl?")))
+                .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/api/storage/datasets/1/dataset.jsonl?")))
                 .andExpect(jsonPath("$.dataset.effectiveTokens").value(1_800_000))
                 .andExpect(jsonPath("$.trainingConfig.epochs").value(1))
                 .andExpect(jsonPath("$.trainingConfig.maxLength").value(512))
@@ -243,7 +243,7 @@ class WorkerJobIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.objectKey").value("jobs/" + job.getId() + "/result.tar"))
                 .andExpect(jsonPath("$.uploadUrl").value(org.hamcrest.Matchers.startsWith(
-                        "http://localhost:8080/storage/jobs/" + job.getId() + "/result.tar?method=PUT&expires=")))
+                        "http://localhost:8080/api/storage/jobs/" + job.getId() + "/result.tar?method=PUT&expires=")))
                 .andExpect(jsonPath("$.expiresAt").exists())
                 .andReturn();
         JsonNode issuedBody = objectMapper.readTree(issued.getResponse().getContentAsString());
@@ -327,7 +327,7 @@ class WorkerJobIntegrationTest {
                 .andExpect(jsonPath("$.code").value("INVALID_JOB_STATUS"));
     }
 
-    // ── /storage/** 서명 검증 ────────────────────────────────────
+    // ── /api/storage/** 서명 검증 ────────────────────────────────────
 
     @Test
     @DisplayName("퍼센트 인코딩된 경로도 서명한 키와 같은 오브젝트로 풀린다 — 인코딩 차이로 서명이 어긋나지 않는다")
@@ -338,21 +338,21 @@ class WorkerJobIntegrationTest {
 
         // 같은 키의 하이픈을 인코딩해 요청해도 서명 검증과 파일 조회가 같은 키로 이뤄진다
         // (인코딩된 슬래시·마침표는 Spring Security 의 StrictHttpFirewall 이 그 전에 400 으로 막는다)
-        String encodedPath = "/storage/jobs/" + job.getId() + "/result%2Dv1.tar";
+        String encodedPath = "/api/storage/jobs/" + job.getId() + "/result%2Dv1.tar";
         // 문자열로 넘기면 MockMvc 가 % 를 다시 인코딩하므로 URI 객체로 원문 그대로 보낸다
         mockMvc.perform(get(URI.create(encodedPath + "?" + signed.getRawQuery())))
                 .andExpect(status().isOk())
                 .andExpect(content().bytes("bytes".getBytes(StandardCharsets.UTF_8)));
 
         // 상위 경로 이동(..)을 인코딩해 숨겨도 400 — 방화벽이 막고, 뚫려도 키 형식 검사가 거른다
-        mockMvc.perform(get(URI.create("/storage/jobs/%2E%2E/secret?" + signed.getRawQuery())))
+        mockMvc.perform(get(URI.create("/api/storage/jobs/%2E%2E/secret?" + signed.getRawQuery())))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("서명이 틀리거나 만료된 URL 은 403 — 서명 없이는 아무 키에도 쓰지 못한다")
     void storageRejectsBadSignature() throws Exception {
-        mockMvc.perform(put("/storage/jobs/1/result.tar?method=PUT&expires=9999999999&sig=deadbeef")
+        mockMvc.perform(put("/api/storage/jobs/1/result.tar?method=PUT&expires=9999999999&sig=deadbeef")
                         .contentType(MediaType.APPLICATION_OCTET_STREAM)
                         .content("x".getBytes(StandardCharsets.UTF_8)))
                 .andExpect(status().isForbidden())

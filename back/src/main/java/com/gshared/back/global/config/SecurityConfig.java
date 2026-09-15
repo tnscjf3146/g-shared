@@ -74,7 +74,7 @@ public class SecurityConfig {
                         // 워커 전용 Job 창구 (execution-context · result-upload) — 역시 워커 토큰
                         .requestMatchers("/api/worker/**").permitAll()
                         // 서명 URL 로 오브젝트를 올리고 내려받는 곳. 인증은 URL 서명(StorageController)이 한다.
-                        .requestMatchers("/storage/**").permitAll()
+                        .requestMatchers("/api/storage/**").permitAll()
 
                         .requestMatchers(HttpMethod.POST, "/api/auth/logout").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()

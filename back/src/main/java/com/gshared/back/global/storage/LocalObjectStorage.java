@@ -24,7 +24,7 @@ import java.util.regex.Pattern;
 /**
  * Backend 자신이 파일을 보관하는 스토리지. 외부 S3/MinIO 없이 MVP 를 돌리기 위한 구현이다.
  *
- * <p>"서명 URL" 은 {@code {publicBaseUrl}/storage/{objectKey}?method=PUT&expires=..&sig=..} 꼴이고,
+ * <p>"서명 URL" 은 {@code {publicBaseUrl}/api/storage/{objectKey}?method=PUT&expires=..&sig=..} 꼴이고,
  * {@link StorageController} 가 서명·만료를 확인한 뒤 파일을 받거나 내준다. 서명은 HMAC-SHA256 이라
  * 비밀키를 모르면 URL 을 위조하거나 만료를 늘릴 수 없다 — S3 presigned URL 과 같은 성질이다.
  *
@@ -63,7 +63,7 @@ public class LocalObjectStorage implements ObjectStorage {
         long expires = Instant.now().plus(ttl).getEpochSecond();
         String signature = sign(method, objectKey, expires);
         String url = stripTrailingSlash(properties.publicBaseUrl())
-                + "/storage/" + objectKey
+                + "/api/storage/" + objectKey
                 + "?method=" + method + "&expires=" + expires + "&sig=" + signature;
         return new SignedUrl(url, Instant.ofEpochSecond(expires));
     }

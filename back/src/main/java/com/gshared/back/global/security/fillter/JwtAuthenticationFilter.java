@@ -37,7 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/workers/*/operator",
             "/api/workers/*/benchmark",
             "/api/worker/**",
-            "/storage/**");
+            "/api/storage/**");
 
     private static final AntPathMatcher PATH_MATCHER = new AntPathMatcher();
 
