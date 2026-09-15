@@ -11,6 +11,12 @@ Two paths:
   attaches the machine to their account, and the identity it issues is sealed
   to this Windows account.
 
+A machine that has been here before can also **stop being** one: when its
+Worker is deleted from the account, the Backend answers its stored token with
+401 ``INVALID_WORKER_TOKEN``. That identity is dead, so it is forgotten -- only
+``workerId`` and the sealed token, never the signing key or any other setting --
+and the machine goes down the second path, once, in the same run.
+
 Registration has to state what this machine can do, so a new machine is
 measured: the fixed fine-tuning workload in
 :mod:`gshared_worker.benchmark_program` runs on the GPU, and the tokens per
@@ -43,10 +49,15 @@ from .gui.window import AuthWindow
 from .logging_setup import LOGGER_NAME
 from .machine_facts import MachineFacts, describe_machine
 from .worker_auth import WorkerAuthResult, WorkerAuthService, WorkerAuthState, WorkerRegistry
-from .worker_credentials import load_credentials, store_credentials
+from .worker_credentials import (
+    CredentialLoad,
+    clear_credentials,
+    load_credentials,
+    store_credentials,
+)
 from . import __version__
 from .benchmark_program import BENCHMARK_VERSION
-from .worker_registry import HttpWorkerRegistry, WorkerRegistrationRequest
+from .worker_registry import INVALID_WORKER_TOKEN, HttpWorkerRegistry, WorkerRegistrationRequest
 from .worker_wallet import WalletError, prepare_wallet
 
 _debug = logging.getLogger(LOGGER_NAME)
@@ -71,6 +82,10 @@ _IN_PLAIN_WORDS = {
     WorkerAuthState.AUTH_FAILED: (
         "G-shared 서비스가 이 PC의 인증 정보를 거부했습니다.",
         "수익을 받으려면 다시 등록하세요.",
+    ),
+    WorkerAuthState.CREDENTIALS_INVALIDATED: (
+        "기존 Worker 등록 정보가 만료되었습니다.",
+        "이 PC를 다시 등록해 주세요.",
     ),
     WorkerAuthState.WORKER_NOT_FOUND: (
         "G-shared 서비스에 이 PC의 등록 기록이 없습니다.",
@@ -107,6 +122,12 @@ def authenticate_worker(
     service = WorkerAuthService(registry or _backend_registry(settings))
     result = service.authenticate(loaded)
 
+    if result.state is WorkerAuthState.CREDENTIALS_INVALIDATED:
+        # Checked once, before enrolment and never after it: whatever enrolment
+        # ends in is reported, not recovered from again, so a Backend that keeps
+        # refusing cannot turn one start into a loop of registrations.
+        result = _forget_the_dead_identity(say, loaded)
+
     if result.state is WorkerAuthState.NEEDS_ENROLLMENT:
         facts = _describe_this_machine(say, describe)
         if facts is None:
@@ -117,6 +138,40 @@ def authenticate_worker(
                         benchmark, make_wallet)
 
     return _report(say, result)
+
+
+def _forget_the_dead_identity(
+    say: Callable[..., None], loaded: CredentialLoad
+) -> WorkerAuthResult:
+    """The Worker was deleted from the account: drop its identity, keep the rest.
+
+    Only ``workerId`` and the sealed token go (:func:`clear_credentials`). The
+    signing key is not touched -- enrolment reads it back with
+    :func:`prepare_wallet`, so the machine registers again under the same
+    operator address -- and neither is any other setting.
+    """
+    dropped = loaded.credentials.worker_id if loaded.credentials else None
+    _debug.warning(
+        "worker auth: %s for %s -- stale worker credential cleared, "
+        "re-registration required", INVALID_WORKER_TOKEN, dropped)
+    try:
+        clear_credentials()
+    except OSError as error:
+        # The file could not be rewritten. Enrolling anyway would register a
+        # machine whose next start still reads the dead identity.
+        _debug.warning("the stale worker credential could not be cleared (%s)",
+                       type(error).__name__)
+        return WorkerAuthResult(
+            WorkerAuthState.CREDENTIAL_ERROR,
+            "만료된 Worker 등록 정보를 지우지 못했습니다.")
+
+    say("")
+    say("기존 Worker 등록 정보가 만료되었습니다.")
+    say("  이 PC를 다시 등록합니다.")
+    return WorkerAuthResult(
+        WorkerAuthState.NEEDS_ENROLLMENT,
+        "the stored Worker identity is no longer accepted and was forgotten",
+    )
 
 
 def _backend_registry(settings: WorkerSettings) -> HttpWorkerRegistry:
@@ -305,6 +360,7 @@ def _report(say: Callable[..., None], result: WorkerAuthResult) -> int:
         return int(WorkerExitCode.TRANSPORT_FAILURE)
     if result.state in (WorkerAuthState.REVOKED, WorkerAuthState.AUTH_FAILED,
                         WorkerAuthState.CREDENTIAL_ERROR,
+                        WorkerAuthState.CREDENTIALS_INVALIDATED,
                         WorkerAuthState.WORKER_NOT_FOUND):
         return int(WorkerExitCode.CREDENTIAL_MISMATCH)
     # BACKEND_CONTRACT_ERROR lands here: not the credential's fault, and not
