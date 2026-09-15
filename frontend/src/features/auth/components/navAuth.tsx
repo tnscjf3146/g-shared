@@ -43,12 +43,13 @@ export function NavAuth() {
 
   return (
     <div className="flex items-center gap-1">
-      <Link href="/dashboard" aria-label="대시보드" className={ICON_BTN}>
+      <Link href="/dashboard" aria-label="대시보드" title="대시보드" className={ICON_BTN}>
         <UserIcon />
       </Link>
       <button
         type="button"
         aria-label="로그아웃"
+        title="로그아웃"
         disabled={pending}
         className={ICON_BTN}
         onClick={async () => {
