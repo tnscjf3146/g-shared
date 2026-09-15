@@ -39,6 +39,10 @@ class AuthWindow:
         self._root = tk.Tk()
         self._root.title(_TITLE)
         self._root.resizable(False, False)
+        # Closed through _close either way. Opened from the status window, this
+        # loop runs inside that window's: destroying the root alone would leave
+        # Tk still counting the status window and this loop would never end.
+        self._root.protocol("WM_DELETE_WINDOW", self._close)
         self._body = ttk.Frame(self._root)
         self._body.pack(fill="both", expand=True, pady=(12, 16))
         self._render(Shown(Screen.LOGIN))
@@ -136,7 +140,18 @@ class AuthWindow:
         if self._token is None:
             self._render(shown)
 
+    def close(self) -> None:
+        """Close the window from outside, as if its X had been pressed.
+
+        For the status window, when the supplier asks G-shared to stop while
+        sign-in is still open. :meth:`ask_to_sign_in` then returns ``None``.
+        """
+        self._close()
+
     def _close(self) -> None:
         if self._root is not None:
+            # quit ends this window's own loop; destroy alone does not when
+            # another Tk window -- the status window -- is still open.
+            self._root.quit()
             self._root.destroy()
             self._root = None

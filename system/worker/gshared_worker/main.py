@@ -18,6 +18,7 @@ import logging
 import os
 import sys
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +30,8 @@ from .instance_guard import WorkerInstanceGuard, default_lock_directory
 from .auth_check import authenticate_worker
 from .logging_setup import BUILD, LOGGER_NAME, start_debug_log
 from .runtime_check import ensure_runtime
+from . import status_events
+from .status_events import StageChanged, WorkerStage
 from .worker_connection import connect_to_backend
 
 _debug = logging.getLogger(LOGGER_NAME)
@@ -52,8 +55,18 @@ def run(
     directory: Path | None = None,
     run_worker: RunWorker | None = None,
     guard_factory: Any = WorkerInstanceGuard,
+    stop: Any = None,
+    open_sign_in: Callable[[Any], str | None] | None = None,
+    show_failure: Callable[[int, list[str]], None] | None = None,
 ) -> int:
-    """Everything, in order. Returns the code the launcher reads."""
+    """Everything, in order. Returns the code the launcher reads.
+
+    ``stop``, ``open_sign_in`` and ``show_failure`` are what the status window
+    (:mod:`gshared_worker.status_app`) brings: a stop signal it can set, a way
+    to run the sign-in window on the window's own thread, and a way to show a
+    failure in the window rather than in a dialog opened from this thread. A
+    run from a terminal passes none of them and behaves exactly as before.
+    """
     directory = directory or data_directory()
     log_path = start_debug_log(directory)
     emit = out or print
@@ -67,7 +80,8 @@ def run(
         said.append(" ".join(str(part) for part in parts))
         emit(*parts)
 
-    run_worker = run_worker or start_the_machine
+    run_worker = run_worker or _with(
+        start_the_machine, stop=stop, open_sign_in=open_sign_in)
 
     try:
         exit_code = _start(
@@ -104,7 +118,7 @@ def run(
         _debug.warning(
             "stopped with exit code %s (build %s; %s)", exit_code, BUILD,
             recorded[0] if recorded else "configuration not read")
-        _show_the_failure(exit_code, said)
+        (show_failure or _show_the_failure)(exit_code, said)
     return exit_code
 
 
@@ -213,7 +227,13 @@ def _run_the_worker(
     return code
 
 
-def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int:
+def start_the_machine(
+    settings: WorkerSettings,
+    say: Callable[..., None],
+    *,
+    stop: Any = None,
+    open_sign_in: Callable[[Any], str | None] | None = None,
+) -> int:
     """Diagnose the machine, bring its GPU runtime up, say whose it is, connect.
 
     Separate stages because they answer different questions and may do
@@ -230,16 +250,45 @@ def start_the_machine(settings: WorkerSettings, say: Callable[..., None]) -> int
     machine's own token, and whether that token is still accepted is exactly
     what the stage before it establishes.
     """
-    code = check_environment(settings, say)
-    if code != WorkerExitCode.OK:
-        return code
-    code = ensure_runtime(settings, say)
-    if code != WorkerExitCode.OK:
-        return code
-    code = authenticate_worker(settings, say)
-    if code != WorkerExitCode.OK:
-        return code
-    return connect_to_backend(settings, say)
+    stages = (
+        (WorkerStage.ENVIRONMENT_CHECK, check_environment, {}),
+        (WorkerStage.RUNTIME_PREPARING, ensure_runtime, {}),
+        (WorkerStage.AUTHENTICATING, authenticate_worker,
+         {"open_sign_in": open_sign_in}),
+    )
+    for stage, run_stage, extra in stages:
+        # Between stages, never inside one: an installation or a benchmark
+        # left half done is worse than one finished a minute late.
+        if _asked_to_stop(stop, say):
+            return int(WorkerExitCode.OK)
+        status_events.publish(StageChanged(stage))
+        code = _with(run_stage, **extra)(settings, say)
+        if code != WorkerExitCode.OK:
+            return code
+    if _asked_to_stop(stop, say):
+        return int(WorkerExitCode.OK)
+    status_events.publish(StageChanged(WorkerStage.CONNECTING))
+    return _with(connect_to_backend, stop=stop)(settings, say)
+
+
+def _with(stage: Callable[..., int], **extra: Any) -> Callable[..., int]:
+    """The stage, called with ``(settings, say)`` plus whatever was really given.
+
+    Nothing given means the stage is called exactly as it always was, which is
+    what every stage double in the tests is written against.
+    """
+    given = {name: value for name, value in extra.items() if value is not None}
+    return partial(stage, **given) if given else stage
+
+
+def _asked_to_stop(stop: Any, say: Callable[..., None]) -> bool:
+    """Whether the supplier asked G-shared to stop before the next stage."""
+    if stop is None or not stop.is_set():
+        return False
+    _debug.debug("stopped between stages on request")
+    say("")
+    say("종료 요청에 따라 G-shared를 멈췄습니다.")
+    return True
 
 
 #: How many of the last lines a failure dialog shows. The end of a run is

@@ -48,6 +48,8 @@ from .gui.presenter import AuthPresenter
 from .gui.window import AuthWindow
 from .logging_setup import LOGGER_NAME
 from .machine_facts import MachineFacts, describe_machine
+from . import status_events
+from .status_events import StageChanged, WorkerStage
 from .worker_auth import WorkerAuthResult, WorkerAuthService, WorkerAuthState, WorkerRegistry
 from .worker_credentials import (
     CredentialLoad,
@@ -111,8 +113,14 @@ def authenticate_worker(
     describe: DescribeMachine | None = None,
     benchmark: Benchmark | None = None,
     make_wallet: Callable[..., Any] | None = None,
+    open_sign_in: Callable[[AuthWindow], str | None] | None = None,
 ) -> int:
-    """Establish who this machine belongs to, or say what is in the way."""
+    """Establish who this machine belongs to, or say what is in the way.
+
+    ``open_sign_in`` is given by the status window, which has to run the
+    sign-in window on its own thread. Without it the window opens here, as it
+    always has.
+    """
     say("")
     say("이 PC의 G-shared 등록 상태를 확인하는 중...")
 
@@ -129,13 +137,14 @@ def authenticate_worker(
         result = _forget_the_dead_identity(say, loaded)
 
     if result.state is WorkerAuthState.NEEDS_ENROLLMENT:
+        status_events.publish(StageChanged(WorkerStage.REGISTRATION_REQUIRED))
         facts = _describe_this_machine(say, describe)
         if facts is None:
             # Said before a window is opened: asking somebody for a password
             # that could not be used is worse than not asking.
             return int(WorkerExitCode.EXPECTED_FAILURE)
         result = _enrol(service, settings, say, ask_to_sign_in, facts,
-                        benchmark, make_wallet)
+                        benchmark, make_wallet, open_sign_in=open_sign_in)
 
     return _report(say, result)
 
@@ -234,11 +243,19 @@ def _enrol(
     facts: MachineFacts,
     benchmark: Benchmark | None,
     make_wallet: Callable[..., Any] | None = None,
+    open_sign_in: Callable[[AuthWindow], str | None] | None = None,
 ) -> WorkerAuthResult:
     """Sign a person in, measure the GPU, and attach the machine to them."""
     say("  이 PC는 아직 등록되지 않았습니다. 로그인하면 계정에 연결됩니다.")
 
-    ask = ask_to_sign_in or _open_sign_in_window(settings)
+    if ask_to_sign_in is not None:
+        ask = ask_to_sign_in
+    elif open_sign_in is not None:
+        def ask() -> str | None:
+            # Built here, opened wherever open_sign_in runs it.
+            return open_sign_in(_sign_in_window(settings))
+    else:
+        ask = _open_sign_in_window(settings)
     access_token = ask()
     if not access_token:
         # The window was closed. Not a fault, nothing was changed, and no GPU
@@ -247,6 +264,7 @@ def _enrol(
             WorkerAuthState.NEEDS_ENROLLMENT,
             "로그인을 취소해 이 PC는 아직 등록되지 않았습니다.",
         )
+    status_events.publish(StageChanged(WorkerStage.AUTHENTICATING))
 
     measured = _measure_this_gpu(say, benchmark)
     if measured is None:
@@ -295,9 +313,14 @@ def _enrol(
 def _open_sign_in_window(settings: WorkerSettings) -> Callable[[], str | None]:
     """The real window, built against the Backend this Worker is configured for."""
     def ask() -> str | None:
-        client = BackendClient(_http_origin_of(settings.backend_url))
-        return AuthWindow(AuthPresenter(client)).ask_to_sign_in()
+        return _sign_in_window(settings).ask_to_sign_in()
     return ask
+
+
+def _sign_in_window(settings: WorkerSettings) -> AuthWindow:
+    """The window, not opened yet. Building it touches no Tk, on any thread."""
+    client = BackendClient(_http_origin_of(settings.backend_url))
+    return AuthWindow(AuthPresenter(client))
 
 
 def _http_origin_of(backend_url: str) -> str:
