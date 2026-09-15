@@ -53,3 +53,7 @@ logging:
 
 cookie:
   secure: false
+
+# 로컬·테스트는 모든 요청이 127.0.0.1 하나에서 온다 — IP 제한이 의미가 없고, 통합 테스트 스위트가 1분에 100회를 넘긴다.
+rate-limit:
+  max-requests-per-minute: 100000
