@@ -11,6 +11,9 @@ import java.util.Optional;
 
 public interface WorkerRepository extends JpaRepository<Worker, String> {
 
+    /** 네트워크 지표용 — 상태별 개수. OFFLINE 판정은 WorkerHeartbeatSweeper 가 이미 status 에 반영하므로 상태만 세면 된다. */
+    long countByStatusIn(java.util.Collection<WorkerStatus> statuses);
+
     // WebSocket 연결 시 Bearer 토큰(SHA-256 해시)으로 Worker 식별
     Optional<Worker> findByWorkerToken(String workerTokenHash);
 
