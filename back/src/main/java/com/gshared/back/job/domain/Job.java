@@ -34,6 +34,15 @@ public class Job extends BaseTimeEntity {
     @Column(nullable = false)
     private Long datasetId;
 
+    // 데이터셋 원본 파일 — 이 Job 을 돌리는 동안만 스토리지에 있다 (V15). 메타는 datasets, 파일은 여기.
+    @Column(length = 512)
+    private String datasetObjectKey;   // jobs/{id}/input/{fileName}
+    private Long datasetSizeBytes;
+    @Column(length = 64)
+    private String datasetSha256;      // 업로드 완료 검증 때 Backend 가 실제 파일에서 계산한 해시 (0x 없음)
+    private LocalDateTime datasetUploadedAt;
+    private LocalDateTime datasetDeletedAt;   // cleanup 이 파일을 지운 시각 — 키는 남긴다
+
     @Column(nullable = false, length = 10)
     private String trainingMode;      // AUTO / CUSTOM — "누가 정했는가" 기록용
 
@@ -197,6 +206,25 @@ public class Job extends BaseTimeEntity {
         this.resultObjectKey = objectKey;
         this.resultSizeBytes = sizeBytes;
         this.resultSha256 = sha256;
+    }
+
+    /** 데이터셋 원본 업로드 완료 검증 기록. 이게 있어야 /fund 가 받고, execution-context 가 downloadUrl 을 만든다. */
+    public void recordDatasetUpload(String objectKey, Long sizeBytes, String sha256, LocalDateTime uploadedAt) {
+        this.datasetObjectKey = objectKey;
+        this.datasetSizeBytes = sizeBytes;
+        this.datasetSha256 = sha256;
+        this.datasetUploadedAt = uploadedAt;
+        this.datasetDeletedAt = null;
+    }
+
+    /** 워커가 내려받을 원본이 스토리지에 있는가 (검증 끝났고 아직 안 지워짐). */
+    public boolean hasDatasetFile() {
+        return datasetUploadedAt != null && datasetDeletedAt == null;
+    }
+
+    /** cleanup 이 원본을 지웠다. 키·해시는 남겨 "무엇이 있었는지"는 추적된다. */
+    public void markDatasetDeleted(LocalDateTime deletedAt) {
+        this.datasetDeletedAt = deletedAt;
     }
 
     /**

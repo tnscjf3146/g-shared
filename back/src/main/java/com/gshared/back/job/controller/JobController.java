@@ -2,16 +2,21 @@ package com.gshared.back.job.controller;
 
 import com.gshared.back.global.security.userdetails.CustomUserDetails;
 import com.gshared.back.job.dto.request.CreateJobRequest;
+import com.gshared.back.job.dto.request.DatasetUploadCompleteRequest;
+import com.gshared.back.job.dto.request.DatasetUploadRequest;
 import com.gshared.back.job.dto.request.EstimateJobRequest;
 import com.gshared.back.job.dto.request.FundJobRequest;
 import com.gshared.back.job.dto.request.JobSpecRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
+import com.gshared.back.job.dto.response.DatasetUploadCompleteResponse;
+import com.gshared.back.job.dto.response.DatasetUploadResponse;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.job.dto.response.EstimateResponse;
 import com.gshared.back.job.dto.response.FundJobResponse;
 import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.dto.response.JobDetailResponse;
 import com.gshared.back.job.dto.response.JobPageResponse;
+import com.gshared.back.job.service.JobDatasetService;
 import com.gshared.back.job.service.JobEstimateService;
 import com.gshared.back.job.service.JobService;
 import jakarta.validation.Valid;
@@ -33,6 +38,7 @@ public class JobController {
 
     private final JobService jobService;
     private final JobEstimateService jobEstimateService;
+    private final JobDatasetService jobDatasetService;
 
     @PostMapping
     public ResponseEntity<CreateJobResponse> create(
@@ -82,6 +88,29 @@ public class JobController {
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
         return ResponseEntity.ok(jobService.getJobs(userDetails.getId(), status, pageable));
+    }
+
+    /**
+     * 데이터셋 원본을 올릴 서명 URL 발급. Job 생성 뒤·예치 전(CREATED)에만.
+     * 파일 본문은 여기를 지나지 않는다 — 프런트가 uploadUrl 에 직접 PUT 한다.
+     */
+    @PostMapping("/{jobId}/dataset-upload")
+    public ResponseEntity<DatasetUploadResponse> createDatasetUpload(
+            @PathVariable Long jobId,
+            @Valid @RequestBody DatasetUploadRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobDatasetService.createUpload(userDetails.getId(), jobId, request));
+    }
+
+    /** 업로드가 끝났다는 알림. Backend 가 실제 오브젝트의 크기·해시를 확인한 뒤에야 verified 이고, 그래야 /fund 가 열린다. */
+    @PostMapping("/{jobId}/dataset-upload/complete")
+    public ResponseEntity<DatasetUploadCompleteResponse> completeDatasetUpload(
+            @PathVariable Long jobId,
+            @Valid @RequestBody DatasetUploadCompleteRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobDatasetService.completeUpload(userDetails.getId(), jobId, request));
     }
 
     /**

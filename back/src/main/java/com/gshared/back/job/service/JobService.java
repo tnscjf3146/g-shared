@@ -242,6 +242,10 @@ public class JobService {
             }
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
         }
+        // 데이터셋 원본이 올라와 검증된 뒤에만 예치를 받는다 — 예치금이 묶인 채 워커가 내려받을 파일이 없는 상황을 막는다.
+        if (!job.hasDatasetFile()) {
+            throw new BusinessException(JobErrorCode.DATASET_NOT_UPLOADED);
+        }
         // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
         jobRepository.findByFundTxHash(hash)
                 .filter(other -> !other.getId().equals(jobId))

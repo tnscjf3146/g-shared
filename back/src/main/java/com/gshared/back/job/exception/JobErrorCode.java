@@ -26,7 +26,13 @@ public enum JobErrorCode implements ErrorCode {
     // 결과물 업로드 완료 검증 — 404: 올라온 파일이 없다 / 422: 파일은 있는데 신고한 크기·해시와 다르다
     RESULT_OBJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "업로드된 결과물을 찾을 수 없습니다."),
     RESULT_UPLOAD_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "업로드된 결과물의 크기 또는 해시가 신고값과 다릅니다."),
-    RESULT_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "objectKey가 이 Job의 결과물 경로가 아닙니다.");
+    RESULT_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "objectKey가 이 Job의 결과물 경로가 아닙니다."),
+    // 데이터셋 원본 업로드 — 결과물과 같은 3단계. 409 DATASET_NOT_UPLOADED 는 /fund 가 업로드 전이라 거절한 것
+    DATASET_OBJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "업로드된 데이터셋 파일을 찾을 수 없습니다. 먼저 업로드 URL로 파일을 올려주세요."),
+    DATASET_UPLOAD_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "업로드된 데이터셋 파일의 크기 또는 해시가 신고값과 다릅니다."),
+    DATASET_METADATA_MISMATCH(HttpStatus.UNPROCESSABLE_CONTENT, "업로드된 파일이 등록된 데이터셋 메타데이터(크기·해시)와 다릅니다. 분석한 파일을 그대로 올려주세요."),
+    DATASET_OBJECT_KEY_MISMATCH(HttpStatus.BAD_REQUEST, "objectKey가 이 Job의 데이터셋 경로가 아닙니다."),
+    DATASET_NOT_UPLOADED(HttpStatus.CONFLICT, "데이터셋 파일이 아직 업로드되지 않았습니다. 업로드를 마친 뒤 예치해주세요.");
 
     private final HttpStatus status;
     private final String message;

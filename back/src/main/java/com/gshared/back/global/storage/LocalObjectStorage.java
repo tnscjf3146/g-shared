@@ -88,6 +88,32 @@ public class LocalObjectStorage implements ObjectStorage {
         }
     }
 
+    @Override
+    public void delete(String objectKey) {
+        Path file = resolve(objectKey);
+        try {
+            Files.deleteIfExists(file);
+            // 비어 있는 상위 디렉터리(jobs/{id}/input)는 같이 정리 — Job 마다 빈 폴더가 쌓이지 않게. root 는 남긴다.
+            Path dir = file.getParent();
+            while (dir != null && !dir.equals(root) && dir.startsWith(root) && isEmptyDir(dir)) {
+                Files.delete(dir);
+                dir = dir.getParent();
+            }
+        } catch (IOException e) {
+            log.error("[Storage] delete 실패 key={}", objectKey, e);
+            throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    private static boolean isEmptyDir(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var entries = Files.list(dir)) {
+            return entries.findAny().isEmpty();
+        }
+    }
+
     // ── StorageController 가 쓰는 입출력 ─────────────────────────
 
     /** 서명 URL 검증. method·key·expires 가 서명과 맞고 아직 만료 전이어야 한다. */

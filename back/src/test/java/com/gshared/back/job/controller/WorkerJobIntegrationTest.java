@@ -114,6 +114,9 @@ class WorkerJobIntegrationTest {
                 "0x" + DATASET_HASH, "datasets/1/dataset.jsonl"));
         job = jobRepository.save(Job.create(client, baseModel.getWorkload().getId(), baseModel.getId(),
                 dataset.getId(), "AUTO", 1, 16, 0.0002, 512, 985.882, "runtime-xgb-v1", workerId, 9L));
+        // 데이터셋 원본은 Job 에 묶인다(V15) — 업로드 완료 검증을 거친 키·해시가 execution-context 로 나간다
+        job.recordDatasetUpload("jobs/" + job.getId() + "/input/dataset.jsonl", 52_428_800L, DATASET_HASH,
+                java.time.LocalDateTime.now());
 
         // CREATED → FUNDED(escrowJobId=17) → ASSIGNED(이 워커) — 매칭이 끝나 JOB_ASSIGN 을 받은 시점.
         // 조건부 UPDATE 는 clearAutomatically 라 그 전에 지갑 연결 등 대기 중인 변경을 먼저 DB 로 보낸다.
@@ -166,7 +169,7 @@ class WorkerJobIntegrationTest {
                 .andExpect(jsonPath("$.runtimeImage.digest").value(
                         "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"))
                 .andExpect(jsonPath("$.dataset.sha256").value(DATASET_HASH))          // 0x 벗긴 64자
-                .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/api/storage/datasets/1/dataset.jsonl?")))
+                .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/api/storage/jobs/" + job.getId() + "/input/dataset.jsonl?method=GET")))
                 .andExpect(jsonPath("$.dataset.effectiveTokens").value(1_800_000))
                 .andExpect(jsonPath("$.trainingConfig.epochs").value(1))
                 .andExpect(jsonPath("$.trainingConfig.maxLength").value(512))
@@ -185,7 +188,7 @@ class WorkerJobIntegrationTest {
         assertThat(body.path("escrow").path("externalRef").asString()).matches("^0x[0-9a-f]{64}$");
 
         // 데이터셋 서명 URL 은 실제로 내려받기가 된다 (파일을 미리 올려 둔 경우)
-        storage.write("datasets/1/dataset.jsonl", new java.io.ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)));
+        storage.write("jobs/" + job.getId() + "/input/dataset.jsonl", new java.io.ByteArrayInputStream("{}".getBytes(StandardCharsets.UTF_8)));
         URI download = URI.create(body.path("dataset").path("downloadUrl").asString());
         mockMvc.perform(get(download.getPath() + "?" + download.getQuery()))
                 .andExpect(status().isOk())

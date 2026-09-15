@@ -21,6 +21,7 @@ public record JobDetailResponse(
         Long workloadId,
         Long baseModelId,
         Long datasetId,
+        Boolean datasetUploaded,       // 원본 파일이 올라와 검증됐는가 — false 면 예치 전에 dataset-upload 부터
         String trainingMode,
         Integer epochs,
         Integer batchSize,
@@ -67,6 +68,7 @@ public record JobDetailResponse(
                 job.getWorkloadId(),
                 job.getBaseModelId(),
                 job.getDatasetId(),
+                job.hasDatasetFile(),
                 job.getTrainingMode(),
                 job.getEpochs(),
                 job.getBatchSize(),

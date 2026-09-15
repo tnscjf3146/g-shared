@@ -73,7 +73,16 @@ class JobFundIntegrationTest {
                 prefix + "-" + UUID.randomUUID() + "@gshared.io", "encoded", "펀드테스터"));
     }
 
+    /** 예치 가능한 Job — 데이터셋 원본 업로드가 검증된 상태 (없으면 /fund 가 409 DATASET_NOT_UPLOADED). */
     private Job saveJob(User jobOwner) {
+        Job job = jobRepository.save(Job.create(
+                jobOwner, workloadId, baseModelId, datasetId,
+                "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
+        job.recordDatasetUpload("jobs/" + job.getId() + "/input/dataset.jsonl", 52_428_800L, "9".repeat(64), LocalDateTime.now());
+        return job;
+    }
+
+    private Job saveJobWithoutDataset(User jobOwner) {
         return jobRepository.save(Job.create(
                 jobOwner, workloadId, baseModelId, datasetId,
                 "AUTO", 3, 8, 0.0002, 1024, 1500.0, "runtime-xgb-v1", null, 3000L));
@@ -110,6 +119,17 @@ class JobFundIntegrationTest {
         assertThat(funded.getEscrowJobId()).isEqualTo("17");   // 온체인 jobId 기록
         assertThat(funded.getFundTxHash()).isEqualTo(TX);
         assertThat(funded.getEscrowChainId()).isEqualTo(31221L);
+    }
+
+    @Test
+    @DisplayName("데이터셋 원본이 업로드되지 않은 Job 은 409 DATASET_NOT_UPLOADED — 예치금이 묶인 채 워커가 받을 파일이 없는 상황을 막는다")
+    void fund_without_dataset_upload() throws Exception {
+        Job job = saveJobWithoutDataset(owner);
+
+        fund(job.getId(), ESCROW_BODY)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("DATASET_NOT_UPLOADED"));
+        assertThat(jobRepository.findById(job.getId()).orElseThrow().getStatus()).isEqualTo(JobStatus.CREATED);
     }
 
     @Test

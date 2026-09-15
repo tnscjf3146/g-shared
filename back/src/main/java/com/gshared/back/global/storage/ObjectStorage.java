@@ -22,6 +22,9 @@ public interface ObjectStorage {
     /** 오브젝트가 실제로 존재하는지와 그 크기·해시. 없으면 empty. (업로드 완료 검증용 — 규격 §18) */
     Optional<ObjectStat> stat(String objectKey);
 
+    /** 오브젝트 삭제. 이미 없으면 아무 일도 하지 않는다 — cleanup 이 같은 키를 두 번 지워도 안전해야 한다. */
+    void delete(String objectKey);
+
     record SignedUrl(String url, Instant expiresAt) {
     }
 
