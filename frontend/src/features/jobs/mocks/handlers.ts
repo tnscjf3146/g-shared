@@ -211,7 +211,19 @@ export const jobHandlers = [
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
     const job = find(Number(params.jobId))
-    return job ? HttpResponse.json(job) : error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    // 예치 입력값(Escrow_Fund_계약_정리) — 고정 fixture 에 안 두고 응답 시점에 계산: clientWallet 은 실제 연결 지갑
+    return HttpResponse.json({
+      ...job,
+      externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
+      escrowJobId: job.status === 'CREATED' ? null : String(job.jobId),
+      priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
+      providerWallet: '0x1111111111111111111111111111111111111111',
+      clientWallet: getLinkedWallet(),
+      chainId: 31221,
+      tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
+      escrowAddress: process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x3333333333333333333333333333333333333333',
+    })
   }),
 
   http.post(URL, async ({ request }) => {
@@ -242,43 +254,21 @@ export const jobHandlers = [
     return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1' }, { status: 201 })
   }),
 
-  // 예치 조건 — 백엔드 미구현 stub(계약: schema.ts escrowTermsSchema). 구현되면 이 핸들러만 삭제.
-  // priceWei 는 estimatedCost(TOKEN) × 10^18 문자열, 주소들은 고정 더미. escrowAddress 는 배포 전이라 env 우선
-  http.get(`${URL}/:jobId/escrow-terms`, async ({ request, params }) => {
-    await delay()
-    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
-    const job = find(Number(params.jobId))
-    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
-    if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.') // CREATED=예치용, FUNDED=온체인 취소용
-    // clientWallet 은 실제 연결된 지갑(지갑 목업 상태) — 진짜 MetaMask 계정으로 예치 검사를 통과할 수 있게
-    const clientWallet = getLinkedWallet()
-    if (!clientWallet) return error(409, 'WALLET_NOT_LINKED', '지갑이 연결되어 있지 않습니다. 지갑을 먼저 연결해 주세요.')
-    return HttpResponse.json({
-      jobId: job.jobId,
-      escrowJobId: job.status === 'FUNDED' ? String(job.jobId) : null,
-      externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
-      priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
-      providerWallet: '0x1111111111111111111111111111111111111111',
-      clientWallet,
-      chainId: 31221,
-      tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
-      escrowAddress: process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x3333333333333333333333333333333333333333',
-    })
-  }),
-
-  // 예치 확인 — 현행 백엔드 규격 { escrowJobId }. 성공 시 FUNDED 로 전이
+  // 예치 확인 — 백엔드 규격 { txHash } (영수증 검증은 실서버 몫, 목업은 형식만 보고 FUNDED). 멱등: 이미 FUNDED 면 같은 답
   http.post(`${URL}/:jobId/fund`, async ({ request, params }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
     const id = Number(params.jobId)
     const job = find(id)
     if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
-    if (job.status !== 'CREATED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
-    const body = (await request.json().catch(() => null)) as { escrowJobId?: string } | null
-    if (!body?.escrowJobId || !/^[0-9]{1,78}$/.test(body.escrowJobId)) return error(400, 'INVALID_INPUT', 'escrowJobId는 0 이상의 정수 문자열이어야 합니다.')
-    set(id, { status: 'FUNDED' })
-    resume(find(id)!)
-    return new HttpResponse(null, { status: 200 })
+    const body = (await request.json().catch(() => null)) as { txHash?: string } | null
+    if (!body?.txHash || !/^0x[0-9a-fA-F]{64}$/.test(body.txHash)) return error(400, 'INVALID_INPUT', 'txHash는 0x로 시작하는 64자리 16진수여야 합니다.')
+    if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    if (job.status === 'CREATED') {
+      set(id, { status: 'FUNDED' })
+      resume(find(id)!)
+    }
+    return HttpResponse.json({ jobId: id, status: 'FUNDED', txHash: body.txHash, escrowJobId: String(id) })
   }),
 
   http.post(`${URL}/:jobId/cancel`, async ({ request, params }) => {

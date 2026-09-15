@@ -9,7 +9,7 @@ const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 // 연결 상태는 모듈 변수 — 새로고침하면 MOCK_WALLET_INITIAL 로 돌아간다(두 화면 다 보기 편함)
 let linked: string | null = MOCK_WALLET_INITIAL
-/** 다른 도메인 목업(jobs escrow-terms)이 연결 주소를 참조 — 목업끼리의 의존이라 목업 제거 시 같이 사라진다 */
+/** 다른 도메인 목업(jobs 상세의 clientWallet)이 연결 주소를 참조 — 목업끼리의 의존이라 목업 제거 시 같이 사라진다 */
 export const getLinkedWallet = () => linked
 let pendingAddress: string | null = null // challenge 발급 시 저장, link 에서 소비(서버의 Redis 역할)
 

@@ -125,9 +125,23 @@ export const jobPageSchema = z.object({
   totalPages: z.number(),
   totalElements: z.number(),
 })
-/** back JobDetailResponse(V7 이후). gpuId 는 없다 — 워커 1대 = GPU 1개라 assignedWorkerId 가 곧 GPU. 학습 설정 4값은 AUTO/CUSTOM 모두 항상 채워져 온다 */
+const hexAddress = z.string().check(z.regex(/^0x[0-9a-fA-F]{40}$/))
+/** back JobDetailResponse(V7 이후). gpuId 는 없다 — 워커 1대 = GPU 1개라 assignedWorkerId 가 곧 GPU. 학습 설정 4값은 AUTO/CUSTOM 모두 항상 채워져 온다.
+ *  예치 필드는 Escrow_Fund_계약_정리(2026-09-15) — CreateJobResponse 와 같은 값이 상세에도 실린다(재진입·새로고침 대비).
+ *  백엔드 반영 전에도 화면이 죽지 않게 optional, priceWei 는 정밀도 때문에 문자열(Number 금지, BigInt 로만) */
 export const jobDetailSchema = z.object({
   jobId: z.number(),
+  externalRef: z.optional(z.nullable(z.string())),
+  escrowJobId: z.optional(z.nullable(z.string())), // 온체인 번호 — 예치 전이면 null, FUNDED 취소에 사용
+  providerWallet: z.optional(z.nullable(hexAddress)),
+  priceWei: z.optional(z.nullable(z.string().check(z.regex(/^[0-9]+$/)))),
+  clientWallet: z.optional(z.nullable(hexAddress)),
+  chainId: z.optional(z.nullable(z.number())),
+  tokenAddress: z.optional(z.nullable(hexAddress)),
+  escrowAddress: z.optional(z.nullable(hexAddress)),
+  // 예치가 끝난 Job 은 예치 당시 값이 따로 박힌다 — 예치 후 화면(취소·탐색기 링크)은 이쪽 우선
+  escrowChainId: z.optional(z.nullable(z.number())),
+  escrowContractAddress: z.optional(z.nullable(hexAddress)),
   status: jobStatusSchema,
   workloadId: z.number(),
   baseModelId: z.number(),
@@ -153,18 +167,10 @@ export const jobDetailSchema = z.object({
   finishedAt: z.nullable(z.string()),
 })
 
-/** GET /jobs/{jobId}/escrow-terms — 예치 조건(0914 연동 규격 §2). 백엔드 미구현 — 계약 고정, MSW 목업 응답.
- *  값은 전부 백엔드가 확정한다: 프론트가 externalRef·priceWei·provider 를 만들거나 계산하지 않는다.
- *  priceWei 는 정밀도 때문에 문자열 — Number() 금지, BigInt(priceWei) 로만 다룬다 */
-const hexAddress = z.string().check(z.regex(/^0x[0-9a-fA-F]{40}$/))
-export const escrowTermsSchema = z.object({
+/** POST /jobs/{id}/fund 응답 — 백엔드가 txHash 영수증을 검증해 확정. PENDING 은 실패가 아니라 "영수증 대기"(같은 txHash 로 재시도) */
+export const fundResponseSchema = z.object({
   jobId: z.number(),
-  externalRef: z.string().check(z.regex(/^0x[0-9a-fA-F]{64}$/)),
-  priceWei: z.string().check(z.regex(/^[0-9]+$/)),
-  providerWallet: hexAddress, // 공급자 정산 지갑(Worker operator 아님)
-  clientWallet: hexAddress, // 로그인 사용자의 연결 지갑 — MetaMask 현재 계정과 대조용
-  chainId: z.number(),
-  tokenAddress: hexAddress,
-  escrowAddress: hexAddress,
-  escrowJobId: z.nullable(z.string().check(z.regex(/^[0-9]{1,78}$/))), // FUNDED 취소용 온체인 번호 — CREATED(예치 전)면 null
+  status: z.enum(['FUNDED', 'PENDING']),
+  txHash: z.string(),
+  escrowJobId: z.nullable(z.string()),
 })

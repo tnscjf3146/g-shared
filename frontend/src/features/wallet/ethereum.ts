@@ -101,16 +101,9 @@ const SEL = {
   createAndFundJob: '0xd903f3f5', // createAndFundJob(bytes32,uint256,address)
   cancelJob: '0x1dffa3dc', // cancelJob(uint256)
 }
-/** JobFunded(uint256 indexed jobId, bytes32 indexed externalRef, address indexed provider, …) 의 topic0 */
-export const JOB_FUNDED_TOPIC = '0x91c5a5aa2f42d46f6921ece691c30445e39a95bf645ef9b8ab8e89ec661db526'
 
 /** 주소·정수·bytes32 → 32바이트 hex(0x 없이). 인자가 전부 정적 타입이라 이어붙이면 끝 */
 const pad = (hexOrBig: string | bigint) => (typeof hexOrBig === 'bigint' ? hexOrBig.toString(16) : hexOrBig.replace(/^0x/, '').toLowerCase()).padStart(64, '0')
-
-/** TOKEN 정수(예: 60) → wei(60 × 10^18). 백엔드 estimatedCost 가 TOKEN 단위라 이 변환을 빠뜨리면 10^18배 틀린다 */
-export function toWei(token: number | string): bigint {
-  return BigInt(token) * BigInt(10) ** BigInt(GSC_TOKEN.decimals)
-}
 
 /** ERC-20 allowance(owner, spender) — 공개 RPC 읽기 */
 export async function getGscAllowance(owner: string, spender: string): Promise<bigint> {
@@ -160,13 +153,4 @@ export async function waitForReceipt(hash: string, timeoutMs = 90_000): Promise<
     if (Date.now() > until) throw new ReceiptTimeoutError()
     await new Promise((r) => setTimeout(r, 2_000))
   }
-}
-
-/** 영수증에서 이 예치의 JobFunded 이벤트를 찾아 온체인 jobId(topics[1])를 십진 문자열로.
- *  jobId·externalRef 가 indexed 라 topic 비교만으로 찾는다 — nextJobId 선읽기(경쟁 시 틀림) 금지 */
-export function extractEscrowJobId(receipt: TxReceipt, escrowAddress: string, externalRef: string): string | null {
-  const log = receipt.logs.find(
-    (l) => l.address.toLowerCase() === escrowAddress.toLowerCase() && l.topics[0] === JOB_FUNDED_TOPIC && l.topics[2]?.toLowerCase() === externalRef.toLowerCase(),
-  )
-  return log ? BigInt(log.topics[1]).toString() : null
 }
