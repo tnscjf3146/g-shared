@@ -131,12 +131,10 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
         </p>
       )}
 
-      {/* 작업 탭: 히어로·도넛·최근 활동·노드 지도·KPI 카드(대시보드.png 구조) → 목록. CTA 는 히어로 배너에, 지표는 JobsOverview 의 KPI 카드가 담당 */}
-      {tab === 'jobs' ? (
-        <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
-      ) : (
-        <StatTiles items={stats} loading={workers.status === 'loading'} />
-      )}
+      {/* 요약(도넛·KPI·진행 중 / 지표 4칸)은 데이터가 있을 때만 — 0건이면 빈 카드만 잔뜩 뜨므로, 아래 빈 상태 안내에 맡긴다 */}
+      {tab === 'jobs'
+        ? (jobs.status === 'loading' || jobList.length > 0) && <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
+        : (workers.status === 'loading' || workerList.length > 0) && <StatTiles items={stats} loading={workers.status === 'loading'} />}
 
       {tab === 'jobs' ? (
         <section className="flex flex-col gap-4">
