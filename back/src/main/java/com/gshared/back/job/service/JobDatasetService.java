@@ -9,7 +9,6 @@ import com.gshared.back.global.storage.StorageProperties;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.job.dto.request.DatasetUploadCompleteRequest;
-import com.gshared.back.job.dto.request.DatasetUploadRequest;
 import com.gshared.back.job.dto.response.DatasetUploadCompleteResponse;
 import com.gshared.back.job.dto.response.DatasetUploadResponse;
 import com.gshared.back.job.exception.JobErrorCode;
@@ -49,31 +48,36 @@ public class JobDatasetService {
     private final ObjectStorage objectStorage;
     private final StorageProperties storageProperties;
 
-    /** 업로드 URL 발급. 예치 전(CREATED)에만 — 예치 뒤에 파일을 바꾸면 워커가 견적과 다른 데이터를 받는다. */
-    public DatasetUploadResponse createUpload(Long ownerId, Long jobId, DatasetUploadRequest request) {
+    /**
+     * 업로드 URL 발급. 예치 전(CREATED)에만 — 예치 뒤에 파일을 바꾸면 워커가 견적과 다른 데이터를 받는다.
+     * 오브젝트 키는 Job 마다 하나로 고정({@link #datasetObjectKey}) — 프런트가 이름을 고르지 않고, 다시 올리면 덮어쓴다.
+     */
+    public DatasetUploadResponse createUpload(Long ownerId, Long jobId) {
         Job job = findCreatedJob(ownerId, jobId);
-        String objectKey = datasetPrefix(job.getId()) + request.fileName();
+        String objectKey = datasetObjectKey(job.getId());
         ObjectStorage.SignedUrl signed = objectStorage.presignUpload(
-                objectKey, request.contentType(), storageProperties.uploadTtl());
+                objectKey, "application/octet-stream", storageProperties.uploadTtl());
         return new DatasetUploadResponse(objectKey, signed.url(), signed.expiresAt());
     }
 
     /**
-     * 업로드 완료. 신고값을 믿지 않고 오브젝트가 실제로 있는지, 크기·해시가 맞는지 확인한 뒤 Job 에 기록한다.
-     * 등록된 Dataset 메타(sizeBytes·dataHash)와도 대조한다 — 견적·과금은 그 메타로 계산했으니 올린 파일이 그 파일이어야 한다.
-     * 같은 Job 에 다시 올리면(재업로드) 마지막 검증값으로 덮어쓴다.
+     * 업로드 완료. 오브젝트가 실제로 있는지 보고, 그 크기·해시를 등록된 Dataset 메타(sizeBytes·dataHash)와 대조한 뒤
+     * Job 에 기록한다 — 견적·과금은 그 메타로 계산했으니 올린 파일이 그 파일이어야 한다. 본문(신고값)은 선택이고, 오면
+     * 그 값과도 대조한다. 같은 Job 에 다시 올리면(재업로드) 마지막 검증값으로 덮어쓴다.
      */
     @Transactional
     public DatasetUploadCompleteResponse completeUpload(Long ownerId, Long jobId, DatasetUploadCompleteRequest request) {
         Job job = findCreatedJob(ownerId, jobId);
-        if (!request.objectKey().startsWith(datasetPrefix(job.getId()))) {
-            throw new BusinessException(JobErrorCode.DATASET_OBJECT_KEY_MISMATCH);   // 남의 Job 경로를 내 파일이라 우기지 못하게
+        String objectKey = datasetObjectKey(job.getId());
+        if (request.objectKey() != null && !request.objectKey().equals(objectKey)) {
+            throw new BusinessException(JobErrorCode.DATASET_OBJECT_KEY_MISMATCH);   // 다른 경로를 내 파일이라 우기지 못하게
         }
 
-        ObjectStorage.ObjectStat stat = objectStorage.stat(request.objectKey())
+        ObjectStorage.ObjectStat stat = objectStorage.stat(objectKey)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.DATASET_OBJECT_NOT_FOUND));
-        String reported = request.sha256().toLowerCase(Locale.ROOT);
-        if (stat.sizeBytes() != request.sizeBytes() || !stat.sha256().equals(reported)) {
+        String reported = request.sha256() == null ? null : request.sha256().toLowerCase(Locale.ROOT);
+        if ((request.sizeBytes() != null && stat.sizeBytes() != request.sizeBytes())
+                || (reported != null && !stat.sha256().equals(reported))) {
             log.warn("[Dataset] 업로드 불일치 jobId={} 신고 size={} sha256={} / 실제 size={} sha256={}",
                     jobId, request.sizeBytes(), reported, stat.sizeBytes(), stat.sha256());
             throw new BusinessException(JobErrorCode.DATASET_UPLOAD_MISMATCH);
@@ -89,8 +93,8 @@ public class JobDatasetService {
             throw new BusinessException(JobErrorCode.DATASET_METADATA_MISMATCH);
         }
 
-        job.recordDatasetUpload(request.objectKey(), stat.sizeBytes(), stat.sha256(), LocalDateTime.now());
-        return new DatasetUploadCompleteResponse(job.getId(), request.objectKey(), true);
+        job.recordDatasetUpload(objectKey, stat.sizeBytes(), stat.sha256(), LocalDateTime.now());
+        return new DatasetUploadCompleteResponse(job.getId(), objectKey, true);
     }
 
     /** 더는 필요 없는 원본(끝난 Job·방치된 CREATED Job)을 가진 Job 목록. 순찰({@link JobDatasetCleanup})이 부른다. */
@@ -121,9 +125,9 @@ public class JobDatasetService {
         return job;
     }
 
-    /** 원본은 Job 별 고정 경로 아래에만 둔다 — 발급도 완료 검증도 cleanup 도 이 접두어로 묶인다. */
-    static String datasetPrefix(Long jobId) {
-        return "jobs/" + jobId + "/input/";
+    /** 원본은 Job 마다 이 한 키에만 둔다 — 발급·완료 검증·execution-context·cleanup 이 전부 같은 값을 본다. */
+    static String datasetObjectKey(Long jobId) {
+        return "jobs/" + jobId + "/input/dataset.jsonl";
     }
 
     /** datasets.data_hash 는 0x 붙은 bytes32 표기, 파일 검증은 0x 없는 64자 — 맞춰서 비교한다. */

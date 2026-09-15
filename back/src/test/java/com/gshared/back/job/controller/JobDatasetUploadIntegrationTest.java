@@ -120,14 +120,19 @@ class JobDatasetUploadIntegrationTest {
         return "/api/jobs/" + jobId + "/dataset-upload";
     }
 
+    /** 프런트와 같이 본문 없이 — 키는 Backend 가 정한다. */
     private ResultActions issue(Long jobId) throws Exception {
         return mockMvc.perform(post(issueUrl(jobId))
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of(
-                        "fileName", "dataset.jsonl", "contentType", "application/jsonl"))));
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken));
     }
 
+    /** 프런트와 같이 본문 없이 — 검증 기준은 등록된 Dataset 메타다. */
+    private ResultActions complete(Long jobId) throws Exception {
+        return mockMvc.perform(post(issueUrl(jobId) + "/complete")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken));
+    }
+
+    /** 신고값을 실어 보내는 경우 — 그 값과도 대조한다. */
     private ResultActions complete(Long jobId, String objectKey, long sizeBytes, String sha256) throws Exception {
         return mockMvc.perform(post(issueUrl(jobId) + "/complete")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken)
@@ -172,8 +177,8 @@ class JobDatasetUploadIntegrationTest {
                         .content(FILE))
                 .andExpect(status().isOk());
 
-        // ③ complete — 실제 오브젝트를 대조 (대문자 해시도 받아 소문자로 정규화)
-        complete(job.getId(), objectKey, FILE.length, fileHash.toUpperCase())
+        // ③ complete — 프런트처럼 본문 없이. Backend 가 실제 오브젝트를 등록된 메타와 대조한다
+        complete(job.getId())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobId").value(job.getId()))
                 .andExpect(jsonPath("$.objectKey").value(objectKey))
@@ -197,13 +202,13 @@ class JobDatasetUploadIntegrationTest {
     @DisplayName("파일을 올리지 않고 complete 하면 404 — 신고만으로는 업로드가 되지 않는다")
     void completeWithoutFile() throws Exception {
         Job job = createdJob();
-        complete(job.getId(), "jobs/" + job.getId() + "/input/dataset.jsonl", FILE.length, fileHash)
+        complete(job.getId())
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("DATASET_OBJECT_NOT_FOUND"));
     }
 
     @Test
-    @DisplayName("신고한 해시·크기가 실제 파일과 다르면 422 DATASET_UPLOAD_MISMATCH")
+    @DisplayName("신고값을 보내면 그 값과도 대조한다 — 실제 파일과 다르면 422 DATASET_UPLOAD_MISMATCH, 맞으면(대문자 해시 포함) 200")
     void completeWithWrongReport() throws Exception {
         Job job = createdJob();
         String objectKey = "jobs/" + job.getId() + "/input/dataset.jsonl";
@@ -216,6 +221,9 @@ class JobDatasetUploadIntegrationTest {
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.code").value("DATASET_UPLOAD_MISMATCH"));
         assertThat(jobRepository.findById(job.getId()).orElseThrow().hasDatasetFile()).isFalse();
+        complete(job.getId(), objectKey, FILE.length, fileHash.toUpperCase())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.verified").value(true));
     }
 
     @Test
@@ -225,7 +233,7 @@ class JobDatasetUploadIntegrationTest {
         String objectKey = "jobs/" + job.getId() + "/input/dataset.jsonl";
         storage.write(objectKey, new ByteArrayInputStream(FILE));
 
-        complete(job.getId(), objectKey, FILE.length, fileHash)   // 신고값은 실제 파일과 일치
+        complete(job.getId())
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.code").value("DATASET_METADATA_MISMATCH"));
     }
@@ -242,10 +250,7 @@ class JobDatasetUploadIntegrationTest {
                 "other-" + UUID.randomUUID() + "@gshared.io", "encoded", "남"));
         String otherToken = jwtProvider.createAccessToken(other.getId(), other.getRole());
         mockMvc.perform(post(issueUrl(job.getId()))
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of(
-                                "fileName", "dataset.jsonl", "contentType", "application/jsonl"))))
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + otherToken))
                 .andExpect(status().isNotFound());
 
         job.recordDatasetUpload("jobs/" + job.getId() + "/input/dataset.jsonl", (long) FILE.length, fileHash, LocalDateTime.now());

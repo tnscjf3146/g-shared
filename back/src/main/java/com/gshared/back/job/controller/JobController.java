@@ -3,7 +3,6 @@ package com.gshared.back.job.controller;
 import com.gshared.back.global.security.userdetails.CustomUserDetails;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.request.DatasetUploadCompleteRequest;
-import com.gshared.back.job.dto.request.DatasetUploadRequest;
 import com.gshared.back.job.dto.request.EstimateJobRequest;
 import com.gshared.back.job.dto.request.FundJobRequest;
 import com.gshared.back.job.dto.request.JobSpecRequest;
@@ -97,20 +96,23 @@ public class JobController {
     @PostMapping("/{jobId}/dataset-upload")
     public ResponseEntity<DatasetUploadResponse> createDatasetUpload(
             @PathVariable Long jobId,
-            @Valid @RequestBody DatasetUploadRequest request,
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
-        return ResponseEntity.ok(jobDatasetService.createUpload(userDetails.getId(), jobId, request));
+        return ResponseEntity.ok(jobDatasetService.createUpload(userDetails.getId(), jobId));
     }
 
-    /** 업로드가 끝났다는 알림. Backend 가 실제 오브젝트의 크기·해시를 확인한 뒤에야 verified 이고, 그래야 /fund 가 열린다. */
+    /**
+     * 업로드가 끝났다는 알림. Backend 가 실제 오브젝트를 등록된 Dataset 메타와 대조한 뒤에야 verified 이고, 그래야 /fund 가 열린다.
+     * 본문은 선택 — 프런트는 보내지 않아도 되고, 보내면 그 신고값과도 대조한다.
+     */
     @PostMapping("/{jobId}/dataset-upload/complete")
     public ResponseEntity<DatasetUploadCompleteResponse> completeDatasetUpload(
             @PathVariable Long jobId,
-            @Valid @RequestBody DatasetUploadCompleteRequest request,
+            @Valid @RequestBody(required = false) DatasetUploadCompleteRequest request,
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
-        return ResponseEntity.ok(jobDatasetService.completeUpload(userDetails.getId(), jobId, request));
+        return ResponseEntity.ok(jobDatasetService.completeUpload(userDetails.getId(), jobId,
+                request != null ? request : DatasetUploadCompleteRequest.EMPTY));
     }
 
     /**
