@@ -9,6 +9,7 @@ import { P } from '../progress'
 // 형태는 셰이더 fbm 노이즈(뜯어진 가장자리·얼룩), 모션은 밀림→감속 + 난류 + 회전 + 부력.
 // 분사구(emitter) 하나가 같은 경로로 퍼프 K개를 시차를 두고 내보내 이어진 기둥이 되고, 퍼프끼리 겹쳐 부피감이 난다.
 // 스크롤 sync 라 시간 기반 스폰 없이 — 퍼프마다 (t0, life) 를 갖고 P.smoke 의 함수로 위치/크기/알파를 계산한다(되감기 가능).
+// 비용은 CPU 가 아니라 GPU fill 이다(큰 반투명 스프라이트 640개 × 픽셀당 노이즈). 알파 0 퍼프는 정점 셰이더에서 크기 0 으로 걸러 그리지 않는다. 그래도 무거우면 E·K 가 손잡이(64×10 → 48×8 이면 절반 이하)
 const E = 64 // 분사구 수(양 옆 반씩)
 const K = 10 // 분사구당 퍼프 수(사슬)
 const N = E * K
@@ -72,7 +73,9 @@ export function Smoke() {
         void main() {
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
           gl_Position = projectionMatrix * mv;
-          gl_PointSize = aSize * uScale / -mv.z;
+          // 알파가 0(아직 안 나온 / 다 사라진 퍼프)이면 점 크기 0 → 프래그먼트가 하나도 안 나온다.
+          // 어느 순간이든 640개 중 살아 있는 건 ~1/4 이라 fbm 셰이더 fill 비용이 약 4배 준다(2026-09-15, 02 연기 구간 렉). 0.03 미만은 눈에 안 보이는 큰 꼬리라 같이 뺀다
+          gl_PointSize = aAlpha < 0.03 ? 0.0 : aSize * uScale / -mv.z;
           vAlpha = aAlpha; vRot = aRot; vSeed = aSeed;
         }`,
       // 연기 형태: 원판을 fbm 노이즈로 뜯어내고(가장자리 불규칙), 안쪽 농도도 노이즈로 얼룩지게
@@ -89,7 +92,7 @@ export function Smoke() {
           float c = cos(vRot), s = sin(vRot);
           vec2 uv = mat2(c, -s, s, c) * uv0;
           float n = fbm(uv * 2.6 + vSeed * 19.0);          // 0..~0.9 큰 덩어리
-          float n2 = fbm(uv * 6.0 + vSeed * 7.0);          // 잔결
+          float n2 = vnoise(uv * 6.0 + vSeed * 7.0);       // 잔결 — 얼룩용이라 옥타브 하나면 충분(fbm 3옥타브였다: 픽셀당 노이즈 6 → 4회, 2026-09-15)
           float rad = 0.5 + 0.16 * (n - 0.45) * 2.0;        // 노이즈로 울퉁불퉁한 반지름
           float d = length(uv) / rad;
           float dens = exp(-d * d * 3.2) * (1.0 - smoothstep(0.7, 1.0, d)); // 중심 짙고 가장자리 안개처럼
