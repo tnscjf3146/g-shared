@@ -39,9 +39,6 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class JobEstimateService {
 
-    /** 필요 VRAM 대비 이만큼은 넘어야 "여유 있다"고 본다. 1.25 = 25% 여유. */
-    private static final double COMFORTABLE_VRAM_RATIO = 1.25;
-
     private final WorkloadRepository workloadRepository;
     private final BaseModelRepository baseModelRepository;
     private final GpuCatalogService gpuCatalogService;
@@ -163,36 +160,14 @@ public class JobEstimateService {
     }
 
     private GpuOptionResponse toOption(GpuGrade grade, int requiredVramMb, Long recommendedGradeId) {
-        GpuOptionResponse.Fit fit = fitOf(grade, requiredVramMb, recommendedGradeId);
+        boolean recommended = recommendedGradeId != null && recommendedGradeId == grade.id();
+        GpuOptionResponse.Fit fit = GpuFitPolicy.fitOf(grade.vramMb(), requiredVramMb, recommended);
         return new GpuOptionResponse(
+                // vramMb 는 raw telemetry 그대로 — 판정에만 nominal 값을 쓴다({@link GpuFitPolicy})
                 grade.id(), grade.model(), grade.vramMb(),
                 // 시간당 단가는 정책 미정 — GpuResponse 와 같은 이유로 0 이다.
                 0L,
-                fit, requiredVramMb, reasonOf(fit, grade, requiredVramMb),
+                fit, requiredVramMb, GpuFitPolicy.reasonOf(fit, grade.vramMb(), requiredVramMb),
                 grade.workers().size());
-    }
-
-    private GpuOptionResponse.Fit fitOf(GpuGrade grade, int requiredVramMb, Long recommendedGradeId) {
-        if (grade.vramMb() < requiredVramMb) {
-            return GpuOptionResponse.Fit.INSUFFICIENT;
-        }
-        if (recommendedGradeId != null && recommendedGradeId == grade.id()) {
-            return GpuOptionResponse.Fit.RECOMMENDED;
-        }
-        return grade.vramMb() < requiredVramMb * COMFORTABLE_VRAM_RATIO
-                ? GpuOptionResponse.Fit.TIGHT
-                : GpuOptionResponse.Fit.OK;
-    }
-
-    /** 화면에 그대로 나가는 한 줄. 왜 이 판정인지를 숫자로 말한다. */
-    private String reasonOf(GpuOptionResponse.Fit fit, GpuGrade grade, int requiredVramMb) {
-        int freeGb = Math.round((grade.vramMb() - requiredVramMb) / 1024f);
-        int shortGb = Math.round((requiredVramMb - grade.vramMb()) / 1024f);
-        return switch (fit) {
-            case RECOMMENDED -> "예상 실행 시간이 가장 짧습니다.";
-            case OK -> "여유 " + freeGb + " GB 로 넉넉합니다.";
-            case TIGHT -> "여유 " + freeGb + " GB 로 빠듯합니다. 설정에 따라 실패할 수 있습니다.";
-            case INSUFFICIENT -> "VRAM 이 " + shortGb + " GB 부족해 실행할 수 없습니다.";
-        };
     }
 }

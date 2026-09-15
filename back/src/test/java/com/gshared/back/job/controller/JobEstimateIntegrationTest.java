@@ -74,6 +74,7 @@ class JobEstimateIntegrationTest {
     @MockitoBean
     private SchedulerClient schedulerClient;
 
+    private Long userId;
     private String accessToken;
     private Long workloadId;
     private Long baseModelId;
@@ -83,6 +84,7 @@ class JobEstimateIntegrationTest {
     void setUp() {
         User user = userRepository.save(User.createUser(
                 "estimate-" + UUID.randomUUID() + "@gshared.io", "encoded", "의뢰자"));
+        userId = user.getId();
         accessToken = jwtProvider.createAccessToken(user.getId(), user.getRole());
 
         BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
@@ -167,6 +169,62 @@ class JobEstimateIntegrationTest {
                         .content(body(spec())))
                 .andExpect(status().isOk())
                 .andExpect(content().json(first));
+    }
+
+    /**
+     * 드라이버가 "8 GB" 카드를 8188 MiB 로 보고하는 실제 사례. Scheduler 는 nominal 보정으로
+     * 1순위로 골랐는데 Backend 가 raw 값으로 다시 비교해 INSUFFICIENT 라고 하던 회귀.
+     */
+    @Test
+    @DisplayName("8188 MiB 카드는 8192 요구에 실행 가능 — 응답 vramMb 는 raw 그대로, 판정만 nominal")
+    void nominalVramFit() throws Exception {
+        String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4070 Laptop GPU", 8188);
+        given(schedulerClient.recommend(any()))
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId,
+                        List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                // VRAM 큰 순이라 4090 이 먼저, 4070 Laptop 이 두 번째
+                .andExpect(jsonPath("$[1].model").value("NVIDIA GeForce RTX 4070 Laptop GPU"))
+                .andExpect(jsonPath("$[1].vramMb").value(8188))
+                .andExpect(jsonPath("$[1].requiredVramMb").value(8192))
+                .andExpect(jsonPath("$[1].fit").value("RECOMMENDED"))
+                .andExpect(jsonPath("$[1].reason").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("부족"))))
+                .andExpect(jsonPath("$[0].fit").value("OK"));
+    }
+
+    @Test
+    @DisplayName("허용 오차(32 MiB) 밖이면 INSUFFICIENT — 부족량은 GB 로 반올림하지 않는다")
+    void insufficientOutsideTolerance() throws Exception {
+        registerOnlineWorker("RTX 3070", 8100);
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].model").value("RTX 3070"))
+                .andExpect(jsonPath("$[1].vramMb").value(8100))
+                .andExpect(jsonPath("$[1].fit").value("INSUFFICIENT"))
+                .andExpect(jsonPath("$[1].reason").value("VRAM 이 92 MiB 부족해 실행할 수 없습니다."));
+    }
+
+    private String registerOnlineWorker(String gpuModel, int vramMb) {
+        RegisterWorkerResponse registered = workerService.register(userId,
+                new RegisterWorkerRequest("0x" + "c".repeat(40), "0.1.0",
+                        new RegisterWorkerRequest.SystemInfo("Windows 11", true),
+                        new RegisterWorkerRequest.GpuInfo(gpuModel, vramMb),
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1")));
+        Worker worker = workerRepository.findById(registered.workerId()).orElseThrow();
+        worker.goOnline(LocalDateTime.now());
+        workerRepository.flush();
+        return registered.workerId();
     }
 
     @Test
