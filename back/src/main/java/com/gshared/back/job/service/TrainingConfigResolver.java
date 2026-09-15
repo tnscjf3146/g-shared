@@ -30,8 +30,8 @@ public class TrainingConfigResolver {
             return validateCustom(customConfig);
         }
         String priority = trainingPriority != null ? trainingPriority : "BALANCED";
-        SchedulerTrainingConfig config = schedulerClient.trainingConfig(
-                new SchedulerTrainingConfigRequest(datasetMeta, priority));
+        SchedulerTrainingConfig config = schedulerClient.trainingConfig(new SchedulerTrainingConfigRequest(
+                SchedulerTrainingConfigRequest.DatasetMeta.from(datasetMeta), priority));
         // AUTO 응답 형태 검증 — null 필드가 NOT NULL 컬럼 저장에서 터지지 않게
         if (config.epochs() == null || config.batchSize() == null
                 || config.learningRate() == null || config.maxLength() == null) {
