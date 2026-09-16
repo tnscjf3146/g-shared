@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { PlainTable } from '@/features/jobs/components/plainTable'
 import { OperatorApproval, type WorkAvailability } from '@/features/workers/components/operatorApproval'
@@ -16,6 +16,8 @@ const WORK_TONE = { muted: 'text-text-muted', danger: 'text-danger', ok: 'font-s
 
 export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { worker: Worker; index: number; now: number; onUnlink: (w: Worker) => void; style?: React.CSSProperties }) {
   const [work, setWork] = useState<WorkAvailability>({ text: '확인 중…', tone: 'muted' })
+  // 같은 값이면 갱신 건너뛰기(같은 참조 반환 → React 리렌더 skip). onWork 는 안정적이라 자식 effect 의존성도 흔들지 않는다
+  const onWork = useCallback((w: WorkAvailability) => setWork((prev) => (prev.text === w.text && prev.tone === w.tone ? prev : w)), [])
   const heartbeat = worker.lastHeartbeatAt ? relativeTime(worker.lastHeartbeatAt, now) : '기록 없음'
   // 오프라인 워커는 꺼진 기계처럼 — 작업 목록의 완료·취소와 같은 어두운 회색 배경
   const offline = worker.status === 'OFFLINE'
@@ -28,7 +30,7 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
         </h3>
         {/* 좁은 폭에서 두 줄로 꺾이지 않게 — 전부 한 줄 truncate, 잘리면 … + title 툴팁 */}
         <div className="hidden min-w-0 md:block">
-          <OperatorApproval worker={worker} onWork={setWork} />
+          <OperatorApproval worker={worker} onWork={onWork} />
         </div>
         <div className="hidden min-w-0 md:block">
           <div className="text-[14px] text-text-muted">OS</div>
