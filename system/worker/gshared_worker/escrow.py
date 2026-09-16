@@ -26,6 +26,7 @@ more than it sounds.
 from __future__ import annotations
 
 import logging
+import errno
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Protocol
@@ -40,6 +41,7 @@ _debug = logging.getLogger(LOGGER_NAME)
 SSAFY_CHAIN_ID = 31221
 
 RECEIPT_TIMEOUT_SECONDS = 120
+RPC_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 class JobState(IntEnum):
@@ -362,6 +364,13 @@ class AcceptResult:
     #: the Backend and must not be quietly tidied away. The caller needs to
     #: tell those apart and the outcome alone does not.
     state: "JobState | None" = None
+    #: True only when a transport failure happened before ``send_accept`` was
+    #: reached. The acceptance worker may repeat such a read-only check; no
+    #: result produced after signing is ever marked this way.
+    preaccept_retryable: bool = False
+    #: Exception class only. Messages can contain endpoint details and are not
+    #: carried into logs or the UI.
+    error_name: str | None = None
 
     @property
     def accepted(self) -> bool:
@@ -374,6 +383,60 @@ class AcceptResult:
 
 
 _TRANSIENT_CODES = frozenset({RejectCode.BLOCKCHAIN_RPC_FAILED})
+
+_TRANSIENT_HTTP_STATUS = frozenset({429, 502, 503, 504})
+_TRANSIENT_ERRNOS = frozenset({
+    errno.ECONNABORTED,
+    errno.ECONNREFUSED,
+    errno.ECONNRESET,
+    errno.EHOSTUNREACH,
+    errno.ENETDOWN,
+    errno.ENETUNREACH,
+    errno.ETIMEDOUT,
+})
+
+
+def _is_transient_rpc_error(error: BaseException | None) -> bool:
+    """Whether *error* is a temporary HTTP transport failure.
+
+    web3 8's ``HTTPProvider`` delegates to ``requests`` and calls
+    ``Response.raise_for_status``. Keep the import local so the escrow model
+    tests and non-chain startup remain importable without web3's dependency
+    tree installed.
+    """
+    if error is None:
+        return False
+    try:
+        from requests.exceptions import (
+            ConnectTimeout,
+            ConnectionError as RequestsConnectionError,
+            HTTPError,
+            ReadTimeout,
+        )
+    except ImportError:  # pragma: no cover - web3 deployments include requests
+        ConnectTimeout = ReadTimeout = RequestsConnectionError = HTTPError = ()
+
+    if isinstance(error, (ReadTimeout, ConnectTimeout, RequestsConnectionError,
+                          TimeoutError, ConnectionError)):
+        return True
+    if isinstance(error, HTTPError):
+        response = getattr(error, "response", None)
+        return getattr(response, "status_code", None) in _TRANSIENT_HTTP_STATUS
+    if isinstance(error, OSError):
+        return getattr(error, "errno", None) in _TRANSIENT_ERRNOS
+    return _is_transient_rpc_error(
+        error.__cause__ if error.__cause__ is not None else error.__context__)
+
+
+def _preaccept_failure(error: BaseException, detail: str) -> AcceptResult:
+    retryable = _is_transient_rpc_error(error)
+    return AcceptResult(
+        AcceptOutcome.UNCERTAIN if retryable else AcceptOutcome.REFUSED,
+        detail,
+        code=RejectCode.BLOCKCHAIN_RPC_FAILED,
+        preaccept_retryable=retryable,
+        error_name=type(error).__name__ if retryable else None,
+    )
 
 
 def accept_escrow_job(
@@ -407,23 +470,26 @@ def accept_escrow_job(
             check_operator_approved(
                 chain, terms.provider_wallet, operator_address)
     except JobRefused as refused:
+        if (refused.code is RejectCode.BLOCKCHAIN_RPC_FAILED
+                and _is_transient_rpc_error(refused.__context__)):
+            cause = refused.__context__
+            return _preaccept_failure(cause, refused.detail)
         _debug.warning("escrow: refusing job %s -- %s (%s)",
                     escrow_job_id, refused.detail, refused.code.value)
         return AcceptResult(
             AcceptOutcome.REFUSED, refused.detail, code=refused.code)
     except EscrowUnavailable as unavailable:
-        # Nothing was sent, so nothing is in flight -- but the job is still
-        # ours to take when the chain comes back, so this is not a refusal.
+        # Wrong chain or absent contract is deterministic configuration, and
+        # nothing was sent. Refusing releases the local reservation instead of
+        # leaving the Worker permanently stuck in ACCEPTING.
         _debug.warning("escrow: chain unavailable -- %s", unavailable)
         return AcceptResult(
-            AcceptOutcome.UNCERTAIN, str(unavailable),
+            AcceptOutcome.REFUSED, str(unavailable),
             code=RejectCode.BLOCKCHAIN_RPC_FAILED)
     except Exception as error:
         _debug.warning("escrow: pre-accept check failed (%s)", type(error).__name__)
-        return AcceptResult(
-            AcceptOutcome.UNCERTAIN,
-            f"the job could not be checked ({type(error).__name__})",
-            code=RejectCode.BLOCKCHAIN_RPC_FAILED)
+        return _preaccept_failure(
+            error, f"the job could not be checked ({type(error).__name__})")
 
     if not must_send:
         return AcceptResult(
@@ -749,7 +815,9 @@ class Web3Escrow:
         from web3 import HTTPProvider, Web3
 
         if self._web3 is None:
-            self._web3 = Web3(HTTPProvider(self._settings.rpc_url))
+            self._web3 = Web3(HTTPProvider(
+                self._settings.rpc_url,
+                request_kwargs={"timeout": RPC_REQUEST_TIMEOUT_SECONDS}))
         return self._web3
 
     def _contract(self) -> Any:

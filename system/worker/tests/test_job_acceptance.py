@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 
 from gshared_worker.escrow import AcceptOutcome, AcceptResult
@@ -23,6 +24,7 @@ from gshared_worker.worker_connection import (
     _dispatch_to,
     answer_decisions,
     keep_alive,
+    take_the_job,
 )
 from gshared_worker.worker_job import JobSlot, SlotState, read_assignment
 from gshared_worker.worker_socket import RegisteredSocket
@@ -179,6 +181,124 @@ class TestDecidingInTheBackground(unittest.TestCase):
         self.assertLessEqual(threading.active_count(), before + 1)
 
 
+class TestTransientPreAcceptRetry(unittest.TestCase):
+    def transient(self, name="ReadTimeout"):
+        return AcceptResult(
+            AcceptOutcome.UNCERTAIN,
+            "the job could not be checked",
+            code=RejectCode.BLOCKCHAIN_RPC_FAILED,
+            preaccept_retryable=True,
+            error_name=name,
+        )
+
+    def run_results(self, *results):
+        calls = []
+
+        def decide(job):
+            calls.append(job.job_id)
+            return results[len(calls) - 1]
+
+        acceptance = JobAcceptance(decide, preaccept_backoff=(0, 0))
+        self.addCleanup(acceptance.close)
+        acceptance.start(a_job())
+        deadline = time.monotonic() + 2
+        while acceptance.busy and time.monotonic() < deadline:
+            time.sleep(0.001)
+        acceptance.close()
+        return acceptance, calls, acceptance.take_decisions()[0].result
+
+    def test_immediate_success_is_not_retried(self):
+        _, calls, result = self.run_results(ACCEPTED)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(calls, ["123"])
+
+    def test_one_read_timeout_then_success(self):
+        acceptance, calls, result = self.run_results(self.transient(), ACCEPTED)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(calls, ["123", "123"])
+        self.assertEqual(len(acceptance.take_notices()), 1)
+
+    def test_two_read_timeouts_then_success(self):
+        _, calls, result = self.run_results(
+            self.transient(), self.transient(), ACCEPTED)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(len(calls), 3)
+
+    def test_three_timeouts_are_exhausted_as_a_settled_refusal(self):
+        with self.assertLogs("gshared", level="WARNING") as logs:
+            acceptance, calls, result = self.run_results(
+                self.transient(), self.transient(), self.transient())
+
+        self.assertIs(result.outcome, AcceptOutcome.REFUSED)
+        self.assertEqual(result.detail, "블록체인 네트워크 확인에 실패했습니다.")
+        self.assertEqual(len(calls), 3)
+        self.assertFalse(result.preaccept_retryable)
+        self.assertTrue(any(
+            "check exhausted attempts=3 error=ReadTimeout" in line
+            for line in logs.output))
+
+    def test_connect_timeout_uses_the_same_bounded_retry(self):
+        _, calls, result = self.run_results(
+            self.transient("ConnectTimeout"), ACCEPTED)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(len(calls), 2)
+
+    def test_deterministic_failure_is_not_retried(self):
+        deterministic = AcceptResult(
+            AcceptOutcome.REFUSED, "operator not approved",
+            code=RejectCode.OPERATOR_NOT_APPROVED)
+
+        _, calls, result = self.run_results(deterministic)
+
+        self.assertIs(result, deterministic)
+        self.assertEqual(len(calls), 1)
+
+    def test_cancel_during_backoff_prevents_retry(self):
+        first_call = threading.Event()
+        calls = []
+
+        def decide(job):
+            calls.append(job.job_id)
+            first_call.set()
+            return self.transient()
+
+        acceptance = JobAcceptance(decide, preaccept_backoff=(10, 10))
+        self.addCleanup(acceptance.close)
+        acceptance.start(a_job())
+        self.assertTrue(first_call.wait(timeout=2))
+        while not acceptance.take_notices():
+            time.sleep(0.01)
+
+        self.assertTrue(acceptance.cancel_preaccept("123"))
+        acceptance.close()
+
+        self.assertEqual(calls, ["123"])
+        self.assertIs(
+            acceptance.take_decisions()[0].result.outcome, AcceptOutcome.REFUSED)
+
+    def test_shutdown_interrupts_backoff(self):
+        first_call = threading.Event()
+
+        def decide(job):
+            first_call.set()
+            return self.transient()
+
+        acceptance = JobAcceptance(decide, preaccept_backoff=(10, 10))
+        acceptance.start(a_job())
+        self.assertTrue(first_call.wait(timeout=2))
+        while not acceptance.take_notices():
+            time.sleep(0.01)
+
+        started = time.monotonic()
+        acceptance.close()
+
+        self.assertLess(time.monotonic() - started, 1)
+
+
 class TestRefusingWithoutAnEscrow(unittest.TestCase):
     """What every installation does today: there is no escrow deployed.
 
@@ -229,13 +349,16 @@ class TestRefusingWithoutAnEscrow(unittest.TestCase):
 class TestTheConnectionKeepsGoing(unittest.TestCase):
     """A Worker must not go offline because it is busy accepting work."""
 
-    def run_with(self, *scheduled, decide=None, slot=None, **kwargs):
+    def run_with(self, *scheduled, decide=None, slot=None,
+                 preaccept_backoff=(0, 0), **kwargs):
         stop = Stop()
         clock = Clock()
         backend = FakeBackend(*scheduled, clock=clock, stop=stop, **kwargs)
         socket = RegisteredSocket(backend, "worker-001")
         slot = slot if slot is not None else JobSlot()
-        acceptance = JobAcceptance(decide, operator_address=OPERATOR)
+        acceptance = JobAcceptance(
+            decide, operator_address=OPERATOR,
+            preaccept_backoff=preaccept_backoff)
         lines = []
         say = lambda *p: lines.append(" ".join(str(x) for x in p))
         try:
@@ -263,9 +386,20 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
                               clock=clock, stop=stop, beats=4)
         socket = RegisteredSocket(backend, "worker-001")
         slot = JobSlot()
+        attempts = []
+
+        def retry_then_wait(job):
+            attempts.append(job.job_id)
+            if len(attempts) == 1:
+                return AcceptResult(
+                    AcceptOutcome.UNCERTAIN, "late",
+                    code=RejectCode.BLOCKCHAIN_RPC_FAILED,
+                    preaccept_retryable=True, error_name="ReadTimeout")
+            return ACCEPTED if may_finish.wait(timeout=10) else UNCERTAIN
+
         acceptance = JobAcceptance(
-            lambda job: ACCEPTED if may_finish.wait(timeout=10) else UNCERTAIN,
-            operator_address=OPERATOR)
+            retry_then_wait, operator_address=OPERATOR,
+            preaccept_backoff=(0, 0))
         lines = []
         say = lambda *p: lines.append(" ".join(str(x) for x in p))
 
@@ -273,6 +407,10 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
             if len(backend.heartbeats) >= 3:
                 may_finish.set()
             answer_decisions(acceptance, socket, slot, say)
+            # The fake socket advances virtual time without blocking. Yield so
+            # the real background acceptance thread gets the same opportunity
+            # it has while a production socket waits for data.
+            time.sleep(0.001)
 
         try:
             keep_alive(socket, stop, interval=HEARTBEAT_INTERVAL_SECONDS,
@@ -287,6 +425,7 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
         # blocked -- the connection never stalled behind it.
         self.assertGreaterEqual(len(backend.heartbeats), 3)
         self.assertTrue(may_finish.is_set())
+        self.assertEqual(attempts, ["123", "123"])
 
     def test_the_reply_waits_for_the_decision(self):
         # Nothing goes to the Backend until the acceptance says yes. Telling it
@@ -302,6 +441,68 @@ class TestTheConnectionKeepsGoing(unittest.TestCase):
 
         self.assertEqual(len(backend.accepteds), 1)
         self.assertIs(slot.state, SlotState.ASSIGNED)
+
+    def test_retry_success_sends_one_acceptance(self):
+        results = [
+            AcceptResult(
+                AcceptOutcome.UNCERTAIN, "late",
+                code=RejectCode.BLOCKCHAIN_RPC_FAILED,
+                preaccept_retryable=True, error_name="ReadTimeout"),
+            ACCEPTED,
+        ]
+
+        backend = FakeBackend()
+        socket = RegisteredSocket(backend, "worker-001")
+        slot = JobSlot()
+        lines = []
+        runtime_started = threading.Event()
+
+        def run_job(job):
+            runtime_started.set()
+            return type("Outcome", (), {"succeeded": True, "detail": "done"})()
+
+        acceptance = JobAcceptance(
+            lambda job: results.pop(0), operator_address=OPERATOR,
+            preaccept_backoff=(0, 0), run_job=run_job)
+        self.addCleanup(acceptance.close)
+        take_the_job(assignment(), socket, slot, lines.append, acceptance)
+        deadline = time.monotonic() + 2
+        while acceptance.busy and time.monotonic() < deadline:
+            time.sleep(0.001)
+        answer_decisions(acceptance, socket, slot, lines.append)
+
+        self.assertEqual(len(backend.accepteds), 1)
+        self.assertEqual(backend.rejecteds, [])
+        self.assertIs(slot.state, SlotState.ASSIGNED)
+        self.assertTrue(runtime_started.wait(timeout=2))
+        self.assertIn(
+            "블록체인 네트워크 응답이 지연되어 다시 확인하고 있습니다.", lines)
+
+    def test_retry_exhaustion_rejects_once_and_restores_idle(self):
+        transient = AcceptResult(
+            AcceptOutcome.UNCERTAIN, "late",
+            code=RejectCode.BLOCKCHAIN_RPC_FAILED,
+            preaccept_retryable=True, error_name="ReadTimeout")
+
+        backend = FakeBackend()
+        socket = RegisteredSocket(backend, "worker-001")
+        slot = JobSlot()
+        lines = []
+        acceptance = JobAcceptance(
+            lambda job: transient, operator_address=OPERATOR,
+            preaccept_backoff=(0, 0))
+        self.addCleanup(acceptance.close)
+        take_the_job(assignment(), socket, slot, lines.append, acceptance)
+        deadline = time.monotonic() + 2
+        while acceptance.busy and time.monotonic() < deadline:
+            time.sleep(0.001)
+        answer_decisions(acceptance, socket, slot, lines.append)
+
+        self.assertEqual(backend.accepteds, [])
+        self.assertEqual(len(backend.rejecteds), 1)
+        self.assertTrue(slot.is_idle)
+        self.assertTrue(any(
+            "블록체인 네트워크 확인에 실패했습니다." in line for line in lines))
 
     def test_a_refused_job_frees_the_slot(self):
         _, _, slot, lines = self.run_with(
