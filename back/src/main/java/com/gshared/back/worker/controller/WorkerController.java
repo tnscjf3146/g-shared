@@ -7,6 +7,7 @@ import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
 import com.gshared.back.worker.dto.request.UpdateBenchmarkRequest;
 import com.gshared.back.worker.dto.request.UpdateOperatorRequest;
 import com.gshared.back.worker.dto.response.AuthenticateWorkerResponse;
+import com.gshared.back.worker.dto.response.OperatorStatusResponse;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
 import com.gshared.back.worker.dto.response.UpdateBenchmarkResponse;
 import com.gshared.back.worker.dto.response.UpdateOperatorResponse;
@@ -27,7 +28,8 @@ import java.util.List;
  *
  * <p>인증 수단이 두 가지로 갈린다.
  * <ul>
- *   <li>{@code /register}, {@code /me}, {@code DELETE /{workerId}} — 사람이 로그인한 뒤 부르는 곳이라 <b>로그인 JWT</b>
+ *   <li>{@code /register}, {@code /me}, {@code /{workerId}/operator-status}, {@code DELETE /{workerId}} — 사람이 로그인한 뒤
+ *       부르는 곳이라 <b>로그인 JWT</b>
  *   <li>{@code /authenticate}, {@code /{workerId}/operator}, {@code /{workerId}/benchmark} — 사람 없이 워커 프로그램이
  *       부르는 곳이라 등록 때 발급한 <b>워커 토큰</b>
  * </ul>
@@ -63,6 +65,21 @@ public class WorkerController {
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
         return ResponseEntity.ok(workerService.getMyWorkers(userDetails.getId()));
+    }
+
+    /**
+     * operator 승인 상태. 워커를 붙인 뒤 "왜 ONLINE 인데 Job 이 안 오나"의 답이 되는 곳이다.
+     *
+     * <p>공급자가 MetaMask 로 {@code setOperator(operator, true)} 를 보낸 뒤 이 API 를 다시 부르면
+     * approved 가 true 로 바뀐다. Backend 는 그 트랜잭션을 대신 보내지 않는다 — 여기서 주는 것은
+     * 주소 두 개(provider·operator)와 컨트랙트, 그리고 체인이 지금 뭐라고 하는가뿐이다.
+     */
+    @GetMapping("/{workerId}/operator-status")
+    public ResponseEntity<OperatorStatusResponse> getOperatorStatus(
+            @PathVariable String workerId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(workerService.getOperatorStatus(userDetails.getId(), workerId));
     }
 
     /**

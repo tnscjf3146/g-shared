@@ -1,6 +1,8 @@
 package com.gshared.back.worker.service;
 
+import com.gshared.back.global.blockchain.EscrowProperties;
 import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.global.wallet.WalletAuthProperties;
 import com.gshared.back.global.wallet.WalletAddressNormalizer;
 import com.gshared.back.user.domain.User;
 import com.gshared.back.user.exception.UserErrorCode;
@@ -9,6 +11,7 @@ import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.domain.WorkerStatus;
 import com.gshared.back.worker.dto.request.RegisterWorkerRequest;
 import com.gshared.back.worker.dto.request.UpdateBenchmarkRequest;
+import com.gshared.back.worker.dto.response.OperatorStatusResponse;
 import com.gshared.back.worker.dto.response.RegisterWorkerResponse;
 import com.gshared.back.worker.dto.response.WorkerResponse;
 import com.gshared.back.worker.exception.WorkerErrorCode;
@@ -33,6 +36,9 @@ public class WorkerService {
     private final WorkerRepository workerRepository;
     private final UserRepository userRepository;
     private final WalletAddressNormalizer addressNormalizer;
+    private final OperatorApprovalChecker approvalChecker;
+    private final WalletAuthProperties walletAuthProperties;
+    private final EscrowProperties escrowProperties;
 
     /**
      * 로그인한 공급자가 자기 PC를 등록한다 (규격 §3).
@@ -91,8 +97,9 @@ public class WorkerService {
     }
 
     /**
-     * operator 주소 변경 (규격 §5). 주소만 바꿔 저장한다 — 온체인 setOperator 승인은 provider 몫이고,
-     * 승인 여부 확인은 System 이 acceptJob 전에 isOperator 로 한다.
+     * operator 주소 변경 (규격 §5). 주소만 바꿔 저장한다 — 온체인 setOperator 승인은 provider 몫이다.
+     * 바뀐 주소는 승인 전이므로 이후 {@link #getOperatorStatus} 는 NOT_APPROVED 를 돌려주고,
+     * 매칭도 배정 직전에 isOperator 로 다시 확인한다.
      *
      * @return 저장된(정규화된) 주소
      */
@@ -120,8 +127,22 @@ public class WorkerService {
      */
     public List<WorkerResponse> getMyWorkers(Long ownerId) {
         return workerRepository.findMineWithOwner(ownerId).stream()
-                .map(WorkerResponse::from)
+                .map(w -> WorkerResponse.from(w, approvalChecker.availabilityOf(w)))
                 .toList();
+    }
+
+    /**
+     * 이 워커의 operator 키를 공급자가 온체인에서 승인했는가 — 지금 체인에 물어본 그대로(캐시 없음).
+     * 주인만 볼 수 있고, 남의 것을 지목하면 존재 여부를 흘리지 않도록 404 다.
+     *
+     * <p>확인하지 못한 경우(체인 미설정·노드 무응답)도 오류가 아니라 UNVERIFIED 다 — 승인을 안 한 것과
+     * 모르는 것은 다르고, 화면은 그 차이로 "승인하세요"와 "잠시 후 다시 확인하세요"를 가른다.
+     */
+    public OperatorStatusResponse getOperatorStatus(Long ownerId, String workerId) {
+        Worker worker = workerRepository.findByIdAndOwnerId(workerId, ownerId)
+                .orElseThrow(() -> new BusinessException(WorkerErrorCode.WORKER_NOT_FOUND));
+        return OperatorStatusResponse.of(worker, approvalChecker.approvalOf(worker),
+                walletAuthProperties.chainId(), escrowProperties.contractAddressOrNull());
     }
 
     /**
