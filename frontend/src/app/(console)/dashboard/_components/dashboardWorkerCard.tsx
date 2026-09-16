@@ -23,22 +23,24 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
   const offline = worker.status === 'OFFLINE'
   return (
     <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={{ ...style, ...(offline && { background: 'color-mix(in srgb, var(--color-hairline-strong) 45%, var(--color-surface-2))' }) }}>
-      {/* 이름 칸 ≈ 26% — 상태가 아래 표의 VRAM 열 시작점 부근에서 시작하게 */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-6 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_auto]">
-        <h3 className="truncate text-[17px] font-bold tracking-heading text-dark" title={worker.workerId}>
-          <span className="tabular-nums">{index}.</span> {worker.deviceName}
-        </h3>
-        {/* 좁은 폭에서 두 줄로 꺾이지 않게 — 전부 한 줄 truncate, 잘리면 … + title 툴팁 */}
-        <div className="hidden min-w-0 md:block">
+      {/* 넓은 화면: 이름 | 연결·권한 | OS | 등록해제 한 줄. 좁은 화면: 세로로 쌓아 아무것도 안 숨긴다 */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_auto] md:items-center md:gap-6">
+        {/* 이름 + 등록해제 — 좁을 땐 한 줄, 넓을 땐 이름만(버튼은 grid 마지막 칸으로) */}
+        <div className="flex items-center justify-between gap-4 md:contents">
+          <h3 className="truncate text-[17px] font-bold tracking-heading text-dark" title={worker.workerId}>
+            <span className="tabular-nums">{index}.</span> {worker.deviceName}
+          </h3>
+          <Button variant="ghost" size="sm" className="flex-none md:order-last" disabled={worker.status === 'RUNNING'} title={worker.status === 'RUNNING' ? '작업이 끝난 뒤 해제할 수 있습니다' : undefined} onClick={() => onUnlink(worker)}>
+            등록 해제
+          </Button>
+        </div>
+        <div className="min-w-0">
           <OperatorApproval worker={worker} onWork={onWork} />
         </div>
-        <div className="hidden min-w-0 md:block">
+        <div className="min-w-0">
           <div className="text-[14px] text-text-muted">OS</div>
           <div className="truncate text-[17px] font-medium text-dark" title={worker.osVersion ?? undefined}>{worker.osVersion ?? '—'}</div>
         </div>
-        <Button variant="ghost" size="sm" disabled={worker.status === 'RUNNING'} title={worker.status === 'RUNNING' ? '작업이 끝난 뒤 해제할 수 있습니다' : undefined} onClick={() => onUnlink(worker)}>
-          등록 해제
-        </Button>
       </div>
 
       <PlainTable
