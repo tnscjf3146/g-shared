@@ -2,7 +2,9 @@ import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
 import { NETWORK_STATS_PATH, WORKERS_PATH } from '../schema'
 import type { Worker } from '../types'
-import { MOCK_WORKERS_INITIAL } from './data'
+import { getLinkedWallet } from '@/features/wallet/mocks/handlers'
+import { ESCROW_ADDRESS } from '@/features/wallet/ethereum'
+import { MOCK_OPERATOR_APPROVED, MOCK_WORKERS_INITIAL } from './data'
 
 const URL = `${API_BASE_URL}${WORKERS_PATH}`
 const error = (status: number, code: string, message: string) => HttpResponse.json({ code, message }, { status })
@@ -27,7 +29,17 @@ export const workerHandlers = [
   http.get(`${URL}/me`, async ({ request }) => {
     await delay()
     if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
-    return HttpResponse.json(workers.map(withFreshHeartbeat))
+    // walletLinked 는 주인 계정의 지갑 연결 여부(실서버: users.wallet_address) — 지갑 목업과 같은 값을 보게 파생한다. 연결 전엔 모든 워커가 '지갑 미연결', 연결 뒤엔 operator 승인 줄이 조회된다
+    return HttpResponse.json(workers.map((w) => ({ ...withFreshHeartbeat(w), walletLinked: getLinkedWallet() !== null })))
+  }),
+
+  // 승인 상태(백엔드 가이드 §5). approved 는 실서버가 체인 isOperator 로 판정 — 목업은 fixture 집합. 서명은 MetaMask 라 목업에선 승인 완료로 넘어가지 않는다
+  http.get(`${URL}/:workerId/operator-status`, async ({ request, params }) => {
+    await delay()
+    if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const w = workers.find((x) => x.workerId === params.workerId)
+    if (!w) return error(404, 'WORKER_NOT_FOUND', 'Worker를 찾을 수 없습니다.')
+    return HttpResponse.json({ workerId: w.workerId, providerAddress: getLinkedWallet(), operatorAddress: w.operatorAddress ?? null, approved: MOCK_OPERATOR_APPROVED.has(w.workerId), chainId: 31221, escrowAddress: ESCROW_ADDRESS })
   }),
 
   http.delete(`${URL}/:workerId`, async ({ request, params }) => {

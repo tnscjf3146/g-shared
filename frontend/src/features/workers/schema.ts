@@ -26,9 +26,21 @@ export const workerSchema = z.object({
   lastHeartbeatAt: z.nullable(z.string()),
   createdAt: z.string(),
   walletLinked: z.boolean(), // 주인 지갑 연결 여부. false 면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다
+  operatorAddress: z.optional(z.nullable(z.string())), // 워커 프로그램의 온체인 서명 키(공개 주소). 승인 여부는 operator-status 로 따로 조회
 })
 
 export const workerListSchema = z.array(workerSchema)
+
+/** GET /workers/{workerId}/operator-status — 공급자 지갑이 이 워커의 서명 키를 에스크로에 setOperator 로 승인했는가(백엔드 가이드 2026-09-16 §5).
+ *  approved 는 백엔드가 체인 isOperator(provider, operator) 로 판정. 주소 둘은 지갑 미연결·키 미등록이면 비어 올 수 있어 nullable */
+export const operatorStatusSchema = z.object({
+  workerId: z.string(),
+  providerAddress: z.nullable(z.string()),
+  operatorAddress: z.nullable(z.string()),
+  approved: z.boolean(),
+  chainId: z.number(),
+  escrowAddress: z.string(),
+})
 
 /** GET /network/stats — 네트워크 전체 워커 현황(소비자 대시보드용) */
 export const networkStatsSchema = z.object({

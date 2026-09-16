@@ -68,7 +68,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
       )}
       {options && options.length === 0 && (
         <p role="status" className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
-          지금 사용 가능한 GPU 가 없습니다. 등급 목록은 켜져 있는 공급자 PC 로 만들어져서, 잠시 후 다시 오면 나타날 수 있습니다.
+          현재 작업 가능한 GPU가 없습니다. 등급 목록은 켜져 있는 공급자 PC 로 만들어져서, 잠시 후 다시 오면 나타날 수 있습니다.
         </p>
       )}
       {options && options.length > 0 && (

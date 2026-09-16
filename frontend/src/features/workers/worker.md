@@ -173,3 +173,27 @@ src/
 1. `[fe-feature] 워커 스키마·API·목업 + 보호 경로·네비 탭·랜딩 CTA` — schema/types/api/errors/format, `workerHandlers` + fixture, `mocks/handlers.ts`, `proxy.ts`, `navAuth.tsx`, `heroSection.tsx`, `.env.example`
 2. `[fe-feature] 워커 화면: 등록 안내 카드·목록·상태 배지` — `(app)/workers`, `ui/statusBadge`, `workersPage`/`workerRegisterCard`/`workerCard`/`workerSkeleton`, worker.md
 3. (백엔드 반영 후) 실서버 확인 → 문서 갱신
+
+## 11. operator 승인 — 백엔드 가이드 "Worker Operator 승인 UX"(2026-09-16), `fe-hotfix/f5-session-draft`
+
+정본은 가이드 문서(Downloads/G-shared_Frontend_Operator_Approval_Fix_Guide.md)와 `blockchain/docs/03-에스크로-연동-규격.md` §2. 가이드를 그대로 따른다.
+
+```
+작업 가능 = Worker ONLINE AND currentJob == null AND operator 승인 완료      (ONLINE != AVAILABLE)
+승인      = 공급자 MetaMask 로 setOperator(operator, true) — 워커 등록 뒤 최초 1회. 이후 Job 은 워커가 acceptJob 으로 자동 수락
+```
+
+| 조각 | 위치 | 하는 일 |
+| --- | --- | --- |
+| `operatorStatusSchema` · `getOperatorStatus` | `schema.ts` · `api.ts` | `GET /workers/{workerId}/operator-status` → `{ workerId, providerAddress, operatorAddress, approved, chainId, escrowAddress }`(가이드 §5). approved 는 백엔드가 체인 `isOperator` 로 판정 |
+| `OperatorApproval` | `components/operatorApproval.tsx` | 카드 상태 칸 세 줄 **연결 상태 / 실행 권한 / 상태(작업 가능)**(§4) + `[GPU 실행 권한 승인]`(§6). 상태는 `OPERATOR_APPROVAL_REQUIRED · PENDING · APPROVED · FAILED` |
+| `setOperator` | `wallet/ethereum.ts` | 셀렉터 `0x558a7297`(keccak 검증). to = 응답의 `escrowAddress` |
+| 목업 | `mocks/handlers.ts` · `mocks/data.ts` | operator-status 응답. approved 는 `MOCK_OPERATOR_APPROVED`(worker 3). 서명은 MetaMask 라 목업에선 승인 완료로 넘어가지 않는다 |
+
+승인 흐름(§8): 승인 필요 → `requestAccount` → **connectedWallet == providerAddress** 아니면 중단("이 GPU를 등록한 공급자 지갑으로 연결해 주세요.", §7) → `ensureSsafyChain`(Chain ID 31221, §7) → MetaMask 승인 요청 → 승인 처리 중(영수증) → **백엔드 operator-status 재조회** → approved=true 면 승인 완료·작업 가능. txHash 만으로 APPROVED 처리하지 않는다. 영수증은 성공인데 서버가 아직 false 면 PENDING 으로 두고 [다시 확인].
+
+문구(§9): 공급자 "GPU가 온라인 상태지만 실행 권한 승인이 필요합니다." / 수요자 "현재 작업 가능한 GPU가 없습니다."(stepGpu · jobs/errors NO_AVAILABLE_WORKER). MetaMask 거절(4001)은 FAILED + 이유.
+
+금지(§10): 프론트는 공급자 MetaMask 서명만. 워커 operator 키는 G-shared.exe, 개인키는 어디로도 보내지 않는다. 같은 지갑이 수요자·공급자를 겸해도 operator 는 별도 키라 최초 승인은 필요하다(§11).
+
+회귀 항목(§12): approved=false → 버튼 / approved=true → 버튼 숨김·"작업 가능" / 지갑 불일치 → 차단 / 체인 불일치 → 전환 / reject → FAILED / pending → PENDING / 성공 → 재조회 → 작업 가능. 목업으로는 처음 둘과 키 미등록·지갑 미연결까지 확인 가능, 서명 이후는 실지갑.

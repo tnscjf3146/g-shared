@@ -28,6 +28,9 @@ const sessionFlag = {
   },
 }
 
+/** 로그인 이력(세션 표시)이 있는가 — authProvider 가 "보호 화면인데 세션 없음" 판정에 쓴다 */
+export const hasSession = () => sessionFlag.has()
+
 /** POST /auth/signup → 201(빈 본문). 중복 이메일은 409 DUPLICATE_EMAIL */
 export function signup(body: SignupRequest): Promise<void> {
   return fetcher<void>('/auth/signup', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body) })
@@ -50,7 +53,9 @@ export function reissue(): Promise<string | null> {
     authStore.signOut()
     return Promise.resolve(null)
   }
-  inflight ??= fetcher<unknown>('/auth/reissue', { method: 'POST' })
+  // keepalive: 서버는 reissue 마다 refresh 토큰을 회전(옛 값 삭제 + 새 쿠키)한다. 응답을 받기 전에 새로고침하면 요청이 끊겨
+  // 새 쿠키를 못 받고, 다음 로드가 옛 쿠키로 오면 서버가 불일치로 토큰을 지워 401 → 로그아웃(F5 연타). 페이지가 내려가도 응답을 끝까지 받아 쿠키를 심는다
+  inflight ??= fetcher<unknown>('/auth/reissue', { method: 'POST', keepalive: true })
     .then((res) => {
       const { accessToken } = tokenResponseSchema.parse(res)
       authStore.signIn(accessToken)

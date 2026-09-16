@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/button'
 import { PlainTable } from '@/features/jobs/components/plainTable'
+import { OperatorApproval } from '@/features/workers/components/operatorApproval'
 import { formatTokensPerSec, formatVram, relativeTime } from '@/features/workers/format'
-import type { Worker, WorkerStatus } from '@/features/workers/types'
+import type { Worker } from '@/features/workers/types'
 
 // 워커 카드 — 작업 카드와 같은 구조. 제목 줄("순번. 기기 이름" | 상태 | OS | 등록 해제) 아래 장식 없는 격자 표.
 // 색·점·배지 없이 글자만. 온도·전력·가동률·수익·수신 토글은 백엔드에 없어 그리지 않는다
-const STATUS_LABEL: Record<WorkerStatus, string> = { ONLINE: '대기 · 배정 가능', RUNNING: '작업 중', OFFLINE: '오프라인' }
+// 상태 칸은 백엔드 가이드(2026-09-16) §4 의 세 줄 — 연결 상태 / 실행 권한 / 상태 — 를 OperatorApproval 이 그린다. ONLINE 은 연결 상태일 뿐 작업 가능이 아니다
 // 컬럼 폭 고정: GPU | VRAM | 드라이버 | 벤치마크 | 하트비트 | 현재 작업
 const COLS = ['26%', '10%', '14%', '16%', '18%', '16%']
 
@@ -22,9 +23,7 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
         </h3>
         {/* 좁은 폭에서 두 줄로 꺾이지 않게 — 전부 한 줄 truncate, 잘리면 … + title 툴팁 */}
         <div className="hidden min-w-0 md:block">
-          <div className="truncate text-[17px] font-medium text-dark" title={STATUS_LABEL[worker.status]}>{STATUS_LABEL[worker.status]}</div>
-          {/* 지갑 미연결이면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다 — 주인만 알 수 있으니 여기서 알린다 */}
-          {!worker.walletLinked && <div className="truncate text-[14px] text-danger" title="지갑 미연결 · 작업을 받을 수 없습니다">지갑 미연결 · 작업을 받을 수 없습니다</div>}
+          <OperatorApproval worker={worker} />
         </div>
         <div className="hidden min-w-0 md:block">
           <div className="text-[14px] text-text-muted">OS</div>

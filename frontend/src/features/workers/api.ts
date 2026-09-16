@@ -1,6 +1,6 @@
 import { authFetch } from '@/features/auth/api'
-import { NETWORK_STATS_PATH, WORKERS_PATH, networkStatsSchema, workerListSchema } from './schema'
-import type { NetworkStats, Worker } from './types'
+import { NETWORK_STATS_PATH, WORKERS_PATH, networkStatsSchema, operatorStatusSchema, workerListSchema } from './schema'
+import type { NetworkStats, OperatorStatus, Worker } from './types'
 
 /** GET /workers/me → 내 워커 목록(없으면 []) */
 export async function getMyWorkers(): Promise<Worker[]> {
@@ -10,6 +10,11 @@ export async function getMyWorkers(): Promise<Worker[]> {
 /** GET /network/stats → 네트워크 전체 워커 현황(back NetworkController) */
 export async function getNetworkStats(): Promise<NetworkStats> {
   return networkStatsSchema.parse(await authFetch<unknown>(NETWORK_STATS_PATH))
+}
+
+/** GET /workers/{id}/operator-status → 승인 상태(백엔드 가이드 §5). 승인 트랜잭션 영수증 뒤에도 이걸 다시 읽어 approved 를 확정한다(§8) */
+export async function getOperatorStatus(workerId: string): Promise<OperatorStatus> {
+  return operatorStatusSchema.parse(await authFetch<unknown>(`${WORKERS_PATH}/${encodeURIComponent(workerId)}/operator-status`))
 }
 
 /** DELETE /workers/{id} → 204. 등록 해제 — 워커 프로그램은 다음 인증에서 WORKER_NOT_FOUND 를 받아 "다시 등록" 안내 */
