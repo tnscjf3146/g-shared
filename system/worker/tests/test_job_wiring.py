@@ -27,7 +27,7 @@ from unittest.mock import patch
 
 from gshared_worker import job_wiring
 from gshared_worker.config import WorkerSettings
-from gshared_worker.escrow import EscrowJob, EscrowSettings, FundedEvent, JobState
+from gshared_worker.escrow import EscrowJob, EscrowSettings, JobState
 from gshared_worker.job_acceptance import refuse_without_escrow
 from gshared_worker.job_cancellation import Cancellation
 from gshared_worker.job_runtime import (
@@ -99,10 +99,8 @@ class FakeChain:
             return escrow_job(state=JobState.ASSIGNED, operator=OPERATOR)
         return escrow_job()
 
-    def find_funded_event(self, escrow_job_id):
-        return FundedEvent(
-            escrow_job_id=17, external_ref=EXTERNAL_REF, provider=PROVIDER,
-            client=CLIENT, price_wei=PRICE_WEI, deadline=2_000_000_000)
+    def job_id_by_client_ref(self, client, external_ref):
+        return 17
 
     def is_operator(self, provider, operator):
         return True
