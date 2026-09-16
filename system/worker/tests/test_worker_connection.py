@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from gshared_worker.config import WorkerSettings
 from gshared_worker.exit_codes import WorkerExitCode
@@ -825,6 +827,21 @@ class TestReconnecting(unittest.TestCase):
 
         for transport in (first, second):
             self.assertEqual(json.loads(transport.sent[0])["type"], "REGISTER")
+
+    def test_backend_restart_and_reconnect_leave_the_operator_file_unchanged(self):
+        with TemporaryDirectory() as temporary:
+            wallet = Path(temporary) / "worker-wallet.json"
+            wallet.write_text(json.dumps({
+                "address": OPERATOR,
+                "privateKeyProtected": "sealed-operator-key",
+            }), encoding="utf-8")
+            before = wallet.read_bytes()
+            first = FakeTransport(REGISTER_ACK, ConnectionWentAway("backend restarted"))
+            second = FakeTransport(REGISTER_ACK, HEARTBEAT_ACK)
+
+            supervise(first, second, stop=Stop(stop_after=3))
+
+            self.assertEqual(wallet.read_bytes(), before)
 
     def test_every_attempt_uses_the_stored_worker_token(self):
         _, _, _ = supervise(*[TransportUnavailable("down")] * 3,

@@ -34,6 +34,7 @@ from gshared_worker.config import (
     worker_directory,
 )
 from gshared_worker.escrow_abi import ARTIFACT_RELATIVE_PATH, default_artifact_path
+from gshared_worker.errors import WorkerConfigurationError
 from gshared_worker.logging_setup import DEBUG_LOG_NAME, start_debug_log, stop_debug_log
 from gshared_worker.worker_wallet import WALLET_FILE_NAME, wallet_file_path
 
@@ -75,6 +76,113 @@ class TheDataDirectoryTest(unittest.TestCase):
             where = data_directory(env={"LOCALAPPDATA": str(self.local)})
 
         self.assertEqual(where, self.program)
+
+    def test_a_portable_config_and_wallet_stay_beside_the_exe(self):
+        (self.program / CONFIG_FILE_NAME).write_text("{}", encoding="utf-8")
+        (self.program / WALLET_FILE_NAME).write_text(
+            json.dumps({
+                "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                "privateKeyProtected": "sealed-portable-key",
+            }),
+            encoding="utf-8",
+        )
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+        with frozen, executable:
+            where = data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+        self.assertEqual(where, self.program)
+
+    def test_a_portable_wallet_without_config_keeps_the_identity_beside_the_exe(self):
+        (self.program / WALLET_FILE_NAME).write_text(
+            json.dumps({
+                "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                "privateKeyProtected": "sealed-portable-key",
+            }),
+            encoding="utf-8",
+        )
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+        with frozen, executable:
+            where = data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+        self.assertEqual(where, self.program)
+        self.assertFalse((self.local / USER_DATA_DIRECTORY_NAME).exists())
+
+    def test_matching_portable_and_local_wallets_keep_portable_precedence(self):
+        address = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+        (self.program / WALLET_FILE_NAME).write_text(
+            json.dumps({"address": address, "privateKeyProtected": "portable"}),
+            encoding="utf-8",
+        )
+        local_data = self.local / USER_DATA_DIRECTORY_NAME
+        local_data.mkdir(parents=True)
+        (local_data / WALLET_FILE_NAME).write_text(
+            json.dumps({"address": address.lower(), "privateKeyProtected": "local"}),
+            encoding="utf-8",
+        )
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+        with frozen, executable:
+            where = data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+        self.assertEqual(where, self.program)
+
+    def test_different_portable_and_local_wallets_are_an_explicit_conflict(self):
+        portable = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+        local = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
+        (self.program / WALLET_FILE_NAME).write_text(
+            json.dumps({"address": portable, "privateKeyProtected": "portable"}),
+            encoding="utf-8",
+        )
+        local_data = self.local / USER_DATA_DIRECTORY_NAME
+        local_data.mkdir(parents=True)
+        (local_data / WALLET_FILE_NAME).write_text(
+            json.dumps({"address": local, "privateKeyProtected": "local"}),
+            encoding="utf-8",
+        )
+        portable_before = (self.program / WALLET_FILE_NAME).read_bytes()
+        local_before = (local_data / WALLET_FILE_NAME).read_bytes()
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+
+        with frozen, executable, self.assertRaisesRegex(
+                WorkerConfigurationError, "STORAGE_IDENTITY_CONFLICT"):
+            data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+        self.assertEqual((self.program / WALLET_FILE_NAME).read_bytes(), portable_before)
+        self.assertEqual((local_data / WALLET_FILE_NAME).read_bytes(), local_before)
+
+    def test_unreadable_dual_wallet_metadata_is_an_explicit_conflict(self):
+        (self.program / WALLET_FILE_NAME).write_text("{broken", encoding="utf-8")
+        local_data = self.local / USER_DATA_DIRECTORY_NAME
+        local_data.mkdir(parents=True)
+        (local_data / WALLET_FILE_NAME).write_text(
+            json.dumps({
+                "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                "privateKeyProtected": "local",
+            }),
+            encoding="utf-8",
+        )
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+
+        with frozen, executable, self.assertRaisesRegex(
+                WorkerConfigurationError, "cannot be compared safely"):
+            data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+    def test_localappdata_wallet_keeps_the_same_root_on_restarts(self):
+        local_data = self.local / USER_DATA_DIRECTORY_NAME
+        local_data.mkdir(parents=True)
+        (local_data / WALLET_FILE_NAME).write_text(
+            json.dumps({
+                "address": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+                "privateKeyProtected": "local",
+            }),
+            encoding="utf-8",
+        )
+        frozen, executable = frozen_at(self.program / "G-shared.exe")
+        with frozen, executable:
+            first = data_directory(env={"LOCALAPPDATA": str(self.local)})
+            second = data_directory(env={"LOCALAPPDATA": str(self.local)})
+
+        self.assertEqual(first, local_data)
+        self.assertEqual(second, local_data)
 
     def test_with_no_profile_folder_it_falls_back_to_the_program(self):
         frozen, executable = frozen_at(self.program / "G-shared.exe")

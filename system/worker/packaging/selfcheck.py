@@ -118,9 +118,13 @@ def main() -> int:
     check("chain config", chain_config)
 
     def wallet_and_dpapi():
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
         from gshared_worker.credentials import (
             protect_current_user, unprotect_current_user)
-        from gshared_worker.worker_wallet import EthAccounts
+        from gshared_worker.worker_wallet import (
+            EthAccounts, prepare_wallet, wallet_file_path)
 
         accounts = EthAccounts()
         address, key = accounts.create()
@@ -128,7 +132,16 @@ def main() -> int:
         sealed = protect_current_user(key)
         _require(sealed != key and key not in sealed, "not sealed")
         _require(unprotect_current_user(sealed) == key, "DPAPI round trip")
-        return "eth_account key made, DPAPI sealed and unsealed"
+        with TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            first = prepare_wallet(lambda *parts: None, directory)
+            stored = wallet_file_path(directory).read_text(encoding="utf-8")
+            second = prepare_wallet(lambda *parts: None, directory)
+            _require(first.address == second.address, "operator changed on reload")
+            _require(first.private_key == second.private_key, "key changed on reload")
+            _require(first.private_key not in stored, "operator key stored in plaintext")
+        return (f"eth_account + DPAPI round trip; operator {first.short} "
+                "persisted across reload")
 
     check("wallet + DPAPI", wallet_and_dpapi)
 

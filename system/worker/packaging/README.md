@@ -50,11 +50,12 @@ WSL2 · NVIDIA Driver · Docker Engine · NVIDIA Container Toolkit.
 | 실행 방식 | 설정·토큰·signing key·로그 |
 |---|---|
 | 소스 실행 | `system/worker/` (기존과 동일) |
-| exe, 옆에 `worker-config.json` 있음 | exe 폴더 (portable — 기존 identity 유지) |
+| exe, 옆에 `worker-config.json` 또는 `worker-wallet.json` 있음 | exe 폴더 (portable — 기존 identity 유지) |
 | exe, 그 외 | `%LOCALAPPDATA%\G-shared\` |
 
 - 단일 실행 lock: `%LOCALAPPDATA%\G-shared\state\` + 사용자별 named mutex.
 - 토큰·private key는 DPAPI(Current User)로 봉인. 다른 계정·다른 PC에서는 못 읽는다.
+- portable과 LocalAppData 양쪽에 wallet이 있으면 공개 Operator Address가 같을 때만 portable을 사용한다. 다르거나 안전하게 비교할 수 없으면 둘 다 변경하지 않고 저장소 충돌로 중단한다.
 - `Program Files`처럼 쓰기 금지 폴더에 설치해도 exe 폴더에 쓰지 않는다.
 
 ## Backend 주소
