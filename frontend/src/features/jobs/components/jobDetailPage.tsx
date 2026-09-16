@@ -145,7 +145,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-4">
-            <h1 className="text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
+            <h1 className="min-w-0 break-words text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
             <span className="text-[17px] font-medium text-dark">{meta.label}</span>
           </div>
           <div className="flex items-center gap-2">
