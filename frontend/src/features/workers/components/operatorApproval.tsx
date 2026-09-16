@@ -17,7 +17,9 @@ type Approval = { s: ApprovalState; detail?: string } // PENDING: 진행 문구 
 const CONNECTION: Record<WorkerStatus, string> = { ONLINE: '온라인', RUNNING: '작업 중', OFFLINE: '오프라인' }
 const WAITING_SERVER = '트랜잭션은 확인됐지만 서버 반영을 기다리고 있습니다'
 
-export function OperatorApproval({ worker }: { worker: Worker }) {
+export type WorkAvailability = { text: string; tone: 'ok' | 'danger' | 'muted' }
+
+export function OperatorApproval({ worker, onWork }: { worker: Worker; onWork?: (w: WorkAvailability) => void }) {
   const [status, setStatus] = useState<OperatorStatus | null | 'error'>(null) // null = 조회 중
   const [approval, setApprovalRaw] = useState<Approval>({ s: 'OPERATOR_APPROVAL_REQUIRED' })
 
@@ -97,6 +99,22 @@ export function OperatorApproval({ worker }: { worker: Worker }) {
   const canApprove = ready && (approval.s === 'OPERATOR_APPROVAL_REQUIRED' || approval.s === 'OPERATOR_APPROVAL_FAILED')
   const available = worker.status === 'ONLINE' && !worker.currentJobId && approval.s === 'OPERATOR_APPROVED'
   const tone = { muted: 'text-text-muted', danger: 'text-danger', ok: 'text-dark' }[permission.tone]
+  // "상태" 줄은 항상 표시(카드마다 줄 수가 달라 헷갈리던 것 통일). 작업 가능 아니면 왜 안 되는지 한 단어로
+  // 좁은 표 칸에서 안 잘리게 이유는 짧게 — 색(초록 가능 / 빨강 조치 필요 / 회색 대기)으로 구분하고 title 에 전체 문구
+  const work = available
+    ? { text: '작업 가능', tone: 'ok' as const }
+    : worker.status === 'OFFLINE'
+      ? { text: '오프라인', tone: 'muted' as const }
+      : worker.currentJobId
+        ? { text: '작업 중', tone: 'muted' as const }
+        : approval.s !== 'OPERATOR_APPROVED'
+          ? { text: '권한 필요', tone: 'danger' as const }
+          : { text: '대기 불가', tone: 'muted' as const }
+  // 작업 가능/불가는 아래 표(현재 작업 옆)에서 보여주도록 부모로 올린다 — work 는 매 렌더 새 객체라 값(text/tone)이 바뀔 때만 전달
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onWork?.(work)
+  }, [onWork, work.text, work.tone])
 
   return (
     <div className="flex min-w-0 flex-col gap-1 text-[14px]">
@@ -107,12 +125,6 @@ export function OperatorApproval({ worker }: { worker: Worker }) {
         <dd className={`truncate font-medium ${tone}`} title={permission.text}>
           {permission.text}
         </dd>
-        {available && (
-          <>
-            <dt className="text-text-muted">상태</dt>
-            <dd className="font-medium text-dark">작업 가능</dd>
-          </>
-        )}
       </dl>
       {/* §9 공급자에겐 실제 원인을 그대로 */}
       {worker.status === 'ONLINE' && ready && approval.s === 'OPERATOR_APPROVAL_REQUIRED' && <p className="text-[13px] text-danger">GPU가 온라인 상태지만 실행 권한 승인이 필요합니다.</p>}
