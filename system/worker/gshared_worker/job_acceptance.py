@@ -50,6 +50,10 @@ DecideOnJob = Callable[[AssignedJob], AcceptResult]
 #: for a decision already in hand to be recorded, short enough that a person
 #: closing the window is not left watching a receipt they no longer care about.
 JOIN_TIMEOUT_SECONDS = 5
+PREACCEPT_ATTEMPTS = 3
+PREACCEPT_BACKOFF_SECONDS = (1.0, 2.0)
+PREACCEPT_RETRY_MESSAGE = "블록체인 네트워크 응답이 지연되어 다시 확인하고 있습니다."
+PREACCEPT_FAILED_MESSAGE = "블록체인 네트워크 확인에 실패했습니다."
 
 
 class Work(Enum):
@@ -164,7 +168,9 @@ class JobAcceptance:
                  clean_up: DecideOnJob | None = None,
                  run_job: Any = None,
                  settle_job: Any = None,
-                 cancel_job: Any = None) -> None:
+                 cancel_job: Any = None,
+                 preaccept_backoff: tuple[float, ...] = PREACCEPT_BACKOFF_SECONDS,
+                 ) -> None:
         self._decide = decide or refuse_without_escrow
         #: Gives a job back on chain. ``None`` when no escrow is configured,
         #: in which case nothing was ever accepted and there is nothing to
@@ -194,6 +200,11 @@ class JobAcceptance:
         #: accepted and it is never sent.
         self.operator_address = operator_address
         self._decisions: "queue.Queue[Decision]" = queue.Queue()
+        self._notices: "queue.Queue[str]" = queue.Queue()
+        self._preaccept_backoff = preaccept_backoff
+        self._decision_stop = threading.Event()
+        self._in_preaccept_backoff = threading.Event()
+        self._closing = False
         #: Where a running container's progress appears, for the connection
         #: loop to pick up. **A separate channel from the decisions queue,
         #: and deliberately so.** A decision is the answer to a Job and is
@@ -241,12 +252,13 @@ class JobAcceptance:
         has already moved past FUNDED.
         """
         with self._lock:
-            if self._deciding is not None:
+            if self._deciding is not None or self._closing:
                 _debug.debug(
                     "acceptance: already deciding on %s, ignoring %s",
                     self._deciding, job.job_id)
                 return False
             self._deciding = job.job_id
+            self._decision_stop.clear()
 
         # daemon=True so a Worker whose main thread has finished is not held
         # open by a receipt nobody is waiting for. The join below is the
@@ -457,7 +469,8 @@ class JobAcceptance:
 
         do = self._decide if work is Work.ACCEPT else self._clean_up
         try:
-            result = do(job)
+            result = (self._accept_with_retry(job, do)
+                      if work is Work.ACCEPT else do(job))
         except Exception as error:
             # A decider that raised told us nothing about what happened on the
             # chain, so this is not a refusal. UNCERTAIN keeps the reservation
@@ -471,6 +484,62 @@ class JobAcceptance:
             with self._lock:
                 self._deciding = None
         self._decisions.put(Decision(job, result, work))
+
+    def _accept_with_retry(self, job: AssignedJob,
+                           decide: DecideOnJob) -> AcceptResult:
+        """Repeat only failures proven to precede any transaction."""
+        for attempt in range(1, PREACCEPT_ATTEMPTS + 1):
+            result = decide(job)
+            if not result.preaccept_retryable:
+                if attempt > 1 and result.accepted:
+                    _debug.info(
+                        "escrow pre-accept check succeeded attempt=%s/%s",
+                        attempt, PREACCEPT_ATTEMPTS)
+                return result
+
+            error_name = result.error_name or "ConnectionError"
+            if attempt >= PREACCEPT_ATTEMPTS:
+                _debug.warning(
+                    "escrow pre-accept check exhausted attempts=%s error=%s",
+                    PREACCEPT_ATTEMPTS, error_name)
+                return AcceptResult(
+                    AcceptOutcome.REFUSED,
+                    PREACCEPT_FAILED_MESSAGE,
+                    code=RejectCode.BLOCKCHAIN_RPC_FAILED)
+
+            _debug.warning(
+                "escrow pre-accept transient failure attempt=%s/%s error=%s",
+                attempt, PREACCEPT_ATTEMPTS, error_name)
+            self._in_preaccept_backoff.set()
+            self._notices.put(PREACCEPT_RETRY_MESSAGE)
+            if self._closing:
+                self._decision_stop.set()
+            delay = self._preaccept_backoff[attempt - 1]
+            interrupted = self._decision_stop.wait(timeout=delay)
+            self._in_preaccept_backoff.clear()
+            if interrupted:
+                return AcceptResult(
+                    AcceptOutcome.REFUSED,
+                    "작업 수락 전 블록체인 확인이 취소되었습니다.",
+                    code=RejectCode.BLOCKCHAIN_RPC_FAILED)
+
+        raise AssertionError("unreachable")
+
+    def cancel_preaccept(self, job_id: str) -> bool:
+        """Interrupt a retry wait for the currently reserved Job."""
+        with self._lock:
+            if self._deciding != job_id:
+                return False
+            self._decision_stop.set()
+            return True
+
+    def take_notices(self) -> list[str]:
+        notices = []
+        while True:
+            try:
+                notices.append(self._notices.get_nowait())
+            except queue.Empty:
+                return notices
 
     def _run_pipeline(self, job: AssignedJob) -> None:
         """Run the training pipeline and put its outcome on the same queue.
@@ -536,11 +605,17 @@ class JobAcceptance:
         socket left to tell the Backend about it, and the chain is the record
         that survives.
         """
-        thread = self._thread
+        with self._lock:
+            self._closing = True
+            if self._in_preaccept_backoff.is_set():
+                self._decision_stop.set()
+            thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
                 _debug.warning("acceptance: still deciding at shutdown, leaving it")
+        with self._lock:
+            self._closing = False
 
 
 def _accepts(what: Any, name: str) -> bool:

@@ -154,6 +154,29 @@ class TestOnlyOneReasonIsActedOn(unittest.TestCase):
         self.assertEqual(acceptance.cancelled, [("123", USER_REQUEST)])
         self.assertEqual(acceptance.asked, [], "it went to the cleanup path")
 
+    def test_user_request_interrupts_preaccept_before_any_runtime_cancel(self):
+        class PreacceptRecorder(Recorder):
+            def __init__(self):
+                super().__init__()
+                self.interrupted = []
+
+            def cancel_preaccept(self, job_id):
+                self.interrupted.append(job_id)
+                return True
+
+        slot = JobSlot()
+        slot.offer(a_job())
+        acceptance = PreacceptRecorder()
+        lines = []
+
+        cancel_the_job(
+            cancellation(reason=USER_REQUEST), slot,
+            lambda *p: lines.append(" ".join(str(x) for x in p)), acceptance)
+
+        self.assertEqual(acceptance.interrupted, ["123"])
+        self.assertEqual(acceptance.cancelled, [])
+        self.assertTrue(any("수락 전 확인을 취소" in line for line in lines))
+
     def test_the_cleanup_path_does_not_start_a_cancellation(self):
         acceptance, _ = self.ask(cancellation())
 

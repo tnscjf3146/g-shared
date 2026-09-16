@@ -390,6 +390,15 @@ def _cancel_for_the_customer(
         say(f"  작업 {request.job_id}: 취소 요청이 왔지만 이 PC는 {held.job_id} 작업을 처리 중입니다. 아무것도 바뀌지 않았습니다.")
         return
 
+    if slot.is_accepting:
+        cancel_preaccept = getattr(acceptance, "cancel_preaccept", None)
+        if callable(cancel_preaccept) and cancel_preaccept(held.job_id):
+            say(f"  작업 {request.job_id}: 수락 전 확인을 취소하는 중...")
+        else:
+            _debug.warning("cancel: pre-accept for %s could not be interrupted",
+                         request.job_id)
+        return
+
     if not acceptance.start_cancellation(held, request.reason):
         # No runtime has started, or none is configured. The Job is kept:
         # giving the slot up while the chain may still have it assigned here
@@ -418,6 +427,9 @@ def answer_decisions(
     machine as the provider would put a Job in RUNNING that this machine has
     no on-chain claim to.
     """
+    take_notices = getattr(acceptance, "take_notices", lambda: ())
+    for notice in take_notices():
+        say(notice)
     for decision in acceptance.take_decisions():
         _settle(decision, socket, slot, say, clock,
                 acceptance.operator_address, acceptance)

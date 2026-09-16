@@ -25,6 +25,15 @@ import ast
 import inspect
 import json
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+from requests import Response
+from requests.exceptions import (
+    ConnectTimeout,
+    ConnectionError as RequestsConnectionError,
+    HTTPError,
+    ReadTimeout,
+)
 
 from gshared_worker.escrow import (
     AcceptOutcome,
@@ -33,6 +42,7 @@ from gshared_worker.escrow import (
     EscrowUnavailable,
     FundedEvent,
     JobState,
+    Web3Escrow,
     abort_escrow_job,
     accept_escrow_job,
     check_chain,
@@ -634,11 +644,108 @@ class TestAccepting(unittest.TestCase):
         self.assertTrue(result.accepted)
         self.assertGreater(chain.reads, 1)
 
+    def test_a_send_failure_is_never_marked_as_safe_to_retry(self):
+        class CountingChain(FakeChain):
+            def __init__(self):
+                super().__init__(
+                    after=a_job(state=JobState.ASSIGNED, operator=OPERATOR))
+                self.send_attempts = 0
+
+            def send_accept(self, escrow_job_id):
+                self.send_attempts += 1
+                raise ReadTimeout("late")
+
+        chain = CountingChain()
+
+        result = self.accept(chain)
+
+        self.assertFalse(result.preaccept_retryable)
+        self.assertEqual(chain.send_attempts, 1)
+
     def test_a_timed_out_receipt_that_actually_landed_is_recovered(self):
         chain = FakeChain(receipt=None,
                           after=a_job(state=JobState.ASSIGNED, operator=OPERATOR))
 
         self.assertTrue(self.accept(chain).accepted)
+
+
+class TestTransientPreAcceptFailures(unittest.TestCase):
+    """Only transport failures before signing may be retried."""
+
+    def result_for(self, error):
+        class Broken(FakeChain):
+            def chain_id(self):
+                raise error
+
+        return accept_escrow_job(
+            Broken(), SETTINGS, terms(), operator_address=OPERATOR)
+
+    def test_read_timeout_is_safe_to_retry_before_signing(self):
+        result = self.result_for(ReadTimeout("late"))
+
+        self.assertTrue(result.preaccept_retryable)
+        self.assertEqual(result.error_name, "ReadTimeout")
+
+    def test_connect_timeout_is_safe_to_retry_before_signing(self):
+        self.assertTrue(
+            self.result_for(ConnectTimeout("late")).preaccept_retryable)
+
+    def test_temporary_connection_failure_is_safe_to_retry_before_signing(self):
+        self.assertTrue(
+            self.result_for(RequestsConnectionError("reset")).preaccept_retryable)
+
+    def test_retryable_http_statuses_are_safe_to_retry_before_signing(self):
+        for status in (429, 502, 503, 504):
+            with self.subTest(status=status):
+                response = Response()
+                response.status_code = status
+                self.assertTrue(self.result_for(
+                    HTTPError("unavailable", response=response)
+                ).preaccept_retryable)
+
+    def test_other_http_status_is_not_retried(self):
+        response = Response()
+        response.status_code = 400
+
+        self.assertFalse(self.result_for(
+            HTTPError("bad request", response=response)
+        ).preaccept_retryable)
+
+    def test_deterministic_failure_is_not_retried(self):
+        result = self.result_for(ValueError("bad ABI"))
+
+        self.assertFalse(result.preaccept_retryable)
+        self.assertIs(result.outcome, AcceptOutcome.REFUSED)
+
+    def test_wrong_chain_is_a_non_retrying_refusal(self):
+        result = accept_escrow_job(
+            FakeChain(chain=1), SETTINGS, terms(), operator_address=OPERATOR)
+
+        self.assertFalse(result.preaccept_retryable)
+        self.assertIs(result.outcome, AcceptOutcome.REFUSED)
+
+class TestWeb3TransportSettings(unittest.TestCase):
+    def test_rpc_timeout_is_explicit_and_bounded(self):
+        providers = []
+
+        class Provider:
+            def __init__(self, url, **kwargs):
+                providers.append((url, kwargs))
+
+        class Web3:
+            def __init__(self, provider):
+                self.provider = provider
+
+        chain = object.__new__(Web3Escrow)
+        chain._settings = SETTINGS
+        chain._web3 = None
+
+        with patch.dict("sys.modules", {
+                "web3": SimpleNamespace(HTTPProvider=Provider, Web3=Web3)}):
+            chain._connection()
+
+        self.assertEqual(providers, [(
+            SETTINGS.rpc_url, {"request_kwargs": {"timeout": 30.0}})])
 
 
 class TestNothingIsSignedOnAnUncheckedFact(unittest.TestCase):
