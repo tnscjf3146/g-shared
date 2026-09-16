@@ -9,7 +9,7 @@ const MESSAGES: Record<string, string> = {
   WORKLOAD_NOT_FOUND: '지원하지 않는 워크로드입니다. 1단계에서 다시 선택해 주세요.',
   BASE_MODEL_NOT_FOUND: '이 워크로드에서 쓸 수 없는 모델입니다. 1단계에서 다시 선택해 주세요.',
   INVALID_TRAINING_CONFIG: '학습 설정 4값(epochs·batch size·learning rate·max length)을 확인해 주세요.',
-  NO_AVAILABLE_WORKER: '지금 일할 수 있는 GPU 가 없습니다. 설정은 그대로 두고 잠시 후 다시 시도해 주세요.',
+  NO_AVAILABLE_WORKER: '현재 작업 가능한 GPU가 없습니다. 설정은 그대로 두고 잠시 후 다시 시도해 주세요.',
   NO_FEASIBLE_GPU: '이 설정으로 실행할 수 있는 GPU 가 없습니다. 모델이나 학습 설정(batch size·max length)을 줄여 주세요.',
   SCHEDULER_REJECTED: '스케줄러가 요청을 거절했습니다. 설정을 확인해 주세요.',
   SCHEDULER_UNAVAILABLE: '스케줄러에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',

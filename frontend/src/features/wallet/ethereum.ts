@@ -10,6 +10,8 @@ export const SSAFY_CHAIN = {
   nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
 }
 export const GSC_TOKEN = { address: '0xaCe3c977A539C16668528619F9417589f12C7B22', symbol: 'GSC', decimals: 18 }
+// 에스크로 컨트랙트 — blockchain/deployments/ssafy-31221/GPUJobEscrow.json(2026-09-14 배포). 실서버는 Job 상세·operator-status 가 escrowAddress 를 실어 주고 그쪽이 정본. 목업 응답용
+export const ESCROW_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_ADDRESS || '0x66178DF08F5938d2ABC17496b6A98F7d776D3c56'
 
 // 잔액 조회는 MetaMask 상태(잠김·미설치·다른 계정)와 무관해야 하므로 공개 RPC 로 직접 JSON-RPC.
 // SSAFY 노드는 요청 Origin 을 그대로 허용(access-control-allow-origin 반영)해 브라우저에서 바로 호출 가능 — 프록시 불필요(2026-09-08 확인)
@@ -100,6 +102,7 @@ const SEL = {
   allowance: '0xdd62ed3e', // allowance(address,address)
   createAndFundJob: '0xd903f3f5', // createAndFundJob(bytes32,uint256,address)
   cancelJob: '0x1dffa3dc', // cancelJob(uint256)
+  setOperator: '0x558a7297', // setOperator(address,bool)
 }
 
 /** 주소·정수·bytes32 → 32바이트 hex(0x 없이). 인자가 전부 정적 타입이라 이어붙이면 끝 */
@@ -129,6 +132,11 @@ export function createAndFundJob(p: Eip1193Provider, from: string, escrowAddress
 /** FUNDED 취소 — Client 지갑으로 직접 cancelJob(escrowJobId) */
 export function cancelEscrowJob(p: Eip1193Provider, from: string, escrowAddress: string, escrowJobId: bigint): Promise<string> {
   return sendTx(p, from, escrowAddress, SEL.cancelJob + pad(escrowJobId))
+}
+
+/** Escrow.setOperator(operator, allowed) — 정산 주소(provider) 본인이 MetaMask 로 서명. 승인 없으면 그 워커는 acceptJob 을 못 부른다 */
+export function setOperator(p: Eip1193Provider, from: string, escrowAddress: string, operator: string, allowed = true): Promise<string> {
+  return sendTx(p, from, escrowAddress, SEL.setOperator + pad(operator) + pad(BigInt(allowed ? 1 : 0)))
 }
 
 export type TxReceipt = { status: string; logs: { address: string; topics: string[] }[] }

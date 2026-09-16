@@ -41,8 +41,12 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
   const busy = phase.s === 'busy'
 
   // 예치는 서명·채굴 대기로 오래 걸린다 — 도중에 벗어나면(작업 상태 폴링으로 리렌더/언마운트) setState 를 건너뛴다
+  // setup 에서 true 로 되돌린다 — StrictMode(dev)는 effect 를 mount→cleanup→mount 로 두 번 돌려, cleanup 만 있으면 false 로 굳어 setPhase 가 전부 무시됐다(2026-09-15)
   const alive = useRef(true)
-  useEffect(() => () => { alive.current = false }, [])
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
   const setPhase = (p: Phase) => { if (alive.current) setPhaseRaw(p) }
 
   // 서버 확인 — 멱등이라 같은 txHash 로 몇 번이고 안전. FUNDED 면 완료, PENDING 이면 재시도 안내

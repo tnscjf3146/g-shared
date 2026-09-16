@@ -107,7 +107,7 @@ export function DashboardSidebar() {
       {/* 로고 줄 — 펼침: 로고 + 우측 ◀(접기) / 접힘: 화살표만 가운데 ▶(펴기) */}
       <div className="flex h-[60px] flex-none items-center gap-3 border-b border-hairline pr-3 pl-[17px]">
         {open && (
-          <Link href="/" aria-label="G-shared 홈" className="flex min-w-0 items-center">
+          <Link href="/" aria-label="G-shared 홈" className="flex shrink-0 items-center">
             <Image src="/logo-wordmark.png" alt="G-shared" width={104} height={18} unoptimized className="h-[18px] w-auto" />
           </Link>
         )}

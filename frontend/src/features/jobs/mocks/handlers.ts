@@ -1,5 +1,6 @@
 import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/lib/fetcher'
+import { ESCROW_ADDRESS } from '@/features/wallet/ethereum'
 import { CATALOG_PATHS, DATASETS_PATH, JOBS_PATH, createDatasetRequestSchema, createJobRequestSchema, datasetSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema } from '../schema'
 import type { AutoMode, Dataset, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
 import { getLinkedWallet } from '@/features/wallet/mocks/handlers'
@@ -223,7 +224,7 @@ export const jobHandlers = [
       clientWallet: getLinkedWallet(),
       chainId: 31221,
       tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
-      escrowAddress: process.env.NEXT_PUBLIC_ESCROW_ADDRESS ?? '0x3333333333333333333333333333333333333333',
+      escrowAddress: ESCROW_ADDRESS, // 배포된 에스크로(wallet/ethereum.ts) — 목업 상세도 실제 주소를 준다
     })
   }),
 

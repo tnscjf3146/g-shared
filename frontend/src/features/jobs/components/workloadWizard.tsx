@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Stepper } from '@/components/ui/stepper'
 import { completeDatasetUpload, createDataset, createJob, getCatalog, requestDatasetUpload, uploadDatasetFile } from '../api'
 import { hashFile } from '../dataset-analysis'
+import { clearDraft, loadDraft, saveDraft } from '../draft'
 import { jobMessageFor } from '../errors'
 import { hasEnough, useWalletFunds } from '../hooks/use-wallet-funds'
 import type { AutoMode, Catalog, DatasetMetadata, Estimate, JobSpec, TrainingConfig } from '../types'
@@ -61,6 +62,7 @@ export function WorkloadWizard() {
   const [maxReached, setMaxReached] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState<string | null>(null) // 진행 문구
+  const [restored, setRestored] = useState<'loading' | 'fresh' | 'draft'>('loading') // 초안(draft.ts) 복원 — 끝나기 전엔 저장도 렌더도 안 한다
   const { funds, recheck } = useWalletFunds(step === 4) // 5단계에 들어오면 지갑·잔액 확인 → 하단 [업로드] 활성 판단
   const patch = (p: Partial<WizardState>) => {
     setState((s) => ({ ...s, ...p }))
@@ -71,9 +73,30 @@ export function WorkloadWizard() {
     getCatalog()
       .then(setCatalog)
       .catch(() => setCatalog('error'))
+    loadDraft().then((d) => {
+      if (d?.state.workloadId) {
+        // 아무것도 안 고른 초안은 없는 것으로
+        setState(d.state)
+        setStep(d.step)
+        setMaxReached(d.maxReached)
+        setRestored('draft')
+      } else setRestored('fresh')
+    })
   }, [])
+  // 바뀔 때마다 초안 저장. 분석 도중 새로고침이면 분석은 이어 갈 수 없으니 파일을 다시 고르게 한다
+  useEffect(() => {
+    if (restored === 'loading') return
+    saveDraft({ state: state.analyzing ? { ...state, analyzing: false, datasetFile: null } : state, step, maxReached })
+  }, [restored, state, step, maxReached])
+  const reset = () => {
+    setState(INITIAL)
+    setStep(0)
+    setMaxReached(0)
+    setError(null)
+    setRestored('fresh')
+  }
 
-  if (catalog === null) return <div aria-busy className="card h-96 w-full animate-pulse" />
+  if (catalog === null || restored === 'loading') return <div aria-busy className="card h-96 w-full animate-pulse" />
   if (catalog === 'error') {
     return (
       <section className="card flex w-full flex-col items-start gap-3 p-10">
@@ -157,6 +180,7 @@ export function WorkloadWizard() {
         setSubmitting(null)
         return
       }
+      await clearDraft()
       router.replace(`/jobs/${jobId}`)
     } catch (e) {
       setError(jobMessageFor(e))
@@ -168,6 +192,14 @@ export function WorkloadWizard() {
   return (
     <div className="flex w-full flex-col gap-6">
       <Stepper steps={STEPS} current={step} maxReached={maxReached} onSelect={goTo} />
+      {restored === 'draft' && (
+        <p role="status" className="flex items-center justify-between gap-3 rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
+          이전에 작성하던 내용을 이어서 보여 드립니다.
+          <button type="button" onClick={reset} disabled={submitting !== null} className="shrink-0 text-primary hover:underline">
+            처음부터
+          </button>
+        </p>
+      )}
 
       <section className="card animate-enter flex flex-col gap-6 p-8" key={step}>
         {step === 0 && <StepWorkload catalog={catalog} state={state} onChange={patch} />}
