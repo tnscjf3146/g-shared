@@ -10,9 +10,8 @@ import { customConfigFormSchema } from '../schema'
 import type { AutoMode, Catalog } from '../types'
 import type { WizardState } from './workloadWizard'
 
-// 2단계: 모델·설정. 학습 수준(학습 워크로드만) · 기존 어댑터 첨부 · 내 학습된 모델 가져오기 · 고급(직접 설정)
+// 2단계: 모델·설정. 제공 모델만 사용(내 모델 가져오기 제거) · 학습 수준(학습 워크로드만) · 기존 어댑터 첨부 · 고급(직접 설정)
 const ADAPTER_ACCEPT = '.safetensors,.bin,.pt,.zip'
-const MODEL_ACCEPT = '.safetensors,.bin,.pt,.gguf,.zip'
 
 type Props = { catalog: Catalog; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 
@@ -48,29 +47,13 @@ export function StepConfig({ catalog, state, onChange }: Props) {
         </p>
       </header>
 
-      {/* 모델 출처: 제공 모델 / 내 모델 */}
+      {/* 모델 — G-shared 제공 모델만(1단계에서 선택). 읽기 전용 확인 */}
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-text-muted">모델 출처</legend>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {(
-            [
-              ['PROVIDED', 'G-shared 제공 모델', model ? `${model.name} (${model.params})` : '1단계에서 선택'],
-              ['OWN', '내 학습된 모델 가져오기', '가지고 있는 가중치 파일을 올려 그 모델로 진행합니다.'],
-            ] as const
-          ).map(([k, title, desc]) => {
-            const on = state.modelSource === k
-            return (
-              <label key={k} className={`card-quiet flex cursor-pointer flex-col gap-1 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
-                <input type="radio" name="modelSource" value={k} checked={on} onChange={() => onChange({ modelSource: k, ...(k === 'PROVIDED' ? { ownModelFile: null } : {}) })} className="sr-only" />
-                <span className="text-[15px] font-semibold text-dark">{title}</span>
-                <span className="text-[13px] text-text-muted">{desc}</span>
-              </label>
-            )
-          })}
+        <legend className="text-[13px] font-medium text-text-muted">모델</legend>
+        <div className="card-quiet flex items-center justify-between gap-3 p-4">
+          <span className="text-[15px] font-semibold text-dark">{model ? model.name : '1단계에서 모델을 선택해 주세요'}</span>
+          {model && <span className="text-[13px] text-text-muted">{model.params}</span>}
         </div>
-        {state.modelSource === 'OWN' && (
-          <FileDrop file={state.ownModelFile} onFile={(f) => onChange({ ownModelFile: f })} accept={MODEL_ACCEPT} label="모델 파일을 끌어놓거나 클릭해 선택" hint={`${MODEL_ACCEPT} · 베이스 아키텍처는 ${model?.name ?? '선택한 모델'} 과 같아야 합니다`} />
-        )}
       </fieldset>
 
       {/* 학습 수준 — 학습 워크로드만 */}

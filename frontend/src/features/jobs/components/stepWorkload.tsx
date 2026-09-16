@@ -59,7 +59,6 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
               })}
             </div>
           )}
-          <p className="text-[12px] text-text-muted">가지고 있는 학습된 모델을 쓰려면 다음 단계에서 가져올 수 있습니다.</p>
         </fieldset>
       )}
     </>
