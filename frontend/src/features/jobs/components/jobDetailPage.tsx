@@ -145,7 +145,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-4">
-            <h1 className="text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
+            <h1 className="min-w-0 break-words text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
             <span className="text-[17px] font-medium text-dark">{meta.label}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -196,10 +196,10 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             ['작업 종류', name.workload],
             ['베이스 모델', name.model],
             ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
-            ['epochs', String(job.epochs)],
-            ['batch size', String(job.batchSize)],
-            ['learning rate', String(job.learningRate)],
-            ['max length', String(job.maxLength)],
+            ['에폭', String(job.epochs)],
+            ['배치 크기', String(job.batchSize)],
+            ['학습률', String(job.learningRate)],
+            ['최대 길이', String(job.maxLength)],
           ]}
         />
       </section>

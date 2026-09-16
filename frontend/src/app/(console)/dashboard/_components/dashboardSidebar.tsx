@@ -24,6 +24,14 @@ const subscribe = (cb: () => void) => {
     window.removeEventListener('resize', cb)
   }
 }
+const NARROW = 768 // 이보다 좁으면 사이드바를 강제로 레일(아이콘)로 — 본문이 짓눌려 버튼·카드가 넘치는 걸 막는다
+const readNarrow = () => {
+  try {
+    return window.innerWidth < NARROW
+  } catch {
+    return false
+  }
+}
 const readOpen = () => {
   try {
     return localStorage.getItem(KEY) === 'open'
@@ -61,6 +69,9 @@ export function DashboardSidebar() {
   // 현재 항목: 작업 = /dashboard/jobs + 작업 상세(/jobs/:id), 나머지는 경로 일치
   const isCurrent = (href: string) => (href === '/dashboard/jobs' ? pathname === href || /^\/jobs\/\d+/.test(pathname) : pathname === href)
   const open = useSyncExternalStore(subscribe, readOpen, () => false)
+  const narrow = useSyncExternalStore(subscribe, readNarrow, () => false)
+  // 좁은 화면: 사이드바를 항상 fixed 로 두고(위치 안 바뀜 → 폭만 부드럽게 전환), 레일(56px) 자리는 spacer 로 항상 유지 → 본문이 안 움찔.
+  // 펼치면 fixed 인 채 폭만 늘어 본문 위를 덮는다. 넓은 화면은 기존대로 sticky 로 나란히
   const width = useSyncExternalStore(subscribe, readWidth, () => DEFAULT_WIDTH)
   const [pending, setPending] = useState(false)
   const [dragging, setDragging] = useState(false) // 끄는 동안은 width 전환 애니메이션을 끈다
@@ -86,9 +97,26 @@ export function DashboardSidebar() {
   const item = 'flex h-10 items-center gap-3 rounded-md px-[9px] text-dark transition-colors hover:bg-black/5'
 
   return (
-    <nav aria-label="주 메뉴" style={{ width: open ? width : RAIL }} className={`relative sticky top-0 flex h-dvh flex-none flex-col overflow-hidden border-r border-hairline bg-surface-1 ${dragging ? '' : 'transition-[width] duration-250 ease-out-expo'}`}>
-      {/* 크기 조절 핸들 — 펼침 상태에서만. 더블클릭하면 기본 폭 */}
-      {open && (
+    <>
+      {/* 좁은 화면: 사이드바가 fixed 라 자리를 안 차지하므로 레일(56px) 자리를 spacer 로 채워 본문이 안 움찔하게 한다 */}
+      {narrow && <div aria-hidden className="h-dvh flex-none" style={{ width: RAIL }} />}
+      {/* 뒤 반투명 배경 — 좁은 화면에선 항상 두고 open 여부로 opacity 페이드(닫힘엔 클릭도 통과). 클릭하면 닫힘 */}
+      {narrow && (
+        <button
+          type="button"
+          aria-label="메뉴 닫기"
+          onClick={toggle}
+          className={`fixed inset-0 z-40 bg-black/40 transition-opacity duration-250 ${open ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+        />
+      )}
+      {/* 좁은 화면은 항상 fixed(위치 고정) → 폭만 56↔펼침 으로 부드럽게 전환. 넓은 화면은 sticky 로 나란히 */}
+      <nav
+        aria-label="주 메뉴"
+        style={{ width: open ? width : RAIL }}
+        className={`flex h-dvh flex-col overflow-hidden border-r border-hairline bg-surface-1 ${narrow ? 'fixed inset-y-0 left-0 z-50 shadow-4' : 'sticky top-0 flex-none'} ${dragging ? '' : 'transition-[width] duration-250 ease-out-expo'}`}
+      >
+      {/* 크기 조절 핸들 — 펼침 상태 + 넓은 화면에서만(좁은 화면은 폭 고정). 더블클릭하면 기본 폭 */}
+      {open && !narrow && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -104,27 +132,27 @@ export function DashboardSidebar() {
           className={`absolute inset-y-0 right-0 z-10 w-1.5 cursor-col-resize touch-none transition-colors hover:bg-primary/40 ${dragging ? 'bg-primary/60' : ''}`}
         />
       )}
-      {/* 로고 줄 — 펼침: 로고 + 우측 ◀(접기) / 접힘: 화살표만 가운데 ▶(펴기) */}
-      <div className="flex h-[60px] flex-none items-center gap-3 border-b border-hairline pr-3 pl-[17px]">
-        {open && (
-          <Link href="/" aria-label="G-shared 홈" className="flex shrink-0 items-center">
-            <Image src="/logo-wordmark.png" alt="G-shared" width={104} height={18} unoptimized className="h-[18px] w-auto" />
-          </Link>
+      {/* 로고 줄 — 펼침: 워드마크(홈) + 우측 접기 버튼 / 접힘: 아이콘 로고 하나(누르면 펴기). 56px 레일엔 둘 다 안 들어가 아이콘이 펴기 역할 겸함 */}
+      <div className={`flex h-[60px] flex-none items-center gap-3 border-b border-hairline ${open ? 'pr-3 pl-[17px]' : 'px-0'}`}>
+        {open ? (
+          <>
+            <Link href="/" aria-label="G-shared 홈" className="flex shrink-0 items-center">
+              <Image src="/logo-wordmark.png" alt="G-shared" width={104} height={18} unoptimized className="h-[18px] w-auto" />
+            </Link>
+            <button type="button" onClick={toggle} title="메뉴 접기" aria-expanded className="ml-auto grid size-8 flex-none place-items-center rounded-md text-text-muted transition-colors hover:bg-black/5">
+              <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                <path d="M9 4v16" />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={toggle} title="메뉴 펼치기" aria-expanded={false} aria-label="메뉴 펼치기" className="mx-auto grid size-8 flex-none place-items-center rounded-md text-text-muted transition-colors hover:bg-black/5">
+            <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 6l6 6-6 6M5 6l6 6-6 6" />
+            </svg>
+          </button>
         )}
-        <button
-          type="button"
-          onClick={toggle}
-          title={open ? '메뉴 접기' : '메뉴 펼치기'}
-          aria-expanded={open}
-          className={`grid size-8 flex-none place-items-center rounded-md text-text-muted transition-colors hover:bg-black/5 ${open ? 'ml-auto' : 'mx-auto'}`}
-        >
-          {/* 사이드바.png 예시 — 패널 아이콘(둥근 사각 + 세로선). 접힘 땐 왼쪽 칸을 채워 '펼치기'로 구분 */}
-          <svg aria-hidden width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="4" width="18" height="16" rx="2.5" />
-            <path d="M9 4v16" />
-            {!open && <rect x="3" y="4" width="6" height="16" rx="2.5" fill="currentColor" stroke="none" />}
-          </svg>
-        </button>
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 px-2 py-2">
@@ -185,6 +213,7 @@ export function DashboardSidebar() {
           {label(pending ? '로그아웃 중…' : '로그아웃')}
         </button>
       </div>
-    </nav>
+      </nav>
+    </>
   )
 }

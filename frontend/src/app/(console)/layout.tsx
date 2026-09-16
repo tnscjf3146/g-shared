@@ -12,8 +12,9 @@ export default function ConsoleLayout({ children }: LayoutProps<'/'>) {
       <ConsoleEntrance />
       <AuthGate>
         <DashboardSidebar />
-        <main className="min-w-0 flex-1">
-          <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-6 pt-6 pb-10 md:px-8">{children}</div>
+        {/* min-w-0 로 본문이 사이드바에 밀려도 줄어들게, overflow-x-hidden 으로 좁을 때 페이지 가로 스크롤 방지 */}
+        <main className="min-w-0 flex-1 overflow-x-hidden">
+          <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pt-6 pb-10 sm:px-6 md:px-8">{children}</div>
         </main>
       </AuthGate>
     </div>

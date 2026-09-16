@@ -95,10 +95,10 @@ export function StepConfig({ catalog, state, onChange }: Props) {
             <div className="grid grid-cols-2 gap-4 pt-4 md:grid-cols-4">
               {(
                 [
-                  ['epochs', 'epochs', '1'],
-                  ['batchSize', 'batch size', '1'],
-                  ['learningRate', 'learning rate', 'any'],
-                  ['maxLength', 'max length', '1'],
+                  ['epochs', '에폭', '1'],
+                  ['batchSize', '배치 크기', '1'],
+                  ['learningRate', '학습률', 'any'],
+                  ['maxLength', '최대 길이', '1'],
                 ] as const
               ).map(([k, label, step]) => (
                 <Field key={k} id={k} label={label} error={custom.errors[k]}>
