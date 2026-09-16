@@ -145,10 +145,11 @@ class EscrowArtifact:
 
 #: The functions this package calls. Listed so a missing one is found when the
 #: artifact is checked rather than when a Worker tries to sign.
-REQUIRED_FUNCTIONS = ("jobs", "acceptJob", "abortJob", "isOperator")
+REQUIRED_FUNCTIONS = (
+    "jobs", "jobIdByClientRef", "acceptJob", "abortJob", "isOperator")
 
-#: The event that carries ``externalRef``. It is **not** a field of the job
-#: struct, so this is the only way to check it.
+#: The event remains part of the contract identity. Pre-accept validation uses
+#: ``jobIdByClientRef`` directly rather than scanning this event from genesis.
 REQUIRED_EVENTS = ("JobFunded",)
 
 
