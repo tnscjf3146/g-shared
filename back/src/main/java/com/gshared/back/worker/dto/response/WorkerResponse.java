@@ -1,6 +1,7 @@
 package com.gshared.back.worker.dto.response;
 
 import com.gshared.back.worker.domain.Worker;
+import com.gshared.back.worker.domain.WorkerAvailability;
 import com.gshared.back.worker.domain.WorkerStatus;
 
 import java.time.LocalDateTime;
@@ -13,6 +14,9 @@ import java.time.LocalDateTime;
  *
  * <p>deviceName·driverVersion 은 규격 v1 등록에서 채우지 않는 옛 필드다. 화면이 아직 읽고 있어
  * 모양은 유지하되, 새 등록 행에서는 빈 문자열/null 로 나간다.
+ *
+ * <p>{@code status} 는 연결 상태이고 {@code availability} 는 "지금 Job 을 받을 수 있는가"다. ONLINE 인데
+ * 승인이 없어 후보에서 빠지는 워커를 화면이 구분해 안내할 수 있도록 둘을 따로 싣는다.
  */
 public record WorkerResponse(
         String workerId,
@@ -27,12 +31,13 @@ public record WorkerResponse(
         String benchmarkVersion,
         String operatorAddress,
         WorkerStatus status,
+        WorkerAvailability availability,
         String currentJobId,
         LocalDateTime lastHeartbeatAt,
         LocalDateTime createdAt,
         boolean walletLinked
 ) {
-    public static WorkerResponse from(Worker worker) {
+    public static WorkerResponse from(Worker worker, WorkerAvailability availability) {
         return new WorkerResponse(
                 worker.getId(),
                 // 옛 규격 필드 — 화면이 문자열을 기대하므로 빈 값으로 막는다.
@@ -47,6 +52,7 @@ public record WorkerResponse(
                 worker.getBenchmarkVersion(),
                 worker.getOperatorAddress(),
                 worker.getStatus(),
+                availability,
                 // 화면은 식별자를 문자열로 다룬다. 숫자로 내보내면 자릿수가 큰 id 에서 정밀도가 깎인다.
                 worker.getCurrentJobId() == null ? null : String.valueOf(worker.getCurrentJobId()),
                 worker.getLastHeartbeatAt(),

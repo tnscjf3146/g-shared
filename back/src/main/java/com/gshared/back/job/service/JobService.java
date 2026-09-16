@@ -46,6 +46,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.time.LocalDateTime;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 
 @Slf4j
@@ -109,22 +110,31 @@ public class JobService {
 
         // ③ GPU 후보 (규격 §28) — 운영 조건(연결·하트비트·미배정·operator/지갑)은 쿼리가 걸렀고,
         //    스펙(null 필드) 없는 워커만 여기서 더 뺀다 (Scheduler 가 null 을 422 로 거절)
-        var candidates = workerRepository.findAvailableWorkers().stream()
+        List<Worker> online = workerRepository.findAvailableWorkers();
+        List<Worker> withSpec = online.stream()
                 .filter(w -> w.getGpuModel() != null && w.getVramMb() != null
                         && w.getBenchmarkTokensPerSec() != null)
-                // 공급자가 이 operator 키를 온체인에서 승인했는가. 승인하지 않은
-                // 워커에게 배정하면 acceptJob 이 되돌려지고, 그 사이 고객의
-                // 예치금은 묶여 있다. 배정 전에 거르는 편이 싸다.
-                //
-                // 모를 때는 거르지 않는다 -- 체인이 설정되지 않았거나 노드가 잠깐
-                // 답하지 않는 동안 멀쩡한 공급자가 후보에서 조용히 빠지면 Job 은
-                // 배정되지 않고 아무도 이유를 모른다.
+                .toList();
+        // 공급자가 이 operator 키를 온체인에서 승인했는가. 승인하지 않은
+        // 워커에게 배정하면 acceptJob 이 되돌려지고, 그 사이 고객의
+        // 예치금은 묶여 있다. 배정 전에 거르는 편이 싸다.
+        //
+        // 모를 때는 거르지 않는다 -- 체인이 설정되지 않았거나 노드가 잠깐
+        // 답하지 않는 동안 멀쩡한 공급자가 후보에서 조용히 빠지면 Job 은
+        // 배정되지 않고 아무도 이유를 모른다.
+        //
+        // 화면(operator-status)이 뭐라고 했든 여기서 다시 묻는다 — 화면은 UX 이고 이것이 권위다.
+        var candidates = withSpec.stream()
                 .filter(w -> !escrow.operatorApproved(
                         w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
                 .map(w -> new SchedulerRecommendRequest.GpuCandidate(
                         w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec()))
                 .toList();
         if (candidates.isEmpty()) {
+            // 의뢰자에게는 "기다리면 된다"(409)로 충분하지만, 운영자는 왜 0 인지 알아야 한다 —
+            // 공급자 쪽 사유(미승인)는 공급자 화면(availability)이, 여기서는 로그가 말한다.
+            log.warn("[MATCH] 배정 가능한 워커 없음 — ONLINE·미배정·주소 있음 {}대, 그중 스펙 누락 {}대, operator 미승인 {}대",
+                    online.size(), online.size() - withSpec.size(), withSpec.size());
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);   // 409 — 기다리면 해결
         }
 
