@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import errno
+import time
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Protocol
@@ -148,8 +149,8 @@ class ReadsEscrow(Protocol):
 
     def read_job(self, escrow_job_id: int) -> EscrowJob: ...
 
-    def find_funded_event(self, escrow_job_id: int) -> FundedEvent | None:
-        """The ``JobFunded`` log for this job, or None if there is not exactly one."""
+    def job_id_by_client_ref(self, client: str, external_ref: str) -> int:
+        """The job bound to ``(client, externalRef)``, or zero when absent."""
 
     def is_operator(self, provider: str, operator: str) -> bool:
         """``isOperator(provider, operator)`` -- did that provider approve us."""
@@ -217,7 +218,7 @@ def check_chain(chain: ReadsEscrow, settings: EscrowSettings) -> None:
 
 def check_job_matches(
     job: EscrowJob,
-    funded: FundedEvent | None,
+    referenced_job_id: int,
     terms: Any,
     *,
     operator_address: str,
@@ -244,16 +245,11 @@ def check_job_matches(
             RejectCode.ESCROW_JOB_NOT_FOUND,
             f"escrow job {escrow_job_id} does not exist on chain")
 
-    # externalRef lives in the event, not the struct. Checked before anything
-    # else about the job, because it is what ties this on-chain job to the
-    # Backend job the message is about; without it the rest compares the right
-    # numbers against possibly the wrong job.
-    if funded is None:
-        raise JobRefused(
-            RejectCode.EXTERNAL_REF_MISMATCH,
-            f"no single JobFunded event was found for escrow job "
-            f"{escrow_job_id}, so its externalRef could not be confirmed")
-    if not _same_hex(funded.external_ref, terms.external_ref):
+    # ``externalRef`` is not stored in the Job struct, but the contract keeps a
+    # direct ``(client, externalRef) -> jobId`` mapping. Reading it is one
+    # bounded ``eth_call``; scanning JobFunded logs from genesis makes a small
+    # job-id lookup grow with the entire chain and can exceed the RPC timeout.
+    if referenced_job_id != escrow_job_id:
         raise JobRefused(
             RejectCode.EXTERNAL_REF_MISMATCH,
             f"escrow job {escrow_job_id} was funded for a different "
@@ -462,9 +458,10 @@ def accept_escrow_job(
     try:
         check_chain(chain, settings)
         job = chain.read_job(escrow_job_id)
-        funded = chain.find_funded_event(escrow_job_id)
+        referenced_job_id = chain.job_id_by_client_ref(
+            terms.client_wallet, terms.external_ref)
         must_send = check_job_matches(
-            job, funded, terms, operator_address=operator_address)
+            job, referenced_job_id, terms, operator_address=operator_address)
         if must_send:
             check_deadline(job, chain.now(), escrow_job_id)
             check_operator_approved(
@@ -813,12 +810,55 @@ class Web3Escrow:
 
     def _connection(self) -> Any:
         from web3 import HTTPProvider, Web3
+        from web3.middleware import ExtraDataToPOAMiddleware
+
+        class DiagnosticHTTPProvider(HTTPProvider):
+            def make_request(provider, method, params):
+                started = time.monotonic()
+                _debug.info("escrow rpc method start method=%s", method)
+                try:
+                    response = super(DiagnosticHTTPProvider, provider).make_request(
+                        method, params)
+                except Exception as error:
+                    elapsed = round((time.monotonic() - started) * 1000)
+                    _debug.warning(
+                        "escrow rpc method failure method=%s elapsed_ms=%s error=%s",
+                        method, elapsed, type(error).__name__)
+                    raise
+                elapsed = round((time.monotonic() - started) * 1000)
+                _debug.info(
+                    "escrow rpc method success method=%s elapsed_ms=%s",
+                    method, elapsed)
+                return response
 
         if self._web3 is None:
-            self._web3 = Web3(HTTPProvider(
+            self._web3 = Web3(DiagnosticHTTPProvider(
                 self._settings.rpc_url,
-                request_kwargs={"timeout": RPC_REQUEST_TIMEOUT_SECONDS}))
+                request_kwargs={"timeout": RPC_REQUEST_TIMEOUT_SECONDS},
+                # JobAcceptance owns the bounded 3-attempt policy. Leaving
+                # web3.py's default five retries enabled turns one 30-second
+                # logical read into roughly 152 seconds before our retry sees
+                # it, and multiplies the same request up to fifteen times.
+                exception_retry_configuration=None))
+            self._web3.middleware_onion.inject(
+                ExtraDataToPOAMiddleware, layer=0)
         return self._web3
+
+    def _timed_rpc(self, operation: str, call: Any) -> Any:
+        started = time.monotonic()
+        _debug.info("escrow rpc start operation=%s", operation)
+        try:
+            result = call()
+        except Exception as error:
+            elapsed = round((time.monotonic() - started) * 1000)
+            _debug.warning(
+                "escrow rpc failure operation=%s elapsed_ms=%s error=%s",
+                operation, elapsed, type(error).__name__)
+            raise
+        elapsed = round((time.monotonic() - started) * 1000)
+        _debug.info(
+            "escrow rpc success operation=%s elapsed_ms=%s", operation, elapsed)
+        return result
 
     def _contract(self) -> Any:
         web3 = self._connection()
@@ -827,52 +867,43 @@ class Web3Escrow:
             abi=self._artifact.abi)
 
     def chain_id(self) -> int:
-        return int(self._connection().eth.chain_id)
+        return int(self._timed_rpc(
+            "chain_id", lambda: self._connection().eth.chain_id))
 
     def has_contract_code(self) -> bool:
         web3 = self._connection()
         address = web3.to_checksum_address(self._settings.escrow_address)
-        return len(web3.eth.get_code(address)) > 0
+        return bool(self._timed_rpc(
+            "contract_code", lambda: len(web3.eth.get_code(address)) > 0))
 
     def read_job(self, escrow_job_id: int) -> EscrowJob:
-        return EscrowJob.from_row(
-            self._contract().functions.jobs(int(escrow_job_id)).call())
+        row = self._timed_rpc(
+            "job_state",
+            lambda: self._contract().functions.jobs(
+                int(escrow_job_id)).call())
+        return EscrowJob.from_row(row)
 
-    def find_funded_event(self, escrow_job_id: int) -> FundedEvent | None:
-        """The one ``JobFunded`` log for this job id.
-
-        ``jobId`` is indexed, so the node filters rather than this process. A
-        job id is assigned once by the contract, so more than one log for it
-        would mean something is badly wrong -- in that case None is returned
-        and the caller refuses, rather than picking one.
-        """
-        contract = self._contract()
-        logs = contract.events.JobFunded().get_logs(
-            from_block=0, argument_filters={"jobId": int(escrow_job_id)})
-        found = list(logs)
-        if len(found) != 1:
-            _debug.warning("escrow: %s JobFunded logs for job %s",
-                        len(found), escrow_job_id)
-            return None
-        args = found[0]["args"]
-        return FundedEvent(
-            escrow_job_id=int(args["jobId"]),
-            external_ref=_as_hex(args["externalRef"]),
-            provider=str(args["provider"]),
-            client=str(args["client"]),
-            price_wei=int(args["price"]),
-            deadline=int(args["deadline"]),
-        )
+    def job_id_by_client_ref(self, client: str, external_ref: str) -> int:
+        web3 = self._connection()
+        raw_ref = bytes.fromhex(external_ref.removeprefix("0x"))
+        return int(self._timed_rpc(
+            "external_ref",
+            lambda: self._contract().functions.jobIdByClientRef(
+                web3.to_checksum_address(client), raw_ref).call()))
 
     def is_operator(self, provider: str, operator: str) -> bool:
         web3 = self._connection()
-        return bool(self._contract().functions.isOperator(
-            web3.to_checksum_address(provider),
-            web3.to_checksum_address(operator)).call())
+        return bool(self._timed_rpc(
+            "is_operator",
+            lambda: self._contract().functions.isOperator(
+                web3.to_checksum_address(provider),
+                web3.to_checksum_address(operator)).call()))
 
     def now(self) -> int:
         """The latest block's timestamp -- the chain's clock, not Windows'."""
-        return int(self._connection().eth.get_block("latest")["timestamp"])
+        return int(self._timed_rpc(
+            "chain_clock",
+            lambda: self._connection().eth.get_block("latest")["timestamp"]))
 
     def send_accept(self, escrow_job_id: int) -> str:
         return self._send(

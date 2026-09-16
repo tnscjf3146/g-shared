@@ -40,7 +40,6 @@ from gshared_worker.escrow import (
     EscrowJob,
     EscrowSettings,
     EscrowUnavailable,
-    FundedEvent,
     JobState,
     Web3Escrow,
     abort_escrow_job,
@@ -116,16 +115,6 @@ def a_job(**changes) -> EscrowJob:
     return EscrowJob(**values)
 
 
-def a_funded_event(**changes) -> FundedEvent:
-    values = {
-        "escrow_job_id": 17, "external_ref": EXTERNAL_REF,
-        "provider": PROVIDER, "client": CLIENT,
-        "price_wei": PRICE_WEI, "deadline": 2_000_000_000,
-    }
-    values.update(changes)
-    return FundedEvent(**values)
-
-
 class FakeChain:
     """A chain that answers what a test wants, and counts signatures.
 
@@ -134,17 +123,13 @@ class FakeChain:
     was signed before the refusal.
     """
 
-    #: ``funded=None`` has to mean "there is no event", which is one of the
-    #: things being tested. A plain default of None would swallow that -- it
-    #: did, and the test passed vacuously until it was made to fail.
-    DEFAULT = object()
-
-    def __init__(self, job=None, funded=DEFAULT, *, approved=True, now=1_000_000,
+    def __init__(self, job=None, *, reference_job_id=17, approved=True,
+                 now=1_000_000,
                  chain=31221, has_code=True, after=None, receipt=1,
                  send_raises=None):
         self._job = job if job is not None else a_job()
         self._after = after
-        self._funded = a_funded_event() if funded is self.DEFAULT else funded
+        self._reference_job_id = reference_job_id
         self._approved = approved
         self._now = now
         self._chain = chain
@@ -166,8 +151,8 @@ class FakeChain:
             return self._after
         return self._job
 
-    def find_funded_event(self, escrow_job_id):
-        return self._funded
+    def job_id_by_client_ref(self, client, external_ref):
+        return self._reference_job_id
 
     def is_operator(self, provider, operator):
         return self._approved
@@ -249,7 +234,9 @@ class TestTheCanonicalAbi(unittest.TestCase):
              "bytes32"))
 
     def test_the_functions_this_package_calls_exist(self):
-        for name in ("jobs", "acceptJob", "abortJob", "isOperator"):
+        for name in (
+                "jobs", "jobIdByClientRef", "acceptJob", "abortJob",
+                "isOperator"):
             with self.subTest(function=name):
                 self.assertEqual(self.artifact.function(name)["name"], name)
 
@@ -265,8 +252,7 @@ class TestTheCanonicalAbi(unittest.TestCase):
         self.assertTrue(inputs["jobId"]["indexed"])
 
     def test_the_external_ref_is_not_a_field_of_the_job_struct(self):
-        # This is why the event must be read at all. A build that looked for
-        # externalRef in jobs() would find nothing and have to invent it.
+        # The direct mapping is required because externalRef is not in jobs().
         outputs = self.artifact.function("jobs")["outputs"]
 
         self.assertNotIn("externalRef", [o.get("name") for o in outputs])
@@ -344,17 +330,18 @@ class TestDecodingAJob(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestComparingTheChainToTheAssignment(unittest.TestCase):
-    def refusal(self, job=None, funded=None, **term_changes) -> JobRefused:
+    def refusal(self, job=None, reference_job_id=17,
+                **term_changes) -> JobRefused:
         with self.assertRaises(JobRefused) as caught:
             check_job_matches(
                 job if job is not None else a_job(),
-                funded if funded is not None else a_funded_event(),
+                reference_job_id,
                 terms(**term_changes), operator_address=OPERATOR)
         return caught.exception
 
     def test_a_matching_job_is_accepted(self):
         self.assertTrue(check_job_matches(
-            a_job(), a_funded_event(), terms(), operator_address=OPERATOR))
+            a_job(), 17, terms(), operator_address=OPERATOR))
 
     def test_a_job_that_does_not_exist(self):
         self.assertIs(self.refusal(job=a_job(state=JobState.NONE)).code,
@@ -398,34 +385,34 @@ class TestComparingTheChainToTheAssignment(unittest.TestCase):
         mine = a_job(state=JobState.ASSIGNED, operator=OPERATOR)
 
         self.assertFalse(check_job_matches(
-            mine, a_funded_event(), terms(), operator_address=OPERATOR))
+            mine, 17, terms(), operator_address=OPERATOR))
 
     def test_addresses_compare_without_case(self):
         self.assertTrue(check_job_matches(
             a_job(provider=PROVIDER.upper().replace("0X", "0x")),
-            a_funded_event(), terms(), operator_address=OPERATOR))
+            17, terms(), operator_address=OPERATOR))
 
 
-class TestTheExternalRefComesFromTheEvent(unittest.TestCase):
-    """``externalRef`` is not in the job struct. The event is the only source."""
+class TestTheExternalRefUsesTheDirectMapping(unittest.TestCase):
+    """The canonical mapping binds ``(client, externalRef)`` to the job ID."""
 
     def test_a_matching_ref_passes(self):
         self.assertTrue(check_job_matches(
-            a_job(), a_funded_event(external_ref=EXTERNAL_REF), terms(),
+            a_job(), 17, terms(),
             operator_address=OPERATOR))
 
     def test_a_different_ref_is_refused(self):
         with self.assertRaises(JobRefused) as caught:
             check_job_matches(
-                a_job(), a_funded_event(external_ref="0x" + "cd" * 32),
+                a_job(), 18,
                 terms(), operator_address=OPERATOR)
 
         self.assertIs(caught.exception.code, RejectCode.EXTERNAL_REF_MISMATCH)
 
-    def test_no_event_at_all_is_refused(self):
+    def test_an_unmapped_ref_is_refused(self):
         # It could not be confirmed, so it is not assumed.
         with self.assertRaises(JobRefused) as caught:
-            check_job_matches(a_job(), None, terms(), operator_address=OPERATOR)
+            check_job_matches(a_job(), 0, terms(), operator_address=OPERATOR)
 
         self.assertIs(caught.exception.code, RejectCode.EXTERNAL_REF_MISMATCH)
 
@@ -438,18 +425,10 @@ class TestTheExternalRefComesFromTheEvent(unittest.TestCase):
         """
         with self.assertRaises(JobRefused) as caught:
             check_job_matches(
-                a_job(client="0x" + "99" * 20), None, terms(),
+                a_job(client="0x" + "99" * 20), 0, terms(),
                 operator_address=OPERATOR)
 
         self.assertIs(caught.exception.code, RejectCode.EXTERNAL_REF_MISMATCH)
-
-    def test_hex_case_does_not_matter(self):
-        upper = EXTERNAL_REF.upper().replace("0X", "0x")
-
-        self.assertTrue(check_job_matches(
-            a_job(), a_funded_event(external_ref=upper), terms(),
-            operator_address=OPERATOR))
-
 
 class TestTheDeadline(unittest.TestCase):
     def test_before_the_deadline_passes(self):
@@ -515,7 +494,7 @@ class TestProviderIsNotTheOperator(unittest.TestCase):
 
     def test_a_job_whose_provider_is_not_us_is_still_acceptable(self):
         self.assertTrue(check_job_matches(
-            a_job(provider=PROVIDER), a_funded_event(), terms(),
+            a_job(provider=PROVIDER), 17, terms(),
             operator_address=OPERATOR))
 
     def test_nothing_compares_the_provider_to_our_own_wallet(self):
@@ -530,7 +509,7 @@ class TestProviderIsNotTheOperator(unittest.TestCase):
     def test_the_provider_is_compared_to_the_assignment_instead(self):
         with self.assertRaises(JobRefused) as caught:
             check_job_matches(
-                a_job(provider="0x" + "99" * 20), a_funded_event(), terms(),
+                a_job(provider="0x" + "99" * 20), 17, terms(),
                 operator_address=OPERATOR)
 
         self.assertIs(caught.exception.code, RejectCode.PROVIDER_MISMATCH)
@@ -592,6 +571,24 @@ class TestAccepting(unittest.TestCase):
 
         self.assertIs(result.outcome, AcceptOutcome.ACCEPTED)
         self.assertEqual(chain.sent, [("accept", 17)])
+
+    def test_external_ref_uses_direct_mapping_without_scanning_logs(self):
+        class DirectReferenceChain(FakeChain):
+            def __init__(self):
+                super().__init__(
+                    after=a_job(state=JobState.ASSIGNED, operator=OPERATOR))
+                self.references = []
+
+            def job_id_by_client_ref(self, client, external_ref):
+                self.references.append((client, external_ref))
+                return 17
+
+        chain = DirectReferenceChain()
+
+        result = self.accept(chain)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(chain.references, [(CLIENT, EXTERNAL_REF)])
 
     def test_the_transaction_hash_comes_back(self):
         chain = FakeChain(after=a_job(state=JobState.ASSIGNED, operator=OPERATOR))
@@ -727,6 +724,8 @@ class TestTransientPreAcceptFailures(unittest.TestCase):
 class TestWeb3TransportSettings(unittest.TestCase):
     def test_rpc_timeout_is_explicit_and_bounded(self):
         providers = []
+        injected = []
+        poa_middleware = object()
 
         class Provider:
             def __init__(self, url, **kwargs):
@@ -735,17 +734,42 @@ class TestWeb3TransportSettings(unittest.TestCase):
         class Web3:
             def __init__(self, provider):
                 self.provider = provider
+                self.middleware_onion = SimpleNamespace(
+                    inject=lambda middleware, layer: injected.append(
+                        (middleware, layer)))
 
         chain = object.__new__(Web3Escrow)
         chain._settings = SETTINGS
         chain._web3 = None
 
         with patch.dict("sys.modules", {
-                "web3": SimpleNamespace(HTTPProvider=Provider, Web3=Web3)}):
+                "web3": SimpleNamespace(HTTPProvider=Provider, Web3=Web3),
+                "web3.middleware": SimpleNamespace(
+                    ExtraDataToPOAMiddleware=poa_middleware),
+        }):
             chain._connection()
 
         self.assertEqual(providers, [(
-            SETTINGS.rpc_url, {"request_kwargs": {"timeout": 30.0}})])
+            SETTINGS.rpc_url, {
+                "request_kwargs": {"timeout": 30.0},
+                "exception_retry_configuration": None,
+            })])
+        self.assertEqual(injected, [(poa_middleware, 0)])
+
+    def test_each_semantic_rpc_operation_is_timed(self):
+        chain = object.__new__(Web3Escrow)
+        chain._connection = lambda: SimpleNamespace(
+            eth=SimpleNamespace(chain_id=31221))
+
+        with self.assertLogs("gshared", level="INFO") as logged:
+            self.assertEqual(chain.chain_id(), 31221)
+
+        self.assertTrue(any(
+            "escrow rpc start operation=chain_id" in line
+            for line in logged.output))
+        self.assertTrue(any(
+            "escrow rpc success operation=chain_id elapsed_ms=" in line
+            for line in logged.output))
 
 
 class TestNothingIsSignedOnAnUncheckedFact(unittest.TestCase):
@@ -774,11 +798,11 @@ class TestNothingIsSignedOnAnUncheckedFact(unittest.TestCase):
 
     def test_mismatched_external_ref(self):
         self.assertEqual(
-            self.sent_after(funded=a_funded_event(external_ref="0x" + "11" * 32)),
+            self.sent_after(reference_job_id=18),
             [])
 
-    def test_missing_funded_event(self):
-        self.assertEqual(self.sent_after(funded=None), [])
+    def test_unmapped_external_ref(self):
+        self.assertEqual(self.sent_after(reference_job_id=0), [])
 
     def test_unapproved_operator(self):
         self.assertEqual(self.sent_after(approved=False), [])
