@@ -31,6 +31,7 @@ class AuthWindow:
         self._presenter = presenter
         self._token: str | None = None
         self._root: tk.Tk | None = None
+        self._body: ttk.Frame | None = None
         #: True while a sign-in request is out, and for good once one succeeded.
         self._submitting = False
 
@@ -149,9 +150,15 @@ class AuthWindow:
         self._close()
 
     def _close(self) -> None:
-        if self._root is not None:
+        root = self._root
+        if root is not None:
+            # The AuthWindow is handed back to the Worker thread after this
+            # method returns. Drop every Tk object here, on the thread that
+            # created it, so its Tcl interpreter cannot later be finalized by
+            # the Worker thread (which aborts the process with Tcl_AsyncDelete).
+            self._root = None
+            self._body = None
             # quit ends this window's own loop; destroy alone does not when
             # another Tk window -- the status window -- is still open.
-            self._root.quit()
-            self._root.destroy()
-            self._root = None
+            root.quit()
+            root.destroy()

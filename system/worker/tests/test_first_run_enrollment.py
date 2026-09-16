@@ -264,6 +264,34 @@ class WhenAFirstRunDoesNotFinishTest(FirstRunTestCase):
         self.assertNotIn(code, (WorkerExitCode.OK, WorkerExitCode.UNEXPECTED_FAULT))
         self.assertFalse(self.config.exists())
 
+    def test_a_wallet_creation_exception_is_reported_instead_of_exiting_silently(self):
+        with patch.object(
+            auth_check,
+            "prepare_wallet",
+            side_effect=OSError("wallet storage unavailable"),
+        ):
+            code = self.run_worker()
+
+        self.assertEqual(code, WorkerExitCode.UNEXPECTED_FAULT)
+        self.assertEqual(self.backend.register_calls, [])
+        self.assertFalse(self.config.exists())
+        self.assertIn("예상하지 못한 오류", self.output)
+        self.assertIn("wallet storage unavailable", self.logged)
+
+    def test_a_payload_exception_is_reported_before_any_request_is_sent(self):
+        with patch.object(
+            auth_check.WorkerRegistrationRequest,
+            "describing",
+            side_effect=ValueError("registration payload unavailable"),
+        ):
+            code = self.run_worker()
+
+        self.assertEqual(code, WorkerExitCode.UNEXPECTED_FAULT)
+        self.assertEqual(self.backend.register_calls, [])
+        self.assertFalse(self.config.exists())
+        self.assertIn("예상하지 못한 오류", self.output)
+        self.assertIn("registration payload unavailable", self.logged)
+
     def test_it_can_be_finished_on_the_next_run(self):
         self.sign_in_answer = None
         self.run_worker()
