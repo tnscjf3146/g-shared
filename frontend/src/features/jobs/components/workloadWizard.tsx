@@ -17,12 +17,11 @@ import { StepUpload } from './stepUpload'
 import { StepWorkload } from './stepWorkload'
 
 // /jobs/new "워크로드 등록" 5단계 위저드(job.md §4). 1 워크로드 → 2 설정 → 3 데이터셋(브라우저 분석) → 4 GPU 등급(메타데이터로 추천, 고르면 견적) → 5 업로드(지갑 잔액 ≥ 비용이면 업로드·등록, 부족하면 예치 안내)
-// 파일(데이터셋·어댑터·내 모델)은 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터(+파일 해시)만 보낸다 — 파일 저장 위치 확정 전(백엔드 안내 2026-09-10 §4)
+// 파일(데이터셋·어댑터)은 브라우저에만 있다. 서버엔 3단계에서 뽑은 메타데이터(+파일 해시)만 보낸다 — 파일 저장 위치 확정 전(백엔드 안내 2026-09-10 §4)
+// 모델은 G-shared 제공 모델만 사용한다(내 학습된 모델 가져오기는 제거). 백엔드 JobSpec.ownModel 계약은 유지하되 항상 false
 export type WizardState = {
   workloadId: number | null
   baseModelId: number | null
-  modelSource: 'PROVIDED' | 'OWN' // 제공 모델 / 내가 가진 학습된 모델
-  ownModelFile: File | null
   adapterFile: File | null // 기존 LoRA 어댑터(학습: 이어서 / 추론·평가: 적용)
   level: AutoMode // 학습 수준(학습 워크로드만)
   custom: TrainingConfig | null | 'invalid' // 고급: 직접 설정(있으면 level 대신). 'invalid' = 고급을 열었지만 값이 틀림 → 다음 단계 차단
@@ -33,7 +32,7 @@ export type WizardState = {
   estimate: Estimate | null
 }
 const INITIAL: WizardState = {
-  workloadId: null, baseModelId: null, modelSource: 'PROVIDED', ownModelFile: null, adapterFile: null, level: 'BALANCED', custom: null,
+  workloadId: null, baseModelId: null, adapterFile: null, level: 'BALANCED', custom: null,
   datasetFile: null, datasetMetadata: null, analyzing: false, gpuId: null, estimate: null,
 }
 const STEPS = [{ label: '워크로드' }, { label: '설정' }, { label: '데이터셋' }, { label: 'GPU 등급 · 견적' }, { label: '업로드' }]
@@ -50,7 +49,7 @@ function toSpec(s: WizardState): JobSpec | null {
     autoMode: custom ? undefined : s.level,
     trainingConfig: custom ?? undefined,
     hasAdapter: s.adapterFile !== null,
-    ownModel: s.modelSource === 'OWN',
+    ownModel: false, // 내 모델 가져오기 제거 — 항상 제공 모델
   }
 }
 
@@ -118,7 +117,6 @@ export function WorkloadWizard() {
       if (!state.baseModelId) return '모델을 선택해 주세요.'
     }
     if (i === 1) {
-      if (state.modelSource === 'OWN' && !state.ownModelFile) return '가져올 모델 파일을 첨부하거나 제공 모델을 선택해 주세요.'
       if (state.custom === 'invalid') return '고급 학습 설정 값을 확인해 주세요.'
     }
     if (i === 2) {

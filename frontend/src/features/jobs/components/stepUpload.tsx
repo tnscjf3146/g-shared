@@ -19,7 +19,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
   const gpu = catalog.gpus.find((g) => g.id === state.gpuId)
   const dataset = state.datasetFile ? `${state.datasetFile.name} (${formatBytes(state.datasetFile.size)})` : undefined
   const meta = spec.datasetMetadata
-  const uploads = [state.datasetFile && '데이터셋', state.adapterFile && '어댑터', state.ownModelFile && '내 모델'].filter(Boolean).join(' · ')
+  const uploads = [state.datasetFile && '데이터셋', state.adapterFile && '어댑터'].filter(Boolean).join(' · ')
 
   const cost = state.estimate?.estimatedCost ?? 0
   const needWei = BigInt(Math.ceil(cost)) * ONE_GSC
@@ -37,7 +37,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
         {(
           [
             ['워크로드', workload?.name],
-            ['모델', state.modelSource === 'OWN' ? `내 모델 · ${state.ownModelFile?.name}` : `${model?.name} (${model?.params})`],
+            ['모델', `${model?.name} (${model?.params})`],
             ['어댑터', state.adapterFile?.name ?? '없음'],
             ['설정', workload?.kind === 'TRAIN_LORA' ? (typeof state.custom === 'object' && state.custom ? '직접 설정' : `자동 · ${AUTO_MODE_META[state.level].label}`) : '—'],
             ['데이터셋', dataset],
