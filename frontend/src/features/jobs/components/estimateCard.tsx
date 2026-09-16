@@ -14,10 +14,10 @@ export function EstimateCard({ estimate, stale, pending = false, onCreate, onEdi
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {[
-          ['epochs', c.epochs],
-          ['batch size', c.batchSize],
-          ['learning rate', c.learningRate],
-          ['max length', c.maxLength],
+          ['에폭', c.epochs],
+          ['배치 크기', c.batchSize],
+          ['학습률', c.learningRate],
+          ['최대 길이', c.maxLength],
         ].map(([k, v]) => (
           <div key={String(k)} className="flex flex-col gap-0.5">
             <span className="text-[12px] text-text-muted">{k}</span>

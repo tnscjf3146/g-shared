@@ -196,10 +196,10 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             ['작업 종류', name.workload],
             ['베이스 모델', name.model],
             ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
-            ['epochs', String(job.epochs)],
-            ['batch size', String(job.batchSize)],
-            ['learning rate', String(job.learningRate)],
-            ['max length', String(job.maxLength)],
+            ['에폭', String(job.epochs)],
+            ['배치 크기', String(job.batchSize)],
+            ['학습률', String(job.learningRate)],
+            ['최대 길이', String(job.maxLength)],
           ]}
         />
       </section>

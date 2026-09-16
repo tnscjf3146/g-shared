@@ -5,7 +5,7 @@ import type { JobDetail, JobSummary } from '../types'
 export function JobProgress({ job, compact = false }: { job: Pick<JobDetail, 'status' | 'progressPercent'> & Partial<Pick<JobDetail, 'progressEpoch' | 'progressTotalEpochs'>> | JobSummary; compact?: boolean }) {
   if (job.status !== 'RUNNING') return null
   const pct = job.progressPercent ?? 0
-  const epoch = 'progressEpoch' in job && job.progressEpoch != null && job.progressTotalEpochs ? `epoch ${job.progressEpoch}/${job.progressTotalEpochs} · ` : ''
+  const epoch = 'progressEpoch' in job && job.progressEpoch != null && job.progressTotalEpochs ? `에폭 ${job.progressEpoch}/${job.progressTotalEpochs} · ` : ''
   return (
     <div className={`flex items-center gap-3 ${compact ? 'w-40' : 'w-full'}`}>
       <ProgressBar value={pct} />
