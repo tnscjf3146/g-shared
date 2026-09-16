@@ -39,7 +39,11 @@ export const workerHandlers = [
     if (!request.headers.get('Authorization')) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
     const w = workers.find((x) => x.workerId === params.workerId)
     if (!w) return error(404, 'WORKER_NOT_FOUND', 'Worker를 찾을 수 없습니다.')
-    return HttpResponse.json({ workerId: w.workerId, providerAddress: getLinkedWallet(), operatorAddress: w.operatorAddress ?? null, approved: MOCK_OPERATOR_APPROVED.has(w.workerId), chainId: 31221, escrowAddress: ESCROW_ADDRESS })
+    const provider = getLinkedWallet()
+    const operator = w.operatorAddress ?? null
+    const approved = MOCK_OPERATOR_APPROVED.has(w.workerId)
+    const status = !provider ? 'PROVIDER_WALLET_MISSING' : !operator ? 'OPERATOR_MISSING' : approved ? 'APPROVED' : 'NOT_APPROVED'
+    return HttpResponse.json({ workerId: w.workerId, providerAddress: provider, operatorAddress: operator, approved, status, chainId: 31221, escrowAddress: ESCROW_ADDRESS })
   }),
 
   http.delete(`${URL}/:workerId`, async ({ request, params }) => {

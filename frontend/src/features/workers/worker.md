@@ -185,7 +185,7 @@ src/
 
 | 조각 | 위치 | 하는 일 |
 | --- | --- | --- |
-| `operatorStatusSchema` · `getOperatorStatus` | `schema.ts` · `api.ts` | `GET /workers/{workerId}/operator-status` → `{ workerId, providerAddress, operatorAddress, approved, chainId, escrowAddress }`(가이드 §5). approved 는 백엔드가 체인 `isOperator` 로 판정 |
+| `operatorStatusSchema` · `getOperatorStatus` | `schema.ts` · `api.ts` | `GET /workers/{workerId}/operator-status` → `{ workerId, providerAddress, operatorAddress, approved, status, chainId, escrowAddress }`(back OperatorStatusResponse, develop 2026-09-16). `status` 는 APPROVED · NOT_APPROVED · PROVIDER_WALLET_MISSING · OPERATOR_MISSING · UNVERIFIED — 아니오의 종류로 안내를 가른다(지갑 연결 / 승인 / 잠시 후 다시). chainId·escrowAddress 는 체인 미설정이면 null → 버튼을 열지 않는다 |
 | `OperatorApproval` | `components/operatorApproval.tsx` | 카드 상태 칸 세 줄 **연결 상태 / 실행 권한 / 상태(작업 가능)**(§4) + `[GPU 실행 권한 승인]`(§6). 상태는 `OPERATOR_APPROVAL_REQUIRED · PENDING · APPROVED · FAILED` |
 | `setOperator` | `wallet/ethereum.ts` | 셀렉터 `0x558a7297`(keccak 검증). to = 응답의 `escrowAddress` |
 | 목업 | `mocks/handlers.ts` · `mocks/data.ts` | operator-status 응답. approved 는 `MOCK_OPERATOR_APPROVED`(worker 3). 서명은 MetaMask 라 목업에선 승인 완료로 넘어가지 않는다 |

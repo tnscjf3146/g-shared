@@ -57,7 +57,7 @@ export function OperatorApproval({ worker }: { worker: Worker }) {
   }, [refresh])
 
   const approve = async () => {
-    if (status === null || status === 'error' || !status.providerAddress || !status.operatorAddress) return
+    if (status === null || status === 'error' || !status.providerAddress || !status.operatorAddress || !status.escrowAddress) return
     const p = getProvider()
     if (!p) return setApproval({ s: 'OPERATOR_APPROVAL_FAILED', detail: 'MetaMask가 설치되어 있지 않습니다. 설치 후 다시 시도해 주세요.' })
     try {
@@ -81,13 +81,14 @@ export function OperatorApproval({ worker }: { worker: Worker }) {
     }
   }
 
-  // 실행 권한 줄 — 조회 결과·승인 진행 상태로 결정
-  const ready = status !== null && status !== 'error' && !!status.providerAddress && !!status.operatorAddress
+  // 실행 권한 줄 — 백엔드 status(아니오의 종류)와 승인 진행 상태로 결정
+  const ready = status !== null && status !== 'error' && status.status !== 'UNVERIFIED' && !!status.providerAddress && !!status.operatorAddress && !!status.escrowAddress
   const permission = (() => {
     if (status === null) return { text: '확인 중…', tone: 'muted' as const }
     if (status === 'error') return { text: '확인 실패', tone: 'muted' as const }
-    if (!status.providerAddress) return { text: '지갑 연결 필요', tone: 'danger' as const }
-    if (!status.operatorAddress) return { text: '워커 키 미등록 · 워커 프로그램을 최신 버전으로 실행해 주세요', tone: 'danger' as const }
+    if (status.status === 'PROVIDER_WALLET_MISSING' || !status.providerAddress) return { text: '지갑 연결 필요', tone: 'danger' as const }
+    if (status.status === 'OPERATOR_MISSING' || !status.operatorAddress) return { text: '워커 키 미등록 · 워커 프로그램을 최신 버전으로 실행해 주세요', tone: 'danger' as const }
+    if (status.status === 'UNVERIFIED' && approval.s !== 'OPERATOR_APPROVED') return { text: '확인 불가 · 잠시 후 다시 확인해 주세요', tone: 'muted' as const }
     if (approval.s === 'OPERATOR_APPROVED') return { text: '승인 완료', tone: 'ok' as const }
     if (approval.s === 'OPERATOR_APPROVAL_PENDING') return { text: `${approval.detail}…`, tone: 'muted' as const }
     if (approval.s === 'OPERATOR_APPROVAL_FAILED') return { text: '승인 실패', tone: 'danger' as const }
@@ -120,7 +121,7 @@ export function OperatorApproval({ worker }: { worker: Worker }) {
           {approval.detail}
         </p>
       )}
-      {approval.s === 'OPERATOR_APPROVAL_PENDING' && approval.detail === WAITING_SERVER && (
+      {((approval.s === 'OPERATOR_APPROVAL_PENDING' && approval.detail === WAITING_SERVER) || (status !== null && status !== 'error' && status.status === 'UNVERIFIED')) && (
         <button type="button" onClick={() => void refresh()} className="self-start text-[13px] text-primary hover:underline">
           다시 확인
         </button>

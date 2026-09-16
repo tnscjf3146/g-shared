@@ -31,15 +31,18 @@ export const workerSchema = z.object({
 
 export const workerListSchema = z.array(workerSchema)
 
-/** GET /workers/{workerId}/operator-status — 공급자 지갑이 이 워커의 서명 키를 에스크로에 setOperator 로 승인했는가(백엔드 가이드 2026-09-16 §5).
- *  approved 는 백엔드가 체인 isOperator(provider, operator) 로 판정. 주소 둘은 지갑 미연결·키 미등록이면 비어 올 수 있어 nullable */
+/** back OperatorApproval — "아니오" 의 종류가 셋이라 안내가 다르다: 지갑 연결 / MetaMask 승인 / 잠시 후 다시 */
+export const operatorApprovalSchema = z.enum(['APPROVED', 'NOT_APPROVED', 'PROVIDER_WALLET_MISSING', 'OPERATOR_MISSING', 'UNVERIFIED'])
+/** GET /workers/{workerId}/operator-status — back OperatorStatusResponse(develop 2026-09-16). 공급자 지갑이 이 워커의 서명 키를 에스크로에 setOperator 로 승인했는가.
+ *  approved = status === 'APPROVED'. 백엔드가 물을 때마다 체인 isOperator(provider, operator) 로 판정(저장 안 함). chainId·escrowAddress 는 체인 미설정이면 null */
 export const operatorStatusSchema = z.object({
   workerId: z.string(),
   providerAddress: z.nullable(z.string()),
   operatorAddress: z.nullable(z.string()),
   approved: z.boolean(),
-  chainId: z.number(),
-  escrowAddress: z.string(),
+  status: operatorApprovalSchema,
+  chainId: z.nullable(z.number()),
+  escrowAddress: z.nullable(z.string()),
 })
 
 /** GET /network/stats — 네트워크 전체 워커 현황(소비자 대시보드용) */
