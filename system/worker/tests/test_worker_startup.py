@@ -23,7 +23,11 @@ from gshared_worker import runtime_check
 from gshared_worker import worker_connection
 from gshared_worker import main as worker_main
 from gshared_worker.config import CONFIG_FILE_NAME
-from gshared_worker.errors import WorkerAlreadyRunningError, WorkerError
+from gshared_worker.errors import (
+    WorkerAlreadyRunningError,
+    WorkerConfigurationError,
+    WorkerError,
+)
 from gshared_worker.exit_codes import WorkerExitCode
 from gshared_worker.instance_guard import WorkerInstanceGuard
 from gshared_worker.logging_setup import DEBUG_LOG_NAME, stop_debug_log
@@ -106,6 +110,26 @@ class StartupTestCase(unittest.TestCase):
     def logged(self):
         stop_debug_log()
         return (self.directory / DEBUG_LOG_NAME).read_text(encoding="utf-8")
+
+
+class AStorageConflictBeforeTheLogStartsTest(unittest.TestCase):
+    def test_it_is_reported_as_an_expected_configuration_failure(self):
+        said = []
+        shown = []
+        conflict = WorkerConfigurationError(
+            "STORAGE_IDENTITY_CONFLICT: two different Worker Operators exist")
+
+        with patch.object(worker_main, "data_directory", side_effect=conflict):
+            code = worker_main.run(
+                out=said.append,
+                env={},
+                show_failure=lambda exit_code, lines: shown.append(
+                    (exit_code, list(lines))),
+            )
+
+        self.assertEqual(code, WorkerExitCode.EXPECTED_FAILURE)
+        self.assertIn("STORAGE_IDENTITY_CONFLICT", "\n".join(said))
+        self.assertEqual(shown[0][0], WorkerExitCode.EXPECTED_FAILURE)
 
 
 class AConfiguredMachineStartsTest(StartupTestCase):

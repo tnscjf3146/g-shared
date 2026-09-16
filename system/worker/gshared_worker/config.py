@@ -27,6 +27,7 @@ from .credentials import unprotect_current_user
 from .errors import WorkerConfigurationError
 
 CONFIG_FILE_NAME = "worker-config.json"
+WALLET_FILE_NAME = "worker-wallet.json"
 EXAMPLE_FILE_NAME = "worker-config.example.json"
 
 #: Which GPU this machine offers, when nobody has said otherwise.
@@ -155,22 +156,71 @@ def data_directory(env: Mapping[str, str] | None = None) -> Path:
     its files in ``%LOCALAPPDATA%\\G-shared``, one folder per Windows account,
     which is also the account DPAPI seals them to.
 
-    The one exception is a **portable** copy: if ``worker-config.json`` is
-    already beside the executable, that folder is used. A supplier who set a
-    machine up that way keeps the token and the signing key they already have
-    rather than the Worker quietly starting a second identity somewhere else.
+    The one exception is a **portable** copy: if ``worker-config.json`` or
+    ``worker-wallet.json`` is already beside the executable, that folder is
+    used. The wallet alone is enough to pin the location: deleting or resetting
+    Worker credentials must not move the Operator identity to LocalAppData and
+    quietly create another one.
+
+    If both locations already contain wallets, their public addresses must
+    agree before portable precedence is used. The private keys are not opened
+    here. A disagreement, or address metadata that cannot be compared safely,
+    is an explicit storage conflict rather than a guess between identities.
     """
     program = worker_directory()
     if not getattr(sys, "frozen", False):
-        return program
-    if (program / CONFIG_FILE_NAME).is_file():
         return program
     root = (os.environ if env is None else env).get("LOCALAPPDATA")
     if not root:
         # Nowhere per-user to go. Beside the program is still better than
         # refusing to start; if it is not writable the log says so.
         return program
-    return Path(root) / USER_DATA_DIRECTORY_NAME
+    local = Path(root) / USER_DATA_DIRECTORY_NAME
+    portable_wallet = program / WALLET_FILE_NAME
+    local_wallet = local / WALLET_FILE_NAME
+    if (portable_wallet.is_file() and local_wallet.is_file()
+            and program != local):
+        _require_one_operator_identity(portable_wallet, local_wallet)
+    if ((program / CONFIG_FILE_NAME).is_file() or portable_wallet.is_file()):
+        return program
+    return local
+
+
+def _require_one_operator_identity(portable: Path, local: Path) -> None:
+    """Refuse two storage roots unless they name the same public identity."""
+    portable_address = _stored_operator_address(portable)
+    local_address = _stored_operator_address(local)
+    if portable_address is None or local_address is None:
+        raise WorkerConfigurationError(
+            "STORAGE_IDENTITY_CONFLICT: portable and LocalAppData both contain "
+            "Worker wallets, but their Operator addresses cannot be compared "
+            "safely. Neither wallet was selected or changed."
+        )
+    if portable_address.lower() != local_address.lower():
+        raise WorkerConfigurationError(
+            "STORAGE_IDENTITY_CONFLICT: portable and LocalAppData contain "
+            f"different Worker Operators ({_short_address(portable_address)} / "
+            f"{_short_address(local_address)}). Neither wallet was selected "
+            "or changed."
+        )
+
+
+def _stored_operator_address(path: Path) -> str | None:
+    """Read only the public address used to disambiguate two storage roots."""
+    try:
+        values = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(values, dict):
+        return None
+    address = values.get("address")
+    if not isinstance(address, str) or not _ADDRESS.match(address):
+        return None
+    return address
+
+
+def _short_address(address: str) -> str:
+    return f"{address[:6]}...{address[-4:]}"
 
 
 def config_file_path(directory: Path | None = None) -> Path:

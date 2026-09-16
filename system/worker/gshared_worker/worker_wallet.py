@@ -35,15 +35,11 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from . import config as _config
+from .config import WALLET_FILE_NAME
 from .credentials import protect_current_user, unprotect_current_user
 from .logging_setup import LOGGER_NAME
 
 _debug = logging.getLogger(LOGGER_NAME)
-
-#: Beside ``worker-config.json`` rather than inside it. The settings file is
-#: something a supplier may open and edit; this is not, and widening the
-#: settings contract with two keys nobody may type would say otherwise.
-WALLET_FILE_NAME = "worker-wallet.json"
 
 #: 0x and forty hex digits. Checked rather than assumed: this string is what
 #: the Backend records as the provider, and a wrong one is a job accepted by

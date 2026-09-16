@@ -67,8 +67,6 @@ def run(
     failure in the window rather than in a dialog opened from this thread. A
     run from a terminal passes none of them and behaves exactly as before.
     """
-    directory = directory or data_directory()
-    log_path = start_debug_log(directory)
     emit = out or print
     #: Everything the supplier was told, kept so a failed run can be shown in a
     #: dialog by the packaged Worker, which has no console to print it to.
@@ -79,6 +77,21 @@ def run(
     def say(*parts: object) -> None:
         said.append(" ".join(str(part) for part in parts))
         emit(*parts)
+
+    try:
+        directory = directory or data_directory()
+    except WorkerConfigurationError as error:
+        # Storage is chosen before there is a safe place to write a log. A
+        # split-brain wallet must still be an explained, visible refusal rather
+        # than an exception on the packaged Worker's background thread.
+        say("")
+        say("저장된 Worker Operator 정보를 안전하게 선택할 수 없습니다.")
+        say(f"  {error}")
+        exit_code = int(WorkerExitCode.EXPECTED_FAILURE)
+        (show_failure or _show_the_failure)(exit_code, said)
+        return exit_code
+
+    log_path = start_debug_log(directory)
 
     run_worker = run_worker or _with(
         start_the_machine, stop=stop, open_sign_in=open_sign_in)
