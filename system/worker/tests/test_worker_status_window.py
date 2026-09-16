@@ -21,6 +21,8 @@ What is protected here, in the order a supplier meets it:
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -99,6 +101,74 @@ from tests.test_worker_token_recovery import (
 )
 
 GPU_FACTS = SimpleNamespace(gpu_model="NVIDIA GeForce RTX 4070 Laptop GPU", vram_mb=8188)
+
+
+def _successful_sign_in_lifecycle_probe() -> int:
+    """Child-process probe for Tk objects crossing back to the Worker thread.
+
+    Tcl aborts the whole process, rather than raising a Python exception, when
+    its interpreter is finalized on a thread other than the one that created
+    it. Keeping this probe in a child lets the suite observe that native crash
+    as a non-zero exit instead of taking the test runner down with it.
+    """
+    import tkinter as tk
+
+    from gshared_worker.backend_client import BackendAnswer, Outcome
+    from gshared_worker.gui.presenter import AuthPresenter
+    from gshared_worker.gui.status_window import StatusWindow
+
+    events: list[str] = []
+
+    class Backend:
+        def login(self, email, password):
+            events.append("login_status=200")
+            return BackendAnswer(Outcome.OK, body={"accessToken": "probe-token"})
+
+    class AutoLoginWindow(AuthWindow):
+        def ask_to_sign_in(self):
+            original_tk = tk.Tk
+
+            def make_root():
+                root = original_tk()
+                root.after(
+                    100,
+                    lambda: self._submit_login("new@worker.test", "password"),
+                )
+                return root
+
+            with patch("gshared_worker.gui.window.tk.Tk", make_root):
+                return super().ask_to_sign_in()
+
+    def run(*, out, stop, open_sign_in, show_failure):
+        token = open_sign_in(AutoLoginWindow(AuthPresenter(Backend())))
+        if token != "probe-token":
+            return int(WorkerExitCode.UNEXPECTED_FAULT)
+        events.append("token_handoff=true")
+        # This is the first post-login action on the Worker thread. Reaching it
+        # proves the login object was returned without killing the process.
+        events.append("registration_started=true")
+        return int(WorkerExitCode.OK)
+
+    def make_window(presenter, feed, on_action, on_event):
+        window = StatusWindow(presenter, feed, on_action, on_event).open()
+        window.later(
+            1200,
+            lambda: events.append(
+                f"status_alive_after_login={str(not window.closed).lower()}"
+            ),
+        )
+        window.later(1400, window.close)
+        window.later(8000, window.close)
+        return window
+
+    code = StatusApp(
+        run=run,
+        make_window=make_window,
+        describe=lambda: None,
+    ).run()
+    events.append(f"exit_code={code}")
+    print(" ".join(events))
+    return code
 
 
 class Recorded:
@@ -626,6 +696,32 @@ class Case7TheXAndTheButtonAreOnePathTest(unittest.TestCase):
         self.assertIsNone(request.result)
         # The sign-in window's own loop ended without ending the status window's.
         self.assertEqual(still_running, [True])
+
+    def test_successful_sign_in_does_not_finalize_tk_on_the_worker_thread(self):
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "from tests.test_worker_status_window import "
+                "_successful_sign_in_lifecycle_probe as probe; "
+                "raise SystemExit(probe())"
+            ),
+        ]
+
+        completed = subprocess.run(
+            command,
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+        diagnostic = f"stdout={completed.stdout!r}\nstderr={completed.stderr!r}"
+        self.assertEqual(completed.returncode, 0, diagnostic)
+        self.assertIn("login_status=200", completed.stdout)
+        self.assertIn("token_handoff=true", completed.stdout)
+        self.assertIn("registration_started=true", completed.stdout)
+        self.assertIn("status_alive_after_login=true", completed.stdout)
 
 
 # --------------------------------------------------------------------------
