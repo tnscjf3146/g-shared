@@ -29,6 +29,11 @@ from gshared_worker.job_runtime import (
     run_training,
     training_arguments,
 )
+from gshared_worker.runtime_image import (
+    CANONICAL_RUNTIME_DIGEST,
+    PREVIOUS_RUNTIME_DIGEST,
+    RuntimeImage,
+)
 from gshared_worker.runtime_pipeline import RuntimePipeline, RuntimeSettings
 from gshared_worker.worker_job import USER_REQUEST
 
@@ -44,10 +49,13 @@ FINISHED = RuntimeOutcome(RuntimeState.FINISHED, None, "training finished", 0)
 class Harness:
     """Runs the real pipeline with every outside call recorded, not made."""
 
-    def __init__(self, context_body, *, adapter_error=None, on_dataset=None):
+    def __init__(self, context_body, *, adapter_error=None, on_dataset=None,
+                 image_digest=CANONICAL_RUNTIME_DIGEST):
         self.adapter_calls: list[dict] = []
         self.training_calls: list[dict] = []
+        self.dataset_fetched = False
         self.pulled = False
+        self._image_digest = image_digest
         self._adapter_error = adapter_error
         self._on_dataset = on_dataset
         self._body = context_body
@@ -69,6 +77,7 @@ class Harness:
             return SimpleNamespace(path=Path(tempfile.mkdtemp()))
 
         def fetched_dataset(url, destination, **kwargs):
+            harness.dataset_fetched = True
             Path(destination).write_text('{"instruction":"a","output":"b"}\n',
                                          encoding="utf-8")
             if harness._on_dataset is not None:
@@ -93,7 +102,9 @@ class Harness:
                 patch.object(runtime_pipeline, "check_matches_trusted_escrow",
                              lambda *a, **k: None), \
                 patch.object(runtime_pipeline, "check_image",
-                             lambda ref, digest: SimpleNamespace(reference=IMAGE)), \
+                             lambda ref, digest: RuntimeImage(
+                                 "le3560/gshared-qlora-sft-runtime",
+                                 self._image_digest)), \
                 patch.object(runtime_pipeline, "prepare_model", prepared_model), \
                 patch.object(runtime_pipeline, "fetch_dataset", fetched_dataset), \
                 patch.object(runtime_pipeline, "fetch_adapter", fetched_adapter), \
@@ -154,6 +165,30 @@ class TestAnAdapterThatCannotBeUsed(unittest.TestCase):
 
     def test_the_failure_code_is_its_own(self):
         self.assertEqual(RuntimeFailure.ADAPTER_UNAVAILABLE.value, "ADAPTER_UNAVAILABLE")
+
+
+class TestARuntimeThatPredatesAdapters(unittest.TestCase):
+    """0.2.0 is still approved while the Backend catalog names it."""
+
+    def test_an_adapter_job_stops_before_anything_is_downloaded(self):
+        harness = Harness(body(adapter=dict(ADAPTER)),
+                          image_digest=PREVIOUS_RUNTIME_DIGEST)
+
+        outcome = harness.run()
+
+        self.assertIs(outcome.state, RuntimeState.FAILED)
+        self.assertIs(outcome.failure, RuntimeFailure.ADAPTER_UNAVAILABLE)
+        self.assertIn("cannot continue training from an adapter", outcome.detail)
+        self.assertFalse(harness.dataset_fetched)
+        self.assertEqual(harness.adapter_calls, [])
+        self.assertFalse(harness.pulled)
+        self.assertEqual(harness.training_calls, [])
+
+    def test_a_job_without_one_still_runs_on_it(self):
+        harness = Harness(body(), image_digest=PREVIOUS_RUNTIME_DIGEST)
+
+        self.assertIs(harness.run().state, RuntimeState.FINISHED)
+        self.assertIs(harness.training_calls[0]["adapter"], False)
 
 
 class TestACancellationBeforeTheAdapter(unittest.TestCase):

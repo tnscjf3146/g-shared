@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File system\worker\packaging\build.ps1
 | `blockchain/abi/GPUJobEscrow.json` (원본 그대로) | `.env` · 토큰 · 키 · `worker-config.json` · `worker-wallet.json` |
 | 런타임 의존성의 dist-info 메타데이터 | Docker 이미지 · 모델 가중치 · 데이터셋 · git 정보 |
 
-- 학습은 Docker 컨테이너가 한다. exe는 `le3560/gshared-qlora-sft-runtime@sha256:acda63bc…126d`(0.2.0)를 Job이 올 때 digest로 pull하고, 이 digest가 아닌 이미지는 실행하지 않는다. 기준값은 `gshared_worker/runtime_image.py`의 `CANONICAL_RUNTIME_*` 상수이며 selfcheck의 `runtime image` 항목이 번들 안에서 확인한다.
+- 학습은 Docker 컨테이너가 한다. exe는 `le3560/gshared-qlora-sft-runtime@sha256:e32bd1c1…e170`(0.3.0, 입력 Adapter 지원)을 Job이 올 때 digest로 pull하고, 승인된 digest가 아닌 이미지는 실행하지 않는다. Backend 카탈로그가 0.3.0으로 옮겨질 때까지 0.2.0(`acda63bc…126d`)도 허용한다. 기준값은 `gshared_worker/runtime_image.py`의 `CANONICAL_RUNTIME_*` 상수이며 selfcheck의 `runtime image` 항목이 번들 안에서 확인한다.
 - selfcheck의 `chain config` 항목은 번들된 기본 체인 설정(chainId 31221, 에스크로 주소 형식, https RPC)을 확인한다.
 - dist-info가 필요한 이유: web3·py_ecc·toolz가 import 중 자기 버전을 `importlib.metadata`로 읽는다. 없으면 `import eth_account`가 번들 안에서 실패해 signing key를 못 만든다.
 
