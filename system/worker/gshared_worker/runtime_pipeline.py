@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .adapter_fetch import AdapterRefused, fetch_adapter
 from .dataset_fetch import DatasetRefused, fetch_dataset
 from .execution_context import (
     ContextRefused,
@@ -198,6 +199,29 @@ ProgressTracker` when somebody is watching. It is handed the container's
                 f"the job workspace could not be prepared "
                 f"({type(error).__name__})")
 
+        # -- the adapter to continue from, if the Job has one ----------------
+        #
+        # After the dataset, before the image: both are the customer's inputs
+        # and both are checked before anything heavier happens. A Job that
+        # asked for an adapter is never trained without it.
+        if context.adapter is not None:
+            if _stop_now(terminal):
+                return _cancelled_before_starting("before fetching the adapter")
+            try:
+                fetch_adapter(
+                    context.adapter.download_url,
+                    workspace.adapter_archive_path, workspace.adapter_dir,
+                    expected_sha256=context.adapter.sha256,
+                    expected_size=context.adapter.size_bytes,
+                    sleep=self._sleep)
+            except AdapterRefused as refused:
+                return _failed(RuntimeFailure.ADAPTER_UNAVAILABLE, refused.detail)
+            except OSError as error:
+                return _failed(
+                    RuntimeFailure.ADAPTER_UNAVAILABLE,
+                    f"the adapter could not be written to the job workspace "
+                    f"({type(error).__name__})")
+
         if _stop_now(terminal):
             return _cancelled_before_starting("before pulling the image")
 
@@ -223,7 +247,8 @@ ProgressTracker` when somebody is watching. It is handed the container's
             generation=generation,
             cancelled=(lambda: terminal.cancel_requested)
             if terminal is not None else None,
-            on_started=_remember(terminal, job.job_id, generation))
+            on_started=_remember(terminal, job.job_id, generation),
+            adapter=context.adapter is not None)
 
     async def _pull(self, image: Any) -> RuntimeOutcome | None:
         """Fetch by digest and confirm what landed. None means it is ready.

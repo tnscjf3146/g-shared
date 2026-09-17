@@ -37,6 +37,9 @@ class TrainingRequest:
     #: smoke tests and the calibration run in the docs -- a real job trains
     #: for whole epochs and this is None.
     max_steps: int | None = None
+    #: A LoRA adapter to continue training from. None trains a fresh one,
+    #: which is what every job did before this existed.
+    adapter_path: Path | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     parser.add_argument("--dataset-path", default=DEFAULT_DATASET_PATH)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument(
+        "--adapter-path", default=None,
+        help="A LoRA adapter directory to continue training from "
+             "(adapter_config.json + adapter_model.safetensors). "
+             "Absent means a freshly initialised adapter.")
     parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--learning-rate", type=float, required=True)
@@ -90,7 +98,8 @@ def read_request(argv: list[str] | None = None) -> TrainingRequest:
         dataset_path=Path(args.dataset_path),
         output_dir=Path(args.output_dir),
         config=config,
-        max_steps=args.max_steps)
+        max_steps=args.max_steps,
+        adapter_path=Path(args.adapter_path) if args.adapter_path else None)
 
 
 def steps_for(samples: int, config: TrainingConfig,

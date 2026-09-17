@@ -71,8 +71,10 @@ class TestTheContainerLearnsNoSecret(unittest.TestCase):
         for action in cli.build_parser()._actions:
             options.extend(action.option_strings)
 
+        # --adapter-path is a path like the other three: a directory the Worker
+        # mounted, never a URL, a token or anything fetched from inside.
         expected = {"-h", "--help", "--model-path", "--dataset-path",
-                    "--output-dir", "--epochs", "--batch-size",
+                    "--output-dir", "--adapter-path", "--epochs", "--batch-size",
                     "--learning-rate", "--max-length", "--seed",
                     "--gradient-accumulation-steps",
                     "--gradient-checkpointing", "--max-steps"}
