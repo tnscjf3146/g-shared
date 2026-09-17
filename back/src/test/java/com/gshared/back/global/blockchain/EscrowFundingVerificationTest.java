@@ -226,6 +226,29 @@ class EscrowFundingVerificationTest {
         assertThat(local.blocks(Verdict.CONTRADICTED)).isTrue();
     }
 
+    @Test
+    void refundRecoveryReadsClientRefFromHistoricalContract() {
+        java.util.concurrent.atomic.AtomicReference<String> target = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicReference<String> data = new java.util.concurrent.atomic.AtomicReference<>();
+        handlers.put("eth_call", params -> {
+            target.set(params.get(0).get("to").asString());
+            data.set(params.get(0).get("data").asString());
+            return "0x" + TypeEncoder.encode(new Uint256(42));
+        });
+        assertThat(chain.jobIdByClientRef(OTHER, CLIENT, REF)).contains("42");
+        assertThat(target.get()).isEqualTo(OTHER);
+        String selector = org.web3j.crypto.Hash.sha3String("jobIdByClientRef(address,bytes32)").substring(0, 10);
+        assertThat(data.get()).isEqualTo(selector + TypeEncoder.encode(new Address(CLIENT)) + REF.substring(2));
+    }
+
+    @Test
+    void missingClientRefMappingIsZeroWhileRpcFailureIsUnknown() {
+        handlers.put("eth_call", params -> "0x" + TypeEncoder.encode(new Uint256(0)));
+        assertThat(chain.jobIdByClientRef(ESCROW, CLIENT, REF)).contains("0");
+        handlers.remove("eth_call");
+        assertThat(chain.jobIdByClientRef(ESCROW, CLIENT, REF)).isEmpty();
+    }
+
     // ── 가짜 노드 응답 ───────────────────────────────────────────
 
     private void receipt(boolean success, String to, JsonNode... logs) {

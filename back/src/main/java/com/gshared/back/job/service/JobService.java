@@ -622,16 +622,14 @@ public class JobService {
         } else if (!refundConfirmedOnChain(jobId)) {
             // 환불 주장 자체가 없다(워커가 abortJob 전에 죽음) — 재전송을 기다려도 올 것이 없다.
             // 종료 대신 CANCELLING 으로 순찰에 태워 keeper 가 시한 만료 후 settleTimeout 으로 환불하게 한다.
-            int held = jobRepository.failToCancellingIfRunning(jobId, workerId, reason, null,
+            int held = jobRepository.holdFailureForRefund(jobId, workerId, reason,
                     actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
-            // 이미 CANCELLING 이었으면(취소 요청 중 실패) 0행 — Job 은 이미 순찰 대상이라 충분하지만,
-            // 워커는 이 보고로 끝난 것이므로 풀어줘야 한다. 안 풀면 BUSY 고착 + 워커가 NACK 로 알고 재전송한다.
-            boolean cancellingAlready = held == 0
-                    && jobRepository.existsByIdAndAssignedWorkerIdAndStatus(jobId, workerId, JobStatus.CANCELLING);
-            if (held > 0 || cancellingAlready) {
+            if (held > 0) {
                 log.warn("[JOB] 실패 보고(환불 주장 없음), 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
                         jobId, workerId, reason);
-                workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+                workerRepository.findById(workerId)
+                        .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                        .ifPresent(worker -> worker.finishJob());
                 return true;
             }
             return false;
@@ -649,7 +647,9 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
-        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
         return true;
     }
 
@@ -668,7 +668,9 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
-        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
         return true;
     }
 

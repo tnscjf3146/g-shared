@@ -110,6 +110,8 @@ public class Job extends BaseTimeEntity {
     private String submitTxHash;      // submitResult() 트랜잭션 (JOB_RESULT)
     @Column(length = 66)
     private String abortTxHash;       // abortJob() 트랜잭션 (JOB_FAILED / JOB_CANCELLED)
+    // 종료 상태와 별개로 체인에서 환불을 확인한 시각. 과거 미환불 종료 작업도 재조회한다.
+    private LocalDateTime refundConfirmedAt;
     @Column(columnDefinition = "TEXT")
     private String failReason;        // 실패·거절 시 에러코드+메시지 (긴 에러 대비 TEXT)
     // 온체인 상태와 DB 가 어긋났을 가능성 — 값이 있으면 자동 진행을 멈추고(fail closed) 대조가 필요하다는 표시
