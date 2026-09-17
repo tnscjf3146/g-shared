@@ -937,6 +937,9 @@ class Web3Escrow:
             "from": sender,
             "nonce": web3.eth.get_transaction_count(sender, "pending"),
             "chainId": self._settings.chain_id,
+            # SSAFY is a legacy-fee chain: its blocks do not carry the
+            # EIP-1559 baseFeePerGas field web3.py otherwise assumes exists.
+            "gasPrice": web3.eth.gas_price,
         })
         # The only line in this package that uses the private key.
         signed = web3.eth.account.sign_transaction(
