@@ -8,11 +8,13 @@ import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
 import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
 import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
 import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.job.domain.AdapterName;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.workload.domain.Workload;
+import com.gshared.back.workload.domain.WorkloadKind;
 import com.gshared.back.workload.exception.WorkloadErrorCode;
 import com.gshared.back.workload.repository.BaseModelRepository;
 import com.gshared.back.workload.repository.WorkloadRepository;
@@ -104,6 +106,9 @@ public class JobService {
             throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
         }
 
+        // 어댑터 주문 확인 — 이름 규칙·부모 조건은 Scheduler(외부 HTTP)를 부르기 전에 본다. 틀린 주문에 추천을 사 올 이유가 없다.
+        AdapterOrder adapterOrder = resolveAdapterOrder(ownerId, request, baseModel.getSlug());
+
         SchedulerRecommendRequest.DatasetMeta datasetMeta = new SchedulerRecommendRequest.DatasetMeta(
                 dataset.getSizeBytes(), dataset.getSampleCount(),
                 dataset.getTotalTokens(), dataset.getEffectiveTokens(),
@@ -168,6 +173,8 @@ public class JobService {
                 recommendedRuntime(rec), rec.schedulerModelVersion(), rec.recommendedWorkerId(),
                 providerWallet, estimateCost(dataset, config)
         );
+        // ⑦ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
+        job.assignAdapterOrder(adapterOrder.required(), adapterOrder.name(), adapterOrder.version(), adapterOrder.parentJobId());
         jobRepository.save(job);
 
         return CreateJobResponse.of(job, walletAuthProperties.chainId(),
@@ -202,6 +209,77 @@ public class JobService {
      */
     private Long estimateCost(Dataset dataset, SchedulerTrainingConfig config) {
         return JobCostPolicy.estimate(dataset.getEffectiveTokens(), config.epochs());
+    }
+
+    /** 서버가 확정한 어댑터 주문 — {@link Job#assignAdapterOrder} 의 인자 그대로. */
+    private record AdapterOrder(boolean required, String name, int version, Long parentJobId) {
+    }
+
+    /**
+     * 주문에 담긴 어댑터 조건을 확정한다.
+     *
+     * <p>세 필드(hasAdapter·adapterName·parentJobId)가 전부 없으면 예전 요청과 똑같이 동작한다 —
+     * 어댑터 없음, v1, 모델 slug 기반 기본 이름.
+     *
+     * <p>{@code parentJobId} 가 오면 그 Job 이 <b>내 것이고, 완료됐고, 결과물이 있고, 같은 베이스 모델로 학습한 것인지</b>
+     * 여기서 확인한다. 프런트도 목록을 그 조건으로 좁혀 보여 주지만 신뢰 경계는 여기다. 확인이 끝나면 버전은 부모 + 1 이고,
+     * 이름을 안 보냈으면 부모 이름을 잇는다(같은 계보는 같은 이름을 쓰는 게 자연스럽다).
+     */
+    private AdapterOrder resolveAdapterOrder(Long ownerId, CreateJobRequest request, String baseModelSlug) {
+        String name = AdapterName.normalize(request.adapterName());
+        if (name != null && !AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+
+        Job parent = null;
+        if (request.parentJobId() != null) {
+            parent = jobRepository.findByIdAndOwnerId(request.parentJobId(), ownerId)
+                    .orElseThrow(() -> new BusinessException(JobErrorCode.PARENT_JOB_NOT_FOUND));
+            if (parent.getStatus() != JobStatus.COMPLETED) {
+                throw new BusinessException(JobErrorCode.PARENT_JOB_NOT_COMPLETED);
+            }
+            // 결과물이 없으면(아직 안 올라왔거나 지워졌거나) 이어서 학습할 입력이 없다
+            if (parent.getResultObjectKey() == null) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // 어댑터를 만드는 작업(학습)의 결과물이어야 한다 — 추론·평가의 result.tar 에는 어댑터가 없다.
+            // 여기서 막지 않으면 예치까지 끝난 뒤 Runtime 이 거절해 돈과 워커 시간이 날아간다.
+            if (workloadRepository.findById(parent.getWorkloadId())
+                    .map(w -> w.getKind() != WorkloadKind.TRAIN_LORA).orElse(true)) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // LoRA 어댑터는 학습한 베이스 모델에만 얹힌다 — 다른 모델에 이어 붙이면 Runtime 이 로드 단계에서 거절한다.
+            if (!parent.getBaseModelId().equals(request.baseModelId())) {
+                throw new BusinessException(JobErrorCode.PARENT_BASE_MODEL_MISMATCH);
+            }
+        }
+
+        boolean required = parent != null || Boolean.TRUE.equals(request.hasAdapter());
+        int version = parent == null ? 1 : parent.getAdapterVersion() + 1;
+        if (name == null) {
+            name = parent != null && parent.getAdapterName() != null
+                    ? parent.getAdapterName()
+                    : AdapterName.defaultFor(baseModelSlug);
+        }
+        return new AdapterOrder(required, name, version, parent == null ? null : parent.getId());
+    }
+
+    /**
+     * 결과 어댑터 이름 변경. 파일도 계보도 건드리지 않으므로 상태 제한이 없다 —
+     * 완료된 Job 을 내려받기 직전에 이름을 고치는 것이 주 사용처다.
+     */
+    @Transactional
+    public JobDetailResponse renameAdapter(Long ownerId, Long jobId, String rawName) {
+        String name = AdapterName.normalize(rawName);
+        if (!AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        job.renameAdapter(name);
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
     }
 
     /**
@@ -278,6 +356,11 @@ public class JobService {
         // 데이터셋 원본이 올라와 검증된 뒤에만 예치를 받는다 — 예치금이 묶인 채 워커가 내려받을 파일이 없는 상황을 막는다.
         if (!job.hasDatasetFile()) {
             throw new BusinessException(JobErrorCode.DATASET_NOT_UPLOADED);
+        }
+        // 입력 어댑터도 같은 이유로 준비돼 있어야 한다. 이어서 학습(parentJobId)은 부모 결과물을 쓰므로
+        // 올릴 파일이 없고, 부모가 완료·결과물 보유인지는 주문 때 확인했다.
+        if (!job.isAdapterInputReady()) {
+            throw new BusinessException(JobErrorCode.ADAPTER_NOT_UPLOADED);
         }
         // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
         jobRepository.findByFundTxHash(hash)

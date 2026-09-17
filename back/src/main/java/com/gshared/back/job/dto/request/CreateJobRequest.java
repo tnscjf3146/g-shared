@@ -30,6 +30,23 @@ public record CreateJobRequest(
         String trainingPriority,
 
         // CUSTOM 일 때만: {epochs, batchSize, learningRate, maxLength}
-        JsonNode trainingConfig
+        JsonNode trainingConfig,
+
+        // ── 어댑터 (없으면 기존과 똑같이 동작한다) ────────────────────
+        /** 어댑터를 얹고 시작하는가. null → false. true 면 파일 업로드 검증이 끝나야 /fund 가 열린다. */
+        Boolean hasAdapter,
+
+        /**
+         * 결과 어댑터 이름 = 내려받을 파일 이름. 비어 오면 서버가 기본값을 붙인다.
+         * 길이·문자 검사는 {@code AdapterName} 한 곳에서 한다 — 여기에 @Size 를 겹쳐 두면
+         * 같은 실수(너무 긴 이름 / 못 쓰는 글자)에 서로 다른 에러 코드가 나간다.
+         */
+        String adapterName,
+
+        /**
+         * 이어서 학습할 완료 작업. 그 작업의 결과물(result.tar)이 이번 학습의 입력 어댑터가 되고,
+         * 결과 버전이 하나 올라간다(v1 → v2 → v3). 따로 올릴 파일이 없다.
+         */
+        Long parentJobId
 ) {
 }

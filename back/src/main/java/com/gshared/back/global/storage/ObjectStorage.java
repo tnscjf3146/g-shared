@@ -23,6 +23,12 @@ public interface ObjectStorage {
     Optional<ObjectStat> stat(String objectKey);
 
     /**
+     * 크기만. {@link #stat} 은 해시를 위해 파일을 끝까지 읽으므로, 크기 상한을 먼저 볼 때는 이걸 쓴다 —
+     * 상한을 넘는 파일을 통째로 해시한 뒤에 거절하면 그 I/O 가 그대로 낭비다. 없으면 empty.
+     */
+    Optional<Long> size(String objectKey);
+
+    /**
      * 오브젝트 봉인 — 이후 같은 키로의 업로드(write)를 거부한다. 멱등.
      * 완료 검증(§18)이 끝난 파일을, 아직 살아 있는 업로드 서명 URL(TTL 1h)로
      * 바꿔치기하는 것을 막는다: 검증된 해시(온체인 기록)와 실제 파일이 계속 같게.
@@ -31,6 +37,15 @@ public interface ObjectStorage {
 
     /** 오브젝트 삭제. 이미 없으면 아무 일도 하지 않는다 — cleanup 이 같은 키를 두 번 지워도 안전해야 한다. */
     void delete(String objectKey);
+
+    /**
+     * 오브젝트의 일부만 읽는다 (형식 검사용). tar 처럼 "헤더만 띄엄띄엄 읽으면 목록을 알 수 있는" 파일을
+     * 통째로 메모리에 올리지 않고 훑기 위한 것이다 — S3 에서는 Range 헤더 한 번에 대응된다.
+     *
+     * @return 실제로 읽은 바이트. 파일이 없으면 empty, offset 이 파일 끝을 넘으면 빈 배열.
+     *         파일 끝에 걸리면 요청한 length 보다 짧을 수 있다.
+     */
+    Optional<byte[]> readRange(String objectKey, long offset, int length);
 
     record SignedUrl(String url, Instant expiresAt) {
     }

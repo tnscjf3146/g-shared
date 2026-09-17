@@ -9,14 +9,18 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -89,6 +93,20 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public Optional<Long> size(String objectKey) {
+        Path file = resolve(objectKey);
+        if (!Files.isRegularFile(file)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Files.size(file));
+        } catch (IOException e) {
+            log.error("[Storage] size 실패 key={}", objectKey, e);
+            throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    @Override
     public void seal(String objectKey) {
         Path file = resolve(objectKey);
         try {
@@ -116,6 +134,28 @@ public class LocalObjectStorage implements ObjectStorage {
             }
         } catch (IOException e) {
             log.error("[Storage] delete 실패 key={}", objectKey, e);
+            throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    @Override
+    public Optional<byte[]> readRange(String objectKey, long offset, int length) {
+        Path file = resolve(objectKey);
+        if (!Files.isRegularFile(file)) {
+            return Optional.empty();
+        }
+        try (SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ)) {
+            if (offset >= channel.size()) {
+                return Optional.of(new byte[0]);
+            }
+            channel.position(offset);
+            ByteBuffer buffer = ByteBuffer.allocate((int) Math.min(length, channel.size() - offset));
+            while (buffer.hasRemaining() && channel.read(buffer) != -1) {
+                // 짧은 읽기(short read)를 대비해 버퍼가 찰 때까지 반복한다
+            }
+            return Optional.of(Arrays.copyOf(buffer.array(), buffer.position()));
+        } catch (IOException e) {
+            log.error("[Storage] readRange 실패 key={} offset={}", objectKey, offset, e);
             throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
         }
     }

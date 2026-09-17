@@ -1,11 +1,15 @@
 package com.gshared.back.job.controller;
 
 import com.gshared.back.global.security.userdetails.CustomUserDetails;
+import com.gshared.back.job.dto.request.AdapterUploadCompleteRequest;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.request.DatasetUploadCompleteRequest;
 import com.gshared.back.job.dto.request.EstimateJobRequest;
 import com.gshared.back.job.dto.request.FundJobRequest;
 import com.gshared.back.job.dto.request.JobSpecRequest;
+import com.gshared.back.job.dto.request.RenameAdapterRequest;
+import com.gshared.back.job.dto.response.AdapterUploadCompleteResponse;
+import com.gshared.back.job.dto.response.AdapterUploadResponse;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.dto.response.DatasetUploadCompleteResponse;
 import com.gshared.back.job.dto.response.DatasetUploadResponse;
@@ -15,6 +19,7 @@ import com.gshared.back.job.dto.response.FundJobResponse;
 import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.dto.response.JobDetailResponse;
 import com.gshared.back.job.dto.response.JobPageResponse;
+import com.gshared.back.job.service.JobAdapterService;
 import com.gshared.back.job.service.JobDatasetService;
 import com.gshared.back.job.service.JobEstimateService;
 import com.gshared.back.job.service.JobService;
@@ -38,6 +43,7 @@ public class JobController {
     private final JobService jobService;
     private final JobEstimateService jobEstimateService;
     private final JobDatasetService jobDatasetService;
+    private final JobAdapterService jobAdapterService;
 
     @PostMapping
     public ResponseEntity<CreateJobResponse> create(
@@ -113,6 +119,45 @@ public class JobController {
     ) {
         return ResponseEntity.ok(jobDatasetService.completeUpload(userDetails.getId(), jobId,
                 request != null ? request : DatasetUploadCompleteRequest.EMPTY));
+    }
+
+    /**
+     * 입력 어댑터(.tar)를 올릴 서명 URL 발급. 데이터셋과 같은 흐름·같은 조건(본인·CREATED)이고,
+     * 주문 때 어댑터를 쓰겠다고 한 Job 만 받는다. "이어서 학습"은 부모 결과물을 쓰므로 여기를 지나지 않는다.
+     */
+    @PostMapping("/{jobId}/adapter-upload")
+    public ResponseEntity<AdapterUploadResponse> createAdapterUpload(
+            @PathVariable Long jobId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobAdapterService.createUpload(userDetails.getId(), jobId));
+    }
+
+    /**
+     * 어댑터 업로드가 끝났다는 알림. Backend 가 실제 오브젝트의 크기·해시와 tar 형식을 확인한 뒤에야 verified 이고,
+     * 그래야 /fund 가 열린다. 본문은 선택 — 보내면 그 신고값과도 대조한다.
+     */
+    @PostMapping("/{jobId}/adapter-upload/complete")
+    public ResponseEntity<AdapterUploadCompleteResponse> completeAdapterUpload(
+            @PathVariable Long jobId,
+            @Valid @RequestBody(required = false) AdapterUploadCompleteRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobAdapterService.completeUpload(userDetails.getId(), jobId,
+                request != null ? request : AdapterUploadCompleteRequest.EMPTY));
+    }
+
+    /**
+     * 결과 어댑터 이름 변경. 이름은 내려받을 파일 이름이라 결과를 받기 직전에 고치는 일이 잦다 —
+     * 파일도 계보도 건드리지 않으므로 상태 제한을 두지 않는다.
+     */
+    @PatchMapping("/{jobId}/adapter-name")
+    public ResponseEntity<JobDetailResponse> renameAdapter(
+            @PathVariable Long jobId,
+            @Valid @RequestBody RenameAdapterRequest request,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobService.renameAdapter(userDetails.getId(), jobId, request.adapterName()));
     }
 
     /**
