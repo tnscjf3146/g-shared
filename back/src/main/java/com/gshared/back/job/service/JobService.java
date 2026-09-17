@@ -571,20 +571,30 @@ public class JobService {
      * <p>이것을 받지 않으면 Job 은 CANCELLING 에 영원히 남는다 — 컨테이너는 죽었고 예치금은
      * 돌아갔는데 기록만 취소 중인 상태.
      *
-     * TODO: 환불(블록체인) 트리거 — abortJob() 이 환불까지 하므로 Backend 는 흔적만 남기면 될 수 있음. BC 담당과 확인
+     * <p><b>환불이 체인에서 확인되지 않으면 종료하지 않는다.</b> abortTxHash 가 없거나(워커가
+     * 환불 전에 죽음) 체인이 CANCELLED 가 아니면, FAILED 로 닫는 순간 keeper·reconciler 의
+     * 순찰 대상에서 빠져 예치금이 잠긴 채 잊힌다. 대신 CANCELLING 으로 남겨 keeper 가 시한
+     * 만료 후 settleTimeout 으로 환불하게 한다. 돈이 잠긴 한 문을 닫지 않는다.
      */
     @Transactional
     public boolean failJob(String workerId, Long jobId, String code, String message,
                            String abortTxHash, Double actualRuntimeSec) {
-        // 실패 보고에는 abortJob 이 따라온다 -- 예치금이 돌아갔다는 주장이다.
-        // 체인이 CANCELLED 가 아니라고 말하면 그 주장은 거짓이고, Job 을 종료
-        // 상태로 확정하면 고객의 돈이 묶인 채로 기록만 끝난다.
-        if (abortTxHash != null && chainContradictsCancellation(jobId, workerId)) {
-            return false;
-        }
-
         LocalDateTime now = LocalDateTime.now();
         String reason = failReason(code, message);
+
+        if (!refundConfirmedOnChain(jobId)) {
+            // 예치금이 아직 잠겨 있(을 수 있)다 → 종료 대신 CANCELLING 으로 순찰에 태운다.
+            // 이미 CANCELLING 이었으면(취소 요청 중 실패) 0행 — 그대로 순찰에 남아 있으니 충분하다.
+            int held = jobRepository.failToCancellingIfRunning(jobId, workerId, reason, abortTxHash,
+                    actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
+            if (held > 0) {
+                log.warn("[JOB] 실패 보고, 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+                workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+            }
+            return held > 0;
+        }
+
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
         if (updated == 0) {
             updated = jobRepository.cancelIfFailedWhileCancelling(
@@ -656,6 +666,20 @@ public class JobService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 예치금이 의뢰자에게 돌아갔다고 확인됐는가. 에스크로에 묶인 적 없는 Job(체인 없는 모드)은
+     * 돌려줄 돈이 없으므로 true. CONFIRMED(체인 CANCELLED)만 true — UNKNOWN(노드 미응답)과
+     * CONTRADICTED(아직 잠김)는 모두 "확인 안 됨"이다. 모르는 돈은 잠긴 돈으로 취급한다.
+     */
+    private boolean refundConfirmedOnChain(Long jobId) {
+        Job current = jobRepository.findById(jobId).orElse(null);
+        if (current == null || current.getEscrowJobId() == null) {
+            return true;
+        }
+        return escrow.cancelledOnChain(current.getEscrowContractAddress(), current.getEscrowJobId())
+                .isConfirmed();
     }
 
     /** 이 워커의 operator 주소. 없으면 null -- 온체인 대조에서 건너뛴다. */

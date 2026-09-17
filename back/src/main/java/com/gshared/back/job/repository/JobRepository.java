@@ -281,6 +281,34 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                       @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
     /**
+     * JOB_FAILED 인데 <b>환불이 체인에서 확인되지 않은</b> 경우: RUNNING → <b>CANCELLING</b>.
+     *
+     * <p>FAILED 로 확정하지 않는 이유: FAILED 는 종료 상태라 keeper·reconciler 의 순찰
+     * 대상({@link #findOpenOnChain})에서 빠진다 — 예치금이 체인에 잠긴 채 아무도 다시 안 본다.
+     * CANCELLING 으로 두면 keeper 가 시한 만료 후 settleTimeout 으로 환불을 실행하고,
+     * reconciler 가 체인 CANCELLED 를 확인해 DB 를 마무리한다. 돈이 잠긴 한 문을 닫지 않는다.
+     *
+     * <p>finishedAt 을 찍지 않는다 — 아직 끝난 게 아니다. 실패 사유는 failReason 에 남겨
+     * 화면이 "실패(환불 처리 중)" 로 구분할 수 있게 한다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.failReason = :failReason,
+                   j.abortTxHash = :abortTxHash,
+                   j.actualRuntimeSec = :actualRuntimeSec,
+                   j.reconciliationReason = :reconciliationReason
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status = com.gshared.back.job.domain.JobStatus.RUNNING
+            """)
+    int failToCancellingIfRunning(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                                  @Param("failReason") String failReason, @Param("abortTxHash") String abortTxHash,
+                                  @Param("actualRuntimeSec") Double actualRuntimeSec,
+                                  @Param("reconciliationReason") String reconciliationReason);
+
+    /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
      * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.
      * 트랜잭션 경계는 서비스 계층(JobService.assignJob)에서 관리.
