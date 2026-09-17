@@ -29,6 +29,8 @@ from ..status_events import (
     JobChanged,
     JobEnd,
     JobEnded,
+    JobPhase,
+    JobPhaseChanged,
     JobStage,
     Said,
     StageChanged,
@@ -89,6 +91,21 @@ _ENDED_LINE = {
     JobEnd.FAILED: "작업 실행에 실패했습니다.",
     JobEnd.CANCELLED: "작업이 취소되었습니다.",
 }
+
+#: What the job row says in each phase.
+_PHASE_LABEL = {
+    JobPhase.CONTEXT: "실행 정보를 확인하는 중",
+    JobPhase.MODEL: "모델을 준비하는 중",
+    JobPhase.DATASET: "데이터셋을 내려받는 중",
+    JobPhase.ADAPTER: "어댑터를 내려받는 중",
+    JobPhase.IMAGE: "실행 이미지를 확인하는 중",
+    JobPhase.TRAINING: "학습 진행 중",
+    JobPhase.SETTLING: "결과를 올리고 정산하는 중",
+}
+
+#: Phases before the GPU is training. The headline says "작업 준비 중" for these.
+_PREPARING = frozenset({JobPhase.CONTEXT, JobPhase.MODEL, JobPhase.DATASET,
+                        JobPhase.ADAPTER, JobPhase.IMAGE})
 
 _ENDED_SHORT = {
     JobEnd.COMPLETED: "완료",
@@ -174,6 +191,8 @@ class StatusPresenter:
         self._clock = clock or (lambda: time.strftime("%H:%M:%S"))
         self.stage = WorkerStage.STARTING
         self.job = JobChanged(None, JobStage.IDLE)
+        #: The latest phase of the Job in hand. None before the pipeline says.
+        self.job_phase: JobPhaseChanged | None = None
         self.last_end: JobEnded | None = None
         self.gpu: GpuDescribed | None = None
         self.worker_id: str | None = None
@@ -197,14 +216,44 @@ class StatusPresenter:
             self.worker_id = event.worker_id
         elif isinstance(event, JobChanged):
             self.job = event
+            if self.job_phase is not None and event.job_id != self.job_phase.job_id:
+                # The slot emptied or holds another Job: the phase was the old one's.
+                self.job_phase = None
+        elif isinstance(event, JobPhaseChanged):
+            self._enter_phase(event)
         elif isinstance(event, JobEnded):
             self.last_end = event
             self.job = JobChanged(None, JobStage.IDLE)
+            self.job_phase = None
             self._line(_ENDED_LINE[event.end])
         elif isinstance(event, FailureToShow):
             self.failure = redact(event.text)
         elif isinstance(event, WorkerFinished):
             self.exit_code = int(event.exit_code)
+
+    def _enter_phase(self, event: JobPhaseChanged) -> None:
+        """Record the phase, and say it once when it is new."""
+        previous = self.job_phase
+        self.job_phase = event
+        if (previous is not None and previous.job_id == event.job_id
+                and previous.phase is event.phase):
+            return
+        name = f"작업 {shorten(event.job_id, 8, 4)}"
+        if event.phase is JobPhase.MODEL and event.cached is False:
+            self._line(f"{name}: 모델을 처음 내려받는 중입니다. "
+                       "이 PC에서 처음 쓰는 모델이면 몇 분 걸릴 수 있습니다.")
+        elif event.phase is JobPhase.IMAGE:
+            self._line(f"{name}: 실행 이미지를 확인하는 중입니다. "
+                       "처음이면 내려받는 데 시간이 걸릴 수 있습니다.")
+        else:
+            self._line(f"{name}: {_PHASE_LABEL[event.phase]}...")
+
+    def _phase_of_job(self) -> JobPhase | None:
+        """The phase, only when it belongs to the Job the slot holds."""
+        phase = self.job_phase
+        if phase is None or self.job.job_id is None or phase.job_id != self.job.job_id:
+            return None
+        return phase.phase
 
     def _line(self, text: str) -> None:
         text = redact(text).strip()
@@ -245,6 +294,9 @@ class StatusPresenter:
             return Display.STOPPING
         if self.stage in (WorkerStage.CONNECTED, WorkerStage.RECONNECTING) and self.job_busy:
             if self.job.stage is JobStage.ACCEPTING:
+                return Display.JOB_ASSIGNED
+            if (self.job.stage is JobStage.WORKING
+                    and self._phase_of_job() in _PREPARING):
                 return Display.JOB_ASSIGNED
             return Display.RUNNING
         if self.stage is WorkerStage.CONNECTED:
@@ -294,12 +346,17 @@ class StatusPresenter:
             return f"{name} · 작업을 준비하고 있습니다"
         if job.stage is JobStage.CANCELLING:
             return f"{name} · 취소하는 중"
+        phase = self._phase_of_job()
+        if phase is not None:
+            return f"{name} · {_PHASE_LABEL[phase]}"
         return f"{name} · 학습 진행 중"
 
     def _progress_text(self) -> str:
-        if self.job.stage is JobStage.WORKING and self.job.percent is not None:
-            return f"{self.job.percent:.0f}%"
-        return "—"
+        if self.job.stage is not JobStage.WORKING or self.job.percent is None:
+            return "—"
+        if self._phase_of_job() not in (None, JobPhase.TRAINING, JobPhase.SETTLING):
+            return "—"
+        return f"{self.job.percent:.0f}%"
 
     def _button_text(self) -> str:
         if self.finished:

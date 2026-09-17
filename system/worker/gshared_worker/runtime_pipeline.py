@@ -60,6 +60,8 @@ from .job_runtime import (
 from .job_workspace import JobWorkspace, ModelCache, UnsafePath, to_distro_path
 from .logging_setup import LOGGER_NAME
 from .model_prep import ModelRefused, prepare_model
+from . import status_events
+from .status_events import JobPhase, JobPhaseChanged
 from .runtime_image import (
     ImageRefused,
     check_image,
@@ -147,6 +149,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
         if _stop_now(terminal):
             return _cancelled_before_starting("before the execution context")
         # -- what to run ------------------------------------------------
+        _announce(job, JobPhase.CONTEXT)
         try:
             body = fetch_execution_context(
                 self._client, self._token, job.job_id, sleep=self._sleep)
@@ -181,6 +184,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
             return _cancelled_before_starting("before preparing the model")
 
         # -- the weights ------------------------------------------------
+        _announce(job, JobPhase.MODEL, cached=self._model_cached(context))
         try:
             model = await prepare_model(
                 self._runner, self._cache, image.reference,
@@ -194,6 +198,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
             return _cancelled_before_starting("before fetching the dataset")
 
         # -- the data ---------------------------------------------------
+        _announce(job, JobPhase.DATASET)
         try:
             workspace = JobWorkspace.under(
                 self._settings.workspace_root, job.job_id).prepare()
@@ -218,6 +223,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
         if context.adapter is not None:
             if _stop_now(terminal):
                 return _cancelled_before_starting("before fetching the adapter")
+            _announce(job, JobPhase.ADAPTER)
             try:
                 fetch_adapter(
                     context.adapter.download_url,
@@ -237,6 +243,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
             return _cancelled_before_starting("before pulling the image")
 
         # -- the image, actually here -----------------------------------
+        _announce(job, JobPhase.IMAGE)
         pulled = await self._pull(image)
         if pulled is not None:
             return pulled
@@ -250,6 +257,7 @@ ProgressTracker` when somebody is watching. It is handed the container's
             return _cancelled_before_starting("before starting the container")
 
         _debug.debug("runtime: %s ready, starting training", job.job_id)
+        _announce(job, JobPhase.TRAINING)
         generation = getattr(terminal, "generation", 0)
         return await run_training(
             self._runner, image.reference, workspace, model.path,
@@ -260,6 +268,15 @@ ProgressTracker` when somebody is watching. It is handed the container's
             if terminal is not None else None,
             on_started=_remember(terminal, job.job_id, generation),
             adapter=context.adapter is not None)
+
+    def _model_cached(self, context: Any) -> bool | None:
+        """Whether the weights are already here. None when it cannot be told."""
+        try:
+            return self._cache.is_complete(
+                context.model.model_ref, context.model.model_revision)
+        except (UnsafePath, OSError, ValueError):
+            # prepare_model reports a bad reference properly a moment later.
+            return None
 
     async def _pull(self, image: Any) -> RuntimeOutcome | None:
         """Fetch by digest and confirm what landed. None means it is ready.
@@ -303,6 +320,11 @@ ProgressTracker` when somebody is watching. It is handed the container's
 def _failed(failure: RuntimeFailure, detail: str) -> RuntimeOutcome:
     _debug.warning("runtime: %s -- %s", failure.value, detail)
     return RuntimeOutcome(RuntimeState.FAILED, failure, detail)
+
+
+def _announce(job: Any, phase: JobPhase, *, cached: bool | None = None) -> None:
+    """Tell a watcher which phase this Job has reached. A value, never a widget."""
+    status_events.publish(JobPhaseChanged(job.job_id, phase, cached))
 
 
 def _stop_now(terminal: Any) -> bool:

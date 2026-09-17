@@ -81,6 +81,24 @@ class JobStage(Enum):
     CANCELLING = "CANCELLING"
 
 
+class JobPhase(Enum):
+    """Where an accepted Job is, from the pipeline's own point of view.
+
+    Published by the runtime pipeline and the settlement as each phase
+    begins. Before training starts there are minutes of work nobody sees --
+    fetching weights the first time is most of a short Job -- and a window
+    that says "training" through all of it reads as stuck.
+    """
+
+    CONTEXT = "CONTEXT"
+    MODEL = "MODEL"
+    DATASET = "DATASET"
+    ADAPTER = "ADAPTER"
+    IMAGE = "IMAGE"
+    TRAINING = "TRAINING"
+    SETTLING = "SETTLING"
+
+
 class JobEnd(Enum):
     """How a Job ended, once the Backend has been told."""
 
@@ -122,6 +140,17 @@ class JobChanged:
     stage: JobStage
     #: 0-100, only while training and only from a real progress event.
     percent: float | None = None
+
+
+@dataclass(frozen=True)
+class JobPhaseChanged:
+    """An accepted Job moved on to its next phase."""
+
+    job_id: str
+    phase: JobPhase
+    #: Only for MODEL: False when the weights are not on this machine yet and
+    #: have to be downloaded, which is the slow case worth saying out loud.
+    cached: bool | None = None
 
 
 @dataclass(frozen=True)
