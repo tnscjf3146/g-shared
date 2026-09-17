@@ -239,6 +239,12 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             ['종료', job.finishedAt ? formatDateTime(job.finishedAt) : dash],
           ]}
         />
+        {job.finishedAt == null && (
+          <p className="text-[12px] text-text-muted">
+            예상 소요는 순수 학습 시간입니다. 매칭 대기와 워커의 실행 환경 준비(이미지·데이터 다운로드)는 포함되지 않아, 특히 첫 실행은 10분 이상 더 걸릴
+            수 있어요.
+          </p>
+        )}
       </section>
 
       {job.status === 'COMPLETED' && (job.resultUrl || job.resultHash) && (
