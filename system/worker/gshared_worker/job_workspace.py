@@ -47,6 +47,11 @@ COMPLETE_MARKER = ".gshared-complete"
 #: The file name the container's contract expects under /job/input.
 DATASET_FILE_NAME = "dataset.jsonl"
 
+#: Where an initial adapter is unpacked, under /job/input, and the archive it
+#: arrives as, which is kept out of the mounted input while it is checked.
+ADAPTER_DIR_NAME = "adapter"
+ADAPTER_ARCHIVE_NAME = "adapter.tar"
+
 
 class UnsafePath(ValueError):
     """An identifier that will not be turned into a path."""
@@ -108,6 +113,16 @@ class JobWorkspace:
     @property
     def dataset_path(self) -> Path:
         return self.input_dir / DATASET_FILE_NAME
+
+    @property
+    def adapter_dir(self) -> Path:
+        """The unpacked initial adapter. Inside the input, so it is mounted read-only."""
+        return self.input_dir / ADAPTER_DIR_NAME
+
+    @property
+    def adapter_archive_path(self) -> Path:
+        """The downloaded archive, outside the mounted input until it is unpacked."""
+        return self.metadata_dir / ADAPTER_ARCHIVE_NAME
 
     def prepare(self) -> "JobWorkspace":
         """Make the directories, empty of anything an earlier attempt left.

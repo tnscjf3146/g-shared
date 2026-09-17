@@ -33,7 +33,9 @@ python -m qlora_sft \
   --epochs 1 --batch-size 16 --learning-rate 0.0002 --max-length 512
 ```
 
-선택: `--seed` (기본 20260910), `--gradient-accumulation-steps`, `--gradient-checkpointing`.
+선택: `--seed` (기본 20260910), `--gradient-accumulation-steps`, `--gradient-checkpointing`, `--adapter-path`.
+
+**`--adapter-path`** — 이어서 학습할 LoRA Adapter 디렉터리(`adapter_config.json` + `adapter_model.safetensors`). 주면 새 LoRA를 만들지 않고 그 Adapter를 `PeftModel.from_pretrained(..., is_trainable=True)`로 올려 **그 rank·target 그대로** 학습을 이어 간다. 없으면 기존처럼 새로 초기화한다. Worker는 `/job/input/adapter`에 풀어 넘긴다.
 
 **Runtime은 SPEED/BALANCED 같은 이름을 모른다.** numeric config만 받는다. 모드 → 숫자 변환은 AI Scheduler의 일이다.
 
@@ -44,7 +46,7 @@ python -m qlora_sft \
 | 경로 | 모드 | 비고 |
 |---|---|---|
 | `/job/model` | read-only | Base model weight. 이미지에 포함되지 않는다 |
-| `/job/input` | read-only | `dataset.jsonl` |
+| `/job/input` | read-only | `dataset.jsonl`, 선택 `adapter/` (이어 학습할 Adapter) |
 | `/job/output` | writable | Adapter + metrics |
 | `/job/cache` | writable 또는 tmpfs | HF·Triton·Inductor cache |
 | `/tmp` | tmpfs | Trainer 임시 디렉터리 |
@@ -85,6 +87,21 @@ PEFT가 남기는 `README.md` model card는 지운다 — 고객이 받을 물�
 
 매 Job은 **자기 결과물을 스스로 검증한다**: 저장 후 모델을 내리고 `PeftModel.from_pretrained`로 다시 올려 본다. 실패하면 non-zero로 끝난다.
 
+`training_metrics.json`의 **`initAdapter`** 는 시작점이다. 새로 초기화했으면 `null`, `--adapter-path`로 이어 학습했으면 실제로 읽은 파일의 `weightsSha256`·`configSha256`과 `r`·`loraAlpha`·`targetModules`. 결과만 보고 어떤 Adapter에서 출발했는지 확인할 수 있다.
+
+### 이어 학습할 Adapter 검사
+
+GPU를 쓰기 전에 host Python으로 확인한다(`qlora_sft/adapter.py`). 하나라도 어긋나면 `INVALID_INPUT`.
+
+| 규칙 | |
+|---|---|
+| 필수 파일 | `adapter_config.json`, 비어 있지 않은 `adapter_model.safetensors` |
+| config | JSON 객체, `peft_type == "LORA"`, `task_type`이 있으면 `CAUSAL_LM`, 양의 정수 `r`, `target_modules` 있음 |
+| 거부 | base model weight(`model.safetensors` 등), pickle(`adapter_model.bin`·`.pt`) |
+| Base model 호환 | shape·target이 이 모델에 안 맞으면 PEFT 로드에서 실패 → `INVALID_INPUT` |
+
+`base_model_name_or_path`는 비교하지 않는다 — 이 컨테이너가 쓴 Adapter는 항상 `/job/model`로 기록돼 어떤 weight였는지 말해 주지 않는다.
+
 ### stdout
 
 ```
@@ -104,7 +121,7 @@ marker가 붙는 이유: stdout은 공유된다. transformers는 진행 막대�
 | | 코드 | |
 |---|---|---|
 | `OK` | 0 | Adapter를 썼다 |
-| `INVALID_INPUT` | 10 | Dataset/config가 읽히지 않음 |
+| `INVALID_INPUT` | 10 | Dataset/config가 읽히지 않음, 또는 이어 학습할 Adapter가 규칙에 안 맞거나 이 모델에 안 맞음 |
 | `MODEL_LOAD_FAILED` | 11 | 지원하지 않는 모델이거나 weight 로드 실패 |
 | `CUDA_UNAVAILABLE` | 12 | 쓸 수 있는 NVIDIA GPU 없음 |
 | `CUDA_OOM` | 13 | VRAM 부족 |
