@@ -30,16 +30,26 @@ a way that looks like a network problem.
 
 ========== ==========================================================================
 repository ``le3560/gshared-qlora-sft-runtime``
-tag        ``0.2.0`` (for people; never used to pull)
-digest     ``sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d``
-reference  ``le3560/gshared-qlora-sft-runtime@sha256:acda63bc…126d``
+tag        ``0.3.0`` (for people; never used to pull)
+digest     ``sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170``
+reference  ``le3560/gshared-qlora-sft-runtime@sha256:e32bd1c1…e170``
 ========== ==========================================================================
 
-The digest was read from Docker Hub after the push, and this image ran the
-Qwen3-0.6B QLoRA job end to end on an RTX 4070 Laptop GPU through the Worker.
-The Backend's ``workloads`` catalog must carry exactly this repository and
-digest; its seed value ``gshared/qlora-sft-runtime@sha256:0000…0000`` is an
-invalid placeholder and is refused.
+0.3.0 is 0.2.0 plus ``--adapter-path``: a Job can continue training from a
+LoRA adapter it brought. The digest was read from Docker Hub after the push,
+and on an RTX 4070 Laptop GPU the image trained Qwen3-0.6B both ways -- fresh
+(``initAdapter`` null, loss as 0.2.0) and from a finished Job's adapter (its
+weights hash recorded, loss 2.39 -> 0.91).
+
+**The previous runtime stays approved** (:data:`PREVIOUS_RUNTIME_DIGEST`). The
+Backend's ``workloads`` catalog names 0.2.0 until its migration lands, and a
+Worker that refused it in the meantime would refuse every Job. It can run
+everything it ran before -- it just cannot continue from an adapter, which
+:func:`supports_adapter` says. Remove it once the catalog carries 0.3.0.
+
+The Backend's catalog must carry exactly the canonical repository and digest;
+its seed value ``gshared/qlora-sft-runtime@sha256:0000…0000`` is an invalid
+placeholder and is refused.
 """
 
 from __future__ import annotations
@@ -54,10 +64,16 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 CANONICAL_RUNTIME_REPOSITORY = "le3560/gshared-qlora-sft-runtime"
 
 #: The human name of that image. Documentation only: pulls are by digest.
-CANONICAL_RUNTIME_TAG = "0.2.0"
+CANONICAL_RUNTIME_TAG = "0.3.0"
 
 #: The exact image the Worker was verified with, read from the registry.
 CANONICAL_RUNTIME_DIGEST = (
+    "sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170")
+
+#: Runtime 0.2.0 -- verified end to end before 0.3.0 and still what the
+#: Backend's catalog names until its migration. Approved, not canonical.
+PREVIOUS_RUNTIME_TAG = "0.2.0"
+PREVIOUS_RUNTIME_DIGEST = (
     "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d")
 
 #: What the Backend's execution context should carry as ``imageRef``.
@@ -77,8 +93,14 @@ APPROVED_REPOSITORIES: tuple[str, ...] = (
     CANONICAL_RUNTIME_REPOSITORY,
 )
 
-#: The images this machine will run, by content. Only the canonical runtime.
-APPROVED_DIGESTS: tuple[str, ...] = (CANONICAL_RUNTIME_DIGEST,)
+#: The images this machine will run, by content: the canonical runtime and,
+#: until the Backend's catalog moves to it, the one before.
+APPROVED_DIGESTS: tuple[str, ...] = (CANONICAL_RUNTIME_DIGEST, PREVIOUS_RUNTIME_DIGEST)
+
+#: The approved runtimes that understand ``--adapter-path``. 0.2.0 does not:
+#: handed the flag, its argument parser exits 2 before loading anything, which
+#: the Worker would only see as an unknown exit code after pulling gigabytes.
+ADAPTER_CAPABLE_DIGESTS: tuple[str, ...] = (CANONICAL_RUNTIME_DIGEST,)
 
 #: The placeholder in the Backend's catalog seed. Named so the refusal can say
 #: what it actually is instead of "pull failed".
@@ -160,6 +182,11 @@ def check_image(
             f"runs {CANONICAL_RUNTIME_REFERENCE}")
 
     return RuntimeImage(repository=repository, digest=wanted)
+
+
+def supports_adapter(image: RuntimeImage) -> bool:
+    """Whether this runtime can continue training from an initial adapter."""
+    return image.digest in ADAPTER_CAPABLE_DIGESTS
 
 
 def pull_command(image: RuntimeImage) -> list[str]:

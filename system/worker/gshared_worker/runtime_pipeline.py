@@ -66,6 +66,7 @@ from .runtime_image import (
     check_pulled,
     inspect_command,
     pull_command,
+    supports_adapter,
 )
 
 _debug = logging.getLogger(LOGGER_NAME)
@@ -165,6 +166,16 @@ ProgressTracker` when somebody is watching. It is handed the container's
             image = check_image(context.image.image_ref, context.image.digest)
         except ImageRefused as refused:
             return _failed(RuntimeFailure.IMAGE_REFUSED, str(refused))
+
+        if context.adapter is not None and not supports_adapter(image):
+            # An approved runtime that predates --adapter-path. Said now,
+            # before the weights and the dataset are fetched for a run that
+            # could only ever train from scratch -- which is not what the
+            # customer asked for.
+            return _failed(
+                RuntimeFailure.ADAPTER_UNAVAILABLE,
+                "the runtime image this Job names cannot continue training "
+                "from an adapter")
 
         if _stop_now(terminal):
             return _cancelled_before_starting("before preparing the model")
