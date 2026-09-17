@@ -4,6 +4,8 @@ import {
   CATALOG_PATHS,
   DATASETS_PATH,
   JOBS_PATH,
+  adapterUploadCompleteSchema,
+  adapterUploadSchema,
   baseModelSchema,
   createJobResponseSchema,
   datasetUploadCompleteSchema,
@@ -15,6 +17,7 @@ import {
   fundResponseSchema,
   jobDetailSchema,
   jobPageSchema,
+  renameAdapterRequestSchema,
   workloadSchema,
 } from './schema'
 import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus } from './types'
@@ -41,6 +44,12 @@ export async function getJob(jobId: number): Promise<JobDetail> {
 /** POST /jobs — 서버가 Scheduler 로 GPU·견적을 다시 계산해 201. 409 NO_AVAILABLE_WORKER(기다리면 됨) / 422 NO_FEASIBLE_GPU(설정 바꿔야) 구분 */
 export async function createJob(body: CreateJobRequest): Promise<CreateJobResponse> {
   return createJobResponseSchema.parse(await post(JOBS_PATH, body))
+}
+
+/** PATCH /jobs/{jobId}/adapter-name — 결과 어댑터 이름만 바꾼다(다운로드 파일 이름). 결과 파일 자체는 건드리지 않아 상태와 무관하게 언제든 가능 */
+export async function renameAdapter(jobId: number, adapterName: string): Promise<JobDetail> {
+  const body = renameAdapterRequestSchema.parse({ adapterName })
+  return jobDetailSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/adapter-name`, { method: 'PATCH', headers: JSON_HEADERS, body: JSON.stringify(body) }))
 }
 
 /** POST /jobs/{id}/cancel — CREATED/FUNDED/ASSIGNED 만, 아니면 409 INVALID_JOB_STATUS */
@@ -90,14 +99,27 @@ export async function requestDatasetUpload(jobId: number): Promise<string> {
   return res.uploadUrl
 }
 
-/** 서명 URL 에 원본 파일 PUT — 서명이 곧 인증이라 Authorization 없이 원본 fetch. 실패는 상태코드로만 판단 */
-export async function uploadDatasetFile(uploadUrl: string, file: File): Promise<void> {
+/** 서명 URL 에 원본 파일 PUT — 서명이 곧 인증이라 Authorization 없이 원본 fetch. 데이터셋·어댑터가 같이 쓴다. 실패는 상태코드로만 판단 */
+export async function uploadSignedFile(uploadUrl: string, file: File): Promise<void> {
   const res = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file })
-  if (!res.ok) throw new ApiError(res.status, 'UPLOAD_FAILED', '데이터셋 업로드에 실패했습니다.')
+  if (!res.ok) throw new ApiError(res.status, 'UPLOAD_FAILED', '파일 업로드에 실패했습니다.')
 }
 
 /** POST /jobs/{jobId}/dataset-upload/complete → verified. false 면 Job 진행(예치)을 중단해야 한다 */
 export async function completeDatasetUpload(jobId: number): Promise<boolean> {
   const res = datasetUploadCompleteSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/dataset-upload/complete`, { method: 'POST' }))
+  return res.verified
+}
+
+/** POST /jobs/{jobId}/adapter-upload → 서명 uploadUrl. 입력 어댑터 .tar 용(데이터셋과 같은 흐름) */
+export async function requestAdapterUpload(jobId: number): Promise<string> {
+  const res = adapterUploadSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/adapter-upload`, { method: 'POST' }))
+  return res.uploadUrl
+}
+
+/** POST /jobs/{jobId}/adapter-upload/complete { sha256, sizeBytes } → verified.
+ *  sha256 은 0x 없는 소문자 64자 — 데이터셋 dataHash(0x 접두)와 표기가 다르다(lora-adapter-frontend-작업 §0) */
+export async function completeAdapterUpload(jobId: number, body: { sha256: string; sizeBytes: number }): Promise<boolean> {
+  const res = adapterUploadCompleteSchema.parse(await post(`${JOBS_PATH}/${jobId}/adapter-upload/complete`, body))
   return res.verified
 }
