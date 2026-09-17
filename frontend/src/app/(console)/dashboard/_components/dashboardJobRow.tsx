@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { JobDetailInline } from '@/features/jobs/components/jobDetailInline'
-import { CANCELLABLE_STATUSES, STATUS_META, formatDateTime } from '@/features/jobs/format'
+import { CANCELLABLE_STATUSES, formatDateTime, jobStatusMeta } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
 
 // 작업 카드 — 작업마다 카드 하나, 세로로 쌓인다.
@@ -19,7 +19,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
   }
   const panelId = `job-detail-${job.jobId}`
   // 끝난 상태 구분: 실패 = 빨간 틴트 배경, 완료·취소됨 = 어두운 회색 배경(가라앉은 느낌)
-  const failed = job.status === 'FAILED'
+  const failed = jobStatusMeta(job.status, job.failReason).tone === 'danger'
   const done = job.status === 'COMPLETED' || job.status === 'CANCELLED'
   const rowBg = failed ? 'var(--color-danger-tint)' : done ? 'color-mix(in srgb, var(--color-hairline-strong) 45%, var(--color-surface-2))' : undefined
   return (
@@ -46,7 +46,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
             <span className="tabular-nums">{index}.</span> {workloadName}
           </h3>
         </div>
-        <div className={`hidden text-[17px] font-medium md:block ${failed ? 'text-danger' : 'text-dark'}`}>{STATUS_META[job.status].label}</div>
+        <div className={`hidden text-[17px] font-medium md:block ${failed ? 'text-danger' : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason).label}</div>
         <div className="hidden md:block">
           <div className="text-[14px] text-text-muted">생성</div>
           <div className="text-[17px] font-medium tabular-nums text-dark">{formatDateTime(job.createdAt)}</div>

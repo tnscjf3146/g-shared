@@ -8,7 +8,7 @@ import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
-import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, STATUS_META, STATUS_SENTENCE, formatBytes, formatCost, formatDateTime, formatDuration } from '../format'
+import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
 import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
@@ -93,7 +93,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   }
 
   const { job } = state
-  const meta = STATUS_META[job.status]
+  const meta = jobStatusMeta(job.status, job.failReason)
   const name = {
     workload: catalog?.workloads.find((w) => w.id === job.workloadId)?.name ?? `#${job.workloadId}`,
     model: catalog?.baseModels.find((m) => m.id === job.baseModelId)?.name ?? `#${job.baseModelId}`,
@@ -168,7 +168,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
-        <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
+        <p className={`text-[16px] ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason)}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
         {job.status === 'CREATED' &&
           (job.datasetUploaded === false ? (
