@@ -1,5 +1,8 @@
-/** GLB 가 로드되어 첫 프레임을 그릴 수 있을 때 gpuModel 이 window 에 쏘는 이벤트. landingScene 은 이걸 기다려 인트로를 시작한다(Hero 가 없어 첫 화면이 곧 캔버스) */
+/** GLB 가 로드되고 셰이더까지 컴파일돼 첫 프레임을 멈춤 없이 그릴 수 있을 때 three/precompile.tsx 가 window 에 쏘는 이벤트.
+ *  gpuCanvas 는 이 신호까지 frameloop 을 끄고, landingScene 은 이 신호에 인트로를 시작한다(Hero 가 없어 첫 화면이 곧 캔버스) */
 export const GPU_READY_EVENT = 'gshared:gpu-ready'
+/** 신호가 안 오면(네트워크·디코더·컴파일 실패) 이 시간 뒤엔 그냥 진행한다 — 캔버스와 인트로가 같은 값을 써야 한쪽만 영영 멈추지 않는다 */
+export const GPU_READY_TIMEOUT_MS = 8000
 
 // anime.js 타임라인이 스크롤에 맞춰 이 숫자들을 움직이고, r3f useFrame 이 매 프레임 읽는다.
 // (React state 를 거치지 않는 단일 공유 상태 — 리렌더 0)
