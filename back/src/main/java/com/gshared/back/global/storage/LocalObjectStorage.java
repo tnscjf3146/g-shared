@@ -89,9 +89,24 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
+    public void seal(String objectKey) {
+        Path file = resolve(objectKey);
+        try {
+            Files.createDirectories(file.getParent());
+            if (!Files.exists(sealMarker(file))) {
+                Files.createFile(sealMarker(file));
+            }
+        } catch (IOException e) {
+            log.error("[Storage] seal 실패 key={}", objectKey, e);
+            throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
+        }
+    }
+
+    @Override
     public void delete(String objectKey) {
         Path file = resolve(objectKey);
         try {
+            Files.deleteIfExists(sealMarker(file));
             Files.deleteIfExists(file);
             // 비어 있는 상위 디렉터리(jobs/{id}/input)는 같이 정리 — Job 마다 빈 폴더가 쌓이지 않게. root 는 남긴다.
             Path dir = file.getParent();
@@ -137,11 +152,15 @@ public class LocalObjectStorage implements ObjectStorage {
      */
     public long write(String objectKey, InputStream body) {
         Path file = resolve(objectKey);
+        if (Files.exists(sealMarker(file))) {
+            // 완료 검증(§18)이 끝나 봉인된 오브젝트 — 살아 있는 서명 URL 로도 덮어쓸 수 없다 (바꿔치기 방어).
+            throw new BusinessException(StorageErrorCode.OBJECT_SEALED);
+        }
         try {
             Files.createDirectories(file.getParent());
             Path temp = Files.createTempFile(file.getParent(), ".upload-", ".part");
             try {
-                long size = Files.copy(body, temp, StandardCopyOption.REPLACE_EXISTING);
+                long size = copyLimited(body, temp);
                 Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 return size;
             } finally {
@@ -151,6 +170,31 @@ public class LocalObjectStorage implements ObjectStorage {
             log.error("[Storage] write 실패 key={}", objectKey, e);
             throw new BusinessException(StorageErrorCode.STORAGE_IO_FAILED);
         }
+    }
+
+    // ponytail: 전역 고정 상한 — 용량 정책이 파일 종류별로 갈리면 presign 에 크기를 서명으로 묶는 방식으로 승급
+    static final long MAX_UPLOAD_BYTES = 10L * 1024 * 1024 * 1024;   // 10 GiB
+
+    /** 상한을 넘는 스트림은 받다 말고 끊는다 — 유효한 서명 URL 하나로 디스크를 가득 채우는 것을 막는다. */
+    private static long copyLimited(InputStream body, Path temp) throws IOException {
+        try (var out = Files.newOutputStream(temp)) {
+            byte[] buffer = new byte[64 * 1024];
+            long total = 0;
+            int read;
+            while ((read = body.read(buffer)) != -1) {
+                total += read;
+                if (total > MAX_UPLOAD_BYTES) {
+                    throw new BusinessException(StorageErrorCode.OBJECT_TOO_LARGE);
+                }
+                out.write(buffer, 0, read);
+            }
+            return total;
+        }
+    }
+
+    /** 봉인 마커 파일 경로 — 오브젝트 옆에 같은 이름 + 접미사. objectKey 정규식상 이 접미사로 끝나는 키는 만들 수 없다. */
+    private static Path sealMarker(Path file) {
+        return file.resolveSibling(file.getFileName() + ".sealed!");
     }
 
     /** 내려줄 파일 경로. 없으면 404. */

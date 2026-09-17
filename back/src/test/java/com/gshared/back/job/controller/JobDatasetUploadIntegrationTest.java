@@ -199,6 +199,27 @@ class JobDatasetUploadIntegrationTest {
     }
 
     @Test
+    @DisplayName("complete 뒤에는 아직 살아 있는 서명 URL 로도 다시 올릴 수 없다 — 검증된 파일 바꿔치기 방지 (봉인)")
+    void sealedAfterComplete() throws Exception {
+        Job job = createdJob();
+        JsonNode body = objectMapper.readTree(issue(job.getId()).andReturn().getResponse().getContentAsString());
+        URI upload = URI.create(body.path("uploadUrl").asString());
+
+        mockMvc.perform(put(upload.getPath() + "?" + upload.getQuery())
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .content(FILE))
+                .andExpect(status().isOk());
+        complete(job.getId()).andExpect(status().isOk());
+
+        // 서명(TTL 1h)은 여전히 유효하지만 — 검증이 끝난 오브젝트는 봉인돼 덮어쓸 수 없다
+        mockMvc.perform(put(upload.getPath() + "?" + upload.getQuery())
+                        .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                        .content("tampered".getBytes(StandardCharsets.UTF_8)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("OBJECT_SEALED"));
+    }
+
+    @Test
     @DisplayName("파일을 올리지 않고 complete 하면 404 — 신고만으로는 업로드가 되지 않는다")
     void completeWithoutFile() throws Exception {
         Job job = createdJob();
