@@ -61,7 +61,8 @@ public record JobDetailResponse(
         LocalDateTime startedAt,
         LocalDateTime finishedAt
 ) {
-    public static JobDetailResponse from(Job job, Long chainId, String tokenAddress, String escrowAddress) {
+    public static JobDetailResponse from(Job job, Long chainId, String tokenAddress, String escrowAddress,
+                                         String resultDownloadUrl) {
         return new JobDetailResponse(
                 job.getId(),
                 job.getStatus(),
@@ -102,7 +103,8 @@ public record JobDetailResponse(
                 job.getProgressElapsedSec(),
                 job.getResultHash(),
                 job.getResultObjectKey(),
-                job.getResultUrl(),
+                // 조회 시점에 발급한 서명 URL — 엔티티의 resultUrl 은 워커가 신고한 외부 URL 자리라 별개
+                resultDownloadUrl != null ? resultDownloadUrl : job.getResultUrl(),
                 job.getFailReason(),
                 job.getCreatedAt(),
                 job.getStartedAt(),

@@ -31,6 +31,8 @@ import com.gshared.back.worker.websocket.WorkerMessageSender;
 import com.gshared.back.global.blockchain.EscrowProperties;
 import com.gshared.back.global.blockchain.EscrowVerification;
 import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
+import com.gshared.back.global.storage.ObjectStorage;
+import com.gshared.back.global.storage.StorageProperties;
 import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.global.wallet.WalletAuthProperties;
 import com.gshared.back.job.dto.response.FundJobResponse;
@@ -75,6 +77,8 @@ public class JobService {
     private final TrainingConfigResolver trainingConfigResolver;
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
+    private final ObjectStorage objectStorage;
+    private final StorageProperties storageProperties;
 
     /**
      * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
@@ -209,7 +213,20 @@ public class JobService {
         Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
         return JobDetailResponse.from(job, walletAuthProperties.chainId(),
-                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
+    /**
+     * 완료된 Job 의 결과물(어댑터) 내려받기 서명 URL. 파일은 스토리지에 resultObjectKey 로만 저장돼 있어서,
+     * 소유자가 조회할 때마다 유효기간이 살아 있는 URL 을 새로 발급한다 — DB 에 URL 을 저장하면 TTL 이 지나
+     * 죽은 링크가 남는다. 소유권은 이미 위(findByIdAndOwnerId)에서 확인됐다.
+     */
+    private String resultDownloadUrl(Job job) {
+        if (job.getStatus() != JobStatus.COMPLETED || job.getResultObjectKey() == null) {
+            return null;
+        }
+        return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
     }
 
     /**
