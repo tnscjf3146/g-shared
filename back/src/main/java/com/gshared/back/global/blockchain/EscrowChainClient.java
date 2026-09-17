@@ -186,6 +186,20 @@ public class EscrowChainClient {
         });
     }
 
+    /** 기록된 계약에서 의뢰자와 externalRef에 해당하는 예치 ID. 0은 예치가 없다는 뜻이다. */
+    public Optional<String> jobIdByClientRef(String contractAddress, String client, String externalRef) {
+        if (!isConfigured() || isBlank(contractAddress) || client == null
+                || !client.matches("0x[0-9a-fA-F]{40}") || externalRef == null
+                || !externalRef.matches("0x[0-9a-fA-F]{64}")) {
+            return Optional.empty();
+        }
+        Function call = new Function("jobIdByClientRef",
+                List.of(new Address(client), new Bytes32(org.web3j.utils.Numeric.hexStringToByteArray(externalRef))),
+                List.of(new TypeReference<Uint256>() { }));
+        return ethCall(contractAddress, call).flatMap(values -> values.isEmpty()
+                ? Optional.empty() : Optional.of(values.get(0).getValue().toString()));
+    }
+
     /**
      * {@code isOperator(provider, operator)}.
      *
