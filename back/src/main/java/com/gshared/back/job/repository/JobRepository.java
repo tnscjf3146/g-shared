@@ -312,6 +312,25 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     boolean existsByIdAndAssignedWorkerIdAndStatus(Long id, String assignedWorkerId, JobStatus status);
 
     /**
+     * FUNDED 취소인데 환불이 체인에서 확인되지 않은 경우: FUNDED → <b>CANCELLING</b>.
+     * failToCancellingIfRunning 과 같은 원칙 — 돈이 잠긴 한 종료(CANCELLED)로 문을 닫지 않고
+     * keeper 순찰에 남겨 acceptTimeout 만료 후 settleTimeout 으로 환불하게 한다.
+     * 배정 전(assignedWorkerId IS NULL)일 때만 — 그 사이 매칭이 배정했으면 0행 → ASSIGNED 취소 경로가 잇는다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.reconciliationReason = :reconciliationReason
+             WHERE j.id = :jobId
+               AND j.owner.id = :ownerId
+               AND j.assignedWorkerId IS NULL
+               AND j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+            """)
+    int cancelToRefundWaitIfFunded(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId,
+                                   @Param("reconciliationReason") String reconciliationReason);
+
+    /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
      * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.
      * 트랜잭션 경계는 서비스 계층(JobService.assignJob)에서 관리.

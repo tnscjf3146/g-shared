@@ -320,6 +320,47 @@ class JobCancelReconciliationTest {
         assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);          // 워커는 다음 일을 받을 수 있다
     }
 
+    // ── FUNDED 취소 — 환불 확인 없이는 문을 닫지 않는다 ─────────────
+
+    /** 배정 전(FUNDED) 에스크로 Job — 취소 경로 검증용. */
+    private Job fundedOnlyJob() {
+        Dataset dataset = datasetRepository.save(Dataset.create(
+                client, 52_428_800L, 10_000, 2_500_000L, 1_800_000L, 250.0, 1024, null, null));
+        BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
+        Job funded = jobRepository.save(Job.create(client, baseModel.getWorkload().getId(), baseModel.getId(),
+                dataset.getId(), "AUTO", 1, 16, 0.0002, 512, 985.882, "runtime-xgb-v1",
+                worker.getId(), 9L));
+        em.flush();
+        jobRepository.fundIfCreated(funded.getId(), 31221L, null, ESCROW_JOB_ID, null);
+        em.clear();
+        return funded;
+    }
+
+    @Test
+    @DisplayName("FUNDED 취소 + 환불 미확인 — CANCELLED 로 닫지 않고 CANCELLING 으로 keeper 순찰에 남긴다")
+    void fundedCancelWithoutRefundStaysOpen() {
+        Job funded = fundedOnlyJob();
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+
+        jobService.cancelJob(client.getId(), funded.getId());
+
+        Job held = jobRepository.findById(funded.getId()).orElseThrow();
+        assertThat(held.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(held.getReconciliationReason()).contains("not CANCELLED");
+    }
+
+    @Test
+    @DisplayName("FUNDED 취소 + 체인 CANCELLED 확인 — 지금처럼 즉시 CANCELLED")
+    void fundedCancelWithConfirmedRefundEndsImmediately() {
+        Job funded = fundedOnlyJob();
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONFIRMED);
+
+        jobService.cancelJob(client.getId(), funded.getId());
+
+        assertThat(jobRepository.findById(funded.getId()).orElseThrow().getStatus())
+                .isEqualTo(JobStatus.CANCELLED);
+    }
+
     // ── 겹치지 않은 정상 경로 ───────────────────────────────────
 
     @Test

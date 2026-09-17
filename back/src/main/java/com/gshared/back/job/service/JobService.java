@@ -352,8 +352,17 @@ public class JobService {
         jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
-        if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
-            return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+        // 환불 미확인이면 문을 닫지 않는다(failJob 과 같은 원칙). FUNDED 는 돈이 체인에 잠겨 있으므로
+        // 체인이 CANCELLED 라고 확인해줄 때만 즉시 종료하고, 아니면 CANCELLING 으로 keeper 순찰에 태운다
+        // — 의뢰자가 온체인 cancelJob 을 건너뛰고 API 만 불러도 acceptTimeout 만료 후 settleTimeout 이 환불한다.
+        if (refundConfirmedOnChain(jobId)) {
+            if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
+                return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+            }
+        } else if (jobRepository.cancelToRefundWaitIfFunded(jobId, ownerId,
+                "cancel requested but the escrow is not CANCELLED — awaiting settleTimeout") > 0) {
+            log.warn("[JOB] FUNDED 취소, 환불 미확인 → CANCELLING(환불 대기) jobId={}", jobId);
+            return;
         }
         if (jobRepository.markCancellingIfActive(jobId, ownerId) == 0) {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);   // 이미 끝났거나 취소 중
@@ -362,7 +371,6 @@ public class JobService {
         jobRepository.findById(jobId)
                 .map(Job::getAssignedWorkerId)
                 .ifPresent(workerId -> sendCancel(workerId, jobId, "USER_REQUEST"));
-        // TODO: FUNDED 취소의 예치금 환불은 의뢰자가 온체인 cancelJob() — BC 연동 후 연결
     }
 
     /**

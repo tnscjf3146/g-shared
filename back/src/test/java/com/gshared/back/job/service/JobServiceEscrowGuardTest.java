@@ -279,14 +279,16 @@ class JobServiceEscrowGuardTest {
     }
 
     @Test
-    @DisplayName("FUNDED 취소는 워커 없이 바로 CANCELLED — JOB_CANCEL 을 보낼 상대가 없다")
-    void cancel_funded_is_immediate() {
+    @DisplayName("FUNDED 취소 — 환불 미확인이면 CANCELLING(환불 대기), JOB_CANCEL 보낼 상대는 없다")
+    void cancel_funded_waits_for_refund() {
         jobRepository.unassignIfAssigned(job.getId(), worker.getId());   // 다시 FUNDED
         em.clear();
+        // 기본 UNKNOWN(아무것도 확인 안 됨) — 예치금이 잠겨 있을 수 있으므로 종료하지 않고
+        // keeper 순찰에 남긴다. 체인 CANCELLED 확인 시 즉시 종료는 JobCancelReconciliationTest 가 검증.
 
         jobService.cancelJob(client.getId(), job.getId());
 
-        assertThat(reload().getStatus()).isEqualTo(JobStatus.CANCELLED);
-        verify(messageSender, never()).send(any(), any());
+        assertThat(reload().getStatus()).isEqualTo(JobStatus.CANCELLING);
+        verify(messageSender, never()).send(any(), any());   // 배정 전이라 워커 통지 없음
     }
 }
