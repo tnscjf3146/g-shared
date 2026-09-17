@@ -3,7 +3,7 @@ services:
     build: ./back            # ./back의 Dockerfile로 이미지 빌드
     container_name: gshared-backend
     ports:
-      - "8080:8080"          # 서버 8080 → 컨테이너 8080
+      - "127.0.0.1:8080:8080"  # 서버 내부(nginx)만 접근 — 도커가 UFW 를 우회해 바깥에 8080 이 직통으로 열리는 것을 차단
     restart: unless-stopped   # 서버 재부팅·크래시 시 자동 재시작
     env_file:
       - .env                  # .env 값을 통째로 컨테이너에 전달
