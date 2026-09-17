@@ -84,6 +84,7 @@ public class WorkerJobService {
                         dataset.getSizeBytes(), dataset.getSampleCount(),
                         dataset.getTotalTokens(), dataset.getEffectiveTokens(),
                         dataset.getAvgSeqLength(), dataset.getMaxSeqLength()),
+                adapter(job),
                 new ExecutionContextResponse.TrainingConfig(
                         job.getEpochs(), job.getBatchSize(), job.getLearningRate(), job.getMaxLength()),
                 new ExecutionContextResponse.Escrow(
@@ -168,6 +169,39 @@ public class WorkerJobService {
         return image.getImageRepository() == null
                 ? image.getImageDigest()
                 : image.getImageRepository() + "@" + image.getImageDigest();
+    }
+
+    /**
+     * 입력 어댑터 (lora-adapter-backend-작업 §5). 어댑터를 안 쓰는 Job 은 null 이다.
+     *
+     * <p>파일의 출처는 둘 중 하나다:
+     * <ul>
+     *   <li><b>올린 .tar</b> — Job 자신의 adapterObjectKey (업로드 완료 검증을 거친 키)
+     *   <li><b>이어서 학습</b> — 부모 Job 의 결과물(result.tar). 받아서 다시 올리는 왕복을 없앤 것으로,
+     *       부모가 COMPLETED 이고 결과물이 있는지는 주문(POST /jobs) 때 확인했다.
+     * </ul>
+     * 어느 쪽도 파일을 찾을 수 없으면 데이터셋과 같게 다룬다 — URL 없는 컨텍스트를 내보내지 않는다.
+     */
+    private ExecutionContextResponse.Adapter adapter(Job job) {
+        if (!job.isAdapterRequired()) {
+            return null;
+        }
+        if (job.isContinuedTraining()) {
+            Job parent = jobRepository.findById(job.getParentJobId())
+                    .orElseThrow(() -> new BusinessException(JobErrorCode.PARENT_JOB_NOT_FOUND));
+            if (parent.getResultObjectKey() == null) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            return new ExecutionContextResponse.Adapter(
+                    objectStorage.presignDownload(parent.getResultObjectKey(), storageProperties.downloadTtl()).url(),
+                    parent.getResultSha256(), parent.getResultSizeBytes());
+        }
+        if (!job.hasAdapterFile()) {
+            throw new BusinessException(JobErrorCode.ADAPTER_NOT_UPLOADED);
+        }
+        return new ExecutionContextResponse.Adapter(
+                objectStorage.presignDownload(job.getAdapterObjectKey(), storageProperties.downloadTtl()).url(),
+                job.getAdapterSha256(), job.getAdapterSizeBytes());
     }
 
     /**

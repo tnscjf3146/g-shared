@@ -45,6 +45,14 @@
 | `GET /workloads` · `GET /base-models` | `CatalogController` | |
 | `GET /gpus` | `GpuController` | `hourlyPrice` 는 항상 0(과금이 토큰 기준) |
 | `PUT <서명 uploadUrl>` | `StorageController` `/api/storage/**` | 서명이 인증이라 Bearer 없이 원본 `fetch` |
+| `POST /jobs/{id}/adapter-upload` | `JobController` | ✅ 2026-09-17 구현 — 입력 어댑터 `.tar` |
+| `POST /jobs/{id}/adapter-upload/complete` | `JobController` | ✅ 같음. 본문 `{ sha256(0x 없음), sizeBytes }` + tar 형식 검사 |
+| `PATCH /jobs/{id}/adapter-name` | `JobController` | ✅ 2026-09-17 구현 — 결과 어댑터 이름 변경(`job.md` §11-2) |
+
+> **2026-09-17 갱신**: 어댑터 버전·이름·입력 어댑터 업로드(`fe-feature/adapter-versioning`)로 경로 3개가 늘었고 **같은 브랜치에서 백엔드까지 구현**했다.
+> `POST /jobs` 는 `adapterName`·`parentJobId`·`hasAdapter` 를 받고, `JobDetail` 은 `hasAdapter`·`adapterUploaded`·`adapterName`·`adapterVersion`·`parentJobId` 를,
+> `JobSummary` 는 `adapterName`·`adapterVersion` 을 돌려준다. 세 필드를 안 보내는 예전 요청은 그대로 동작한다(하위 호환 테스트 있음). 상세는 `job.md` §11.
+
 
 ### wallet (`features/wallet/api.ts`)
 

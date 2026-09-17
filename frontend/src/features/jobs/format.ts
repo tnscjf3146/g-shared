@@ -20,7 +20,7 @@ export const STATUS_SENTENCE: Record<JobStatus, string> = {
   ASSIGNED: '워커에 배정됐습니다. 곧 학습이 시작됩니다.',
   RUNNING: '학습이 진행 중입니다.',
   CANCELLING: '정리 중입니다. 예치금 처리가 확인되면 종료 상태로 바뀝니다.',
-  COMPLETED: '학습이 끝났습니다. 아래에서 결과를 받을 수 있습니다.',
+  COMPLETED: '학습이 끝났습니다. 아래에서 어댑터를 받을 수 있습니다.',
   FAILED: '학습이 실패했습니다.',
   CANCELLED: '취소된 작업입니다.',
 }
@@ -84,4 +84,32 @@ export function formatBytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
   return `${Math.round(n / 1024)} KB`
+}
+
+// ── 어댑터(학습 결과물) 이름·버전 ────────────────────────────────
+// 이름은 다운로드 파일 이름이 되고, 버전은 "이어서 학습"을 몇 번 쌓았는지다(처음 학습 v1 → 이어서 v2 → v3).
+// 서버가 확정값을 주지만(JobDetail.adapterName/adapterVersion) 반영 전에는 비어 오므로 화면은 항상 대체값을 갖는다.
+
+/** 베이스 모델 이름 → 어댑터 이름 기본값 제안. 사용자가 비워 두면 이 값으로 등록한다 */
+export function suggestAdapterName(modelName: string | undefined): string {
+  const slug = (modelName ?? 'adapter')
+    .trim()
+    .replace(/[^가-힣a-zA-Z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '') // 이름은 한글·영숫자로 시작해야 한다(adapterNameSchema)
+    .slice(0, 50)
+  return `${slug || 'adapter'}-lora`
+}
+
+/** 표시용 "이름 v2" — 이름이 없으면 작업 번호로 대신한다 */
+export function adapterLabel(jobId: number, name?: string | null, version?: number | null): string {
+  return `${name?.trim() || `작업 #${jobId} 어댑터`}${version ? ` v${version}` : ''}`
+}
+
+/** 다운로드 파일 이름 — 이름-v2 + 결과 URL 의 확장자. 확장자를 못 읽으면 붙이지 않는다(브라우저가 정한다).
+ *  ponytail: 같은 오리진일 때만 <a download> 가 먹는다 — 외부 스토리지면 서버 Content-Disposition 이 정본(job.md §11) */
+export function adapterFileName(jobId: number, name: string | null | undefined, version: number | null | undefined, resultUrl: string): string {
+  const stem = `${(name?.trim() || `job-${jobId}-adapter`).replace(/\s+/g, '-')}${version ? `-v${version}` : ''}`
+  const path = resultUrl.split(/[?#]/)[0]
+  const ext = /\.([a-zA-Z0-9]{1,12}(?:\.(?:gz|zst|bz2))?)$/.exec(path)?.[1]
+  return ext ? `${stem}.${ext}` : stem
 }

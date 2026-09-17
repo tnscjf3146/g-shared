@@ -1,17 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { useZodForm } from '@/features/auth/hooks/use-zod-form'
 import { Field } from '@/components/ui/field'
 import { FileDrop } from '@/components/ui/fileDrop'
 import { Input } from '@/components/ui/input'
-import { AUTO_MODE_META } from '../format'
-import { customConfigFormSchema } from '../schema'
+import { useZodForm } from '@/features/auth/hooks/use-zod-form'
+import { ADAPTER_ACCEPT, checkAdapterTar } from '../adapter-tar'
+import { AUTO_MODE_META, adapterLabel } from '../format'
+import { ADAPTER_NAME_MAX, adapterNameSchema, customConfigFormSchema } from '../schema'
 import type { AutoMode, Catalog } from '../types'
-import type { WizardState } from './workloadWizard'
+import { AdapterPicker } from './adapterPicker'
+import { chosenParent, defaultAdapterName, resultAdapterVersion, type AdapterSource, type WizardState } from './workloadWizard'
 
-// 2단계: 모델·설정. 제공 모델만 사용(내 모델 가져오기 제거) · 학습 수준(학습 워크로드만) · 기존 어댑터 첨부 · 고급(직접 설정)
-const ADAPTER_ACCEPT = '.safetensors,.bin,.pt,.zip'
+// 2단계: 모델·설정. 제공 모델만 사용(내 모델 가져오기 제거) · 학습 수준(학습 워크로드만) · 어댑터 출발점(처음부터 / 내 완료 작업 이어서 = v2·v3 / .tar 업로드) · 결과 어댑터 이름 · 고급(직접 설정)
 
 type Props = { catalog: Catalog; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 
@@ -27,11 +28,29 @@ export function StepConfig({ catalog, state, onChange }: Props) {
   )
   const str = (v: unknown) => (v == null ? '' : String(v))
 
+  const [fileError, setFileError] = useState<string | null>(null) // 어댑터 .tar 즉시 검사 결과
+
+  // 이번 학습 결과의 버전·기본 이름 — 5단계 요약·전송과 같은 계산(workloadWizard 헬퍼). 부모 버전을 모르면(백엔드 반영 전) 숫자를 말하지 않는다
+  const chosen = chosenParent(state)
+  const nextVersion = resultAdapterVersion(state)
+  const suggested = defaultAdapterName(state, model?.name)
+  const trimmed = state.adapterName.trim()
+  const nameParsed = trimmed ? adapterNameSchema.safeParse(trimmed) : null
+  const nameError = nameParsed && !nameParsed.success ? (nameParsed.error.issues[0]?.message ?? '어댑터 이름을 확인해 주세요.') : undefined
+
   // 고급 값이 바뀔 때마다 즉시 검증(필드 오류 표시). 유효하면 상태에 반영, 틀리면 'invalid'(위저드가 다음 단계 차단)
   const setCustom = (k: 'epochs' | 'batchSize' | 'learningRate' | 'maxLength', v: string) => {
     custom.set(k, v)
     const data = custom.validate({ ...custom.values, [k]: v })
     onChange({ custom: data ?? 'invalid' })
+  }
+  // 어댑터 .tar 는 고르는 즉시 검사한다 — 업로드까지 가서 422 로 되돌아오면 5단계에서야 알게 된다
+  const pickAdapterFile = async (f: File | null) => {
+    setFileError(null)
+    if (!f) return onChange({ adapterFile: null })
+    const problem = await checkAdapterTar(f)
+    setFileError(problem)
+    onChange({ adapterFile: problem ? null : f })
   }
   const toggleAdvanced = (on: boolean) => {
     setAdvanced(on)
@@ -94,11 +113,81 @@ export function StepConfig({ catalog, state, onChange }: Props) {
         </fieldset>
       )}
 
-      {/* 어댑터 — 학습: 이어서 학습 / 추론·평가: 적용 */}
+      {/* 어댑터 출발점 — 처음부터 / 내 완료 작업 이어서(v2·v3) / .tar 업로드. 추론·평가는 "적용"의 의미 */}
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-text-muted">{isTrain ? '기존 어댑터 (선택) — 이어서 학습' : '어댑터 (선택) — 모델에 적용'}</legend>
-        <FileDrop file={state.adapterFile} onFile={(f) => onChange({ adapterFile: f })} accept={ADAPTER_ACCEPT} label="LoRA 어댑터 파일을 끌어놓거나 클릭해 선택" hint={isTrain ? '없으면 처음부터 학습합니다' : '없으면 모델만으로 진행합니다'} />
+        <legend className="text-[13px] font-medium text-text-muted">{isTrain ? '학습 시작점' : '어댑터 (선택) — 모델에 적용'}</legend>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {(
+            [
+              ['none', isTrain ? '처음부터 학습' : '어댑터 없이', isTrain ? '베이스 모델에서 시작해 v1 어댑터를 만듭니다.' : '베이스 모델만으로 진행합니다.'],
+              ['job', isTrain ? '이어서 학습 (버전 올리기)' : '내 학습 결과 적용', isTrain ? '완료된 내 학습 작업의 어댑터에서 이어 학습해 v2, v3 … 로 쌓습니다.' : '완료된 내 학습 작업의 어댑터를 모델에 얹습니다.'],
+              ['file', '어댑터 파일 올리기', '다른 데서 받아 온 어댑터 .tar 를 올려 사용합니다.'],
+            ] as [AdapterSource, string, string][]
+          ).map(([value, label, description]) => (
+            <label key={value} className={`card-quiet flex cursor-pointer flex-col gap-1 p-4 transition-colors ${state.adapterSource === value ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
+              <input
+                type="radio"
+                name="adapter-source"
+                value={value}
+                checked={state.adapterSource === value}
+                onChange={() => {
+                  setFileError(null)
+                  onChange({ adapterSource: value })
+                }}
+                className="sr-only"
+              />
+              <span className="text-[15px] font-semibold text-dark">{label}</span>
+              <span className="text-[13px] text-text-muted">{description}</span>
+            </label>
+          ))}
+        </div>
+
+        {state.adapterSource === 'job' && (
+          <div className="flex flex-col gap-1.5 pt-1">
+            <AdapterPicker catalog={catalog} value={chosen} onChange={(p) => onChange({ parent: p })} describedBy="adapter-parent-hint" />
+            <p id="adapter-parent-hint" className="text-[12px] text-text-muted">
+              {chosen ? `${adapterLabel(chosen.jobId, chosen.name, chosen.version)} 에서 이어서 학습합니다. 파일을 다시 올릴 필요가 없습니다.` : '이어서 학습할 어댑터를 선택해 주세요.'}
+            </p>
+          </div>
+        )}
+
+        {state.adapterSource === 'file' && (
+          <div className="flex flex-col gap-1.5 pt-1">
+            <FileDrop
+              file={state.adapterFile}
+              onFile={(f) => void pickAdapterFile(f)}
+              accept={ADAPTER_ACCEPT}
+              label="LoRA 어댑터 .tar 파일을 끌어놓거나 클릭해 선택"
+              hint="같은 기본 모델로 학습한 결과여야 합니다 · 1 GiB 이하"
+            />
+            {fileError ? (
+              <p role="alert" className="text-[13px] text-danger">
+                {fileError}
+              </p>
+            ) : (
+              <p className="text-[12px] text-text-muted">비압축 .tar 안에 adapter_config.json · adapter_model.safetensors 가 있어야 합니다. 완료된 작업에서 받은 파일을 그대로 올려도 됩니다.</p>
+            )}
+          </div>
+        )}
       </fieldset>
+
+      {/* 결과 어댑터 이름 — 다운로드 파일 이름이 된다. 학습 워크로드만(추론·평가는 어댑터를 만들지 않는다) */}
+      {isTrain && (
+        <Field id="adapterName" label="어댑터 이름" error={nameError} hint={<span className="text-[12px] text-text-muted">다운로드 파일 이름이 됩니다</span>}>
+          <Input
+            id="adapterName"
+            value={state.adapterName}
+            onChange={(e) => onChange({ adapterName: e.target.value })}
+            placeholder={suggested}
+            maxLength={ADAPTER_NAME_MAX}
+            aria-invalid={!!nameError}
+            aria-describedby={nameError ? 'adapterName-error' : 'adapterName-hint'}
+          />
+          <p id="adapterName-hint" className="text-[12px] text-text-muted">
+            비워 두면 <span className="font-medium text-dark">{suggested}</span> 로 저장됩니다. {nextVersion ? `이번 학습 결과는 v${nextVersion} 입니다.` : ''} 등록 뒤에도 작업 상세에서 바꿀 수 있습니다.
+          </p>
+        </Field>
+      )}
     </>
   )
 }

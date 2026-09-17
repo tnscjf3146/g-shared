@@ -19,6 +19,8 @@ public record CreateJobResponse(
         Double predictedRuntimeSec,
         Long estimatedCost,
         String schedulerModelVersion,
+        String adapterName,            // 서버가 확정한 결과 어댑터 이름 (요청을 비워 보냈으면 기본값)
+        Integer adapterVersion,        // 서버가 정한 버전 — 이어서 학습이면 부모 + 1
         String externalRef,
         String priceWei,
         String providerWallet,
@@ -34,6 +36,8 @@ public record CreateJobResponse(
                 job.getPredictedRuntimeSec(),
                 job.getEstimatedCost(),
                 job.getSchedulerModelVersion(),
+                job.getAdapterName(),
+                job.getAdapterVersion(),
                 job.getExternalRef(),
                 TokenUnits.toWei(job.getEstimatedCost()).toString(),
                 job.getProviderWallet(),

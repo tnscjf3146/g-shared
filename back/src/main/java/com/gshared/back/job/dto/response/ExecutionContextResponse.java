@@ -13,6 +13,7 @@ public record ExecutionContextResponse(
         Model model,
         RuntimeImage runtimeImage,
         Dataset dataset,
+        Adapter adapter,        // 어댑터 없는 Job 은 null — 필드는 빼지 않는다(계약을 명확히)
         TrainingConfig trainingConfig,
         Escrow escrow
 ) {
@@ -40,6 +41,18 @@ public record ExecutionContextResponse(
             Long effectiveTokens,
             Double avgSeqLength,
             Integer maxSeqLength
+    ) {
+    }
+
+    /**
+     * 학습을 이어서 시작할 입력 LoRA 어댑터. 출처는 둘 중 하나이고 워커는 구분할 필요가 없다:
+     * 사용자가 올린 {@code .tar} 이거나, "이어서 학습"한 부모 Job 의 결과물({@code result.tar})이다.
+     * 어느 쪽이든 비압축 tar 안에 adapter_config.json·adapter_model.safetensors 가 있다.
+     */
+    public record Adapter(
+            String downloadUrl,     // 서명 URL — 만료 전에 받아야 한다
+            String sha256,          // 64자리 hex (0x 없음) — 내려받은 파일 검증용
+            Long sizeBytes
     ) {
     }
 

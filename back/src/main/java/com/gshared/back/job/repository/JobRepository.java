@@ -58,6 +58,19 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findDatasetFilesToClean(@Param("abandonedBefore") LocalDateTime abandonedBefore);
 
+    /** 같은 조건의 어댑터 판 — 끝난 Job 과 예치 없이 방치된 CREATED Job 의 입력 어댑터(V17). */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.adapterUploadedAt IS NOT NULL
+               AND j.adapterDeletedAt IS NULL
+               AND (j.status IN (com.gshared.back.job.domain.JobStatus.COMPLETED,
+                                 com.gshared.back.job.domain.JobStatus.FAILED,
+                                 com.gshared.back.job.domain.JobStatus.CANCELLED)
+                    OR (j.status = com.gshared.back.job.domain.JobStatus.CREATED
+                        AND j.createdAt < :abandonedBefore))
+            """)
+    java.util.List<Job> findAdapterFilesToClean(@Param("abandonedBefore") LocalDateTime abandonedBefore);
+
     /**
      * 원자적 취소 ①: 아직 워커 손에 가지 않은 Job(CREATED/FUNDED)은 바로 CANCELLED.
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).

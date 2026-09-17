@@ -22,6 +22,11 @@ public record JobDetailResponse(
         Long baseModelId,
         Long datasetId,
         Boolean datasetUploaded,       // 원본 파일이 올라와 검증됐는가 — false 면 예치 전에 dataset-upload 부터
+        Boolean hasAdapter,            // 어댑터를 얹고 시작하는 작업인가 (adapter_required)
+        Boolean adapterUploaded,       // 올린 어댑터 파일이 검증됐는가. 이어서 학습이면 올릴 것이 없어 false 고, parentJobId 로 구분한다
+        String adapterName,            // 결과 어댑터 이름 = 내려받을 파일 이름
+        Integer adapterVersion,        // 내 계보에서 몇 번째 (v1, v2, v3 …)
+        Long parentJobId,              // 이어서 학습한 원본 Job (없으면 null)
         String trainingMode,
         Integer epochs,
         Integer batchSize,
@@ -70,6 +75,11 @@ public record JobDetailResponse(
                 job.getBaseModelId(),
                 job.getDatasetId(),
                 job.hasDatasetFile(),
+                job.isAdapterRequired(),
+                job.hasAdapterFile(),
+                job.getAdapterName(),
+                job.getAdapterVersion(),
+                job.getParentJobId(),
                 job.getTrainingMode(),
                 job.getEpochs(),
                 job.getBatchSize(),
