@@ -22,6 +22,13 @@ public interface ObjectStorage {
     /** 오브젝트가 실제로 존재하는지와 그 크기·해시. 없으면 empty. (업로드 완료 검증용 — 규격 §18) */
     Optional<ObjectStat> stat(String objectKey);
 
+    /**
+     * 오브젝트 봉인 — 이후 같은 키로의 업로드(write)를 거부한다. 멱등.
+     * 완료 검증(§18)이 끝난 파일을, 아직 살아 있는 업로드 서명 URL(TTL 1h)로
+     * 바꿔치기하는 것을 막는다: 검증된 해시(온체인 기록)와 실제 파일이 계속 같게.
+     */
+    void seal(String objectKey);
+
     /** 오브젝트 삭제. 이미 없으면 아무 일도 하지 않는다 — cleanup 이 같은 키를 두 번 지워도 안전해야 한다. */
     void delete(String objectKey);
 

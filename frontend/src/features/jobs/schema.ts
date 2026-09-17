@@ -7,8 +7,8 @@ export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-model
 /** 데이터셋 메타데이터 등록·조회(develop). 원본 파일 업로드가 아니라 분석 결과 저장 — 파일 저장 위치는 미정(블록체인 회의 6-3) */
 export const DATASETS_PATH = '/datasets'
 
-/** back JobStatus 7단계 */
-export const jobStatusSchema = z.enum(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'])
+/** back JobStatus 8단계 — CANCELLING 은 취소·실패 후 예치금 정리(환불) 대기 중인 중간 상태 */
+export const jobStatusSchema = z.enum(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING', 'CANCELLING', 'COMPLETED', 'FAILED', 'CANCELLED'])
 export const trainingModeSchema = z.enum(['AUTO', 'CUSTOM'])
 /** AUTO 학습 방향. 견적(estimate·gpu-options)에서는 `autoMode`, 주문(POST /jobs)에서는 `trainingPriority` 이름으로 보낸다(값은 같음) */
 export const autoModeSchema = z.enum(['SPEED', 'BALANCED', 'TRAINING'])
@@ -117,6 +117,7 @@ export const jobSummarySchema = z.object({
   workloadId: z.number(),
   progressPercent: z.nullable(z.number()),
   estimatedCost: z.number(),
+  failReason: z.optional(z.nullable(z.string())), // 있으면 실패한 작업 — 상태와 조합해 "실패·환불 처리 중" 등으로 표시 (배포 전 서버 대비 optional)
   createdAt: z.string(), // LocalDateTime "2026-09-09T10:00:00" (Z 없음)
 })
 export const jobPageSchema = z.object({

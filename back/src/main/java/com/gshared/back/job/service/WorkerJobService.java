@@ -144,6 +144,9 @@ public class WorkerJobService {
             throw new BusinessException(JobErrorCode.RESULT_UPLOAD_MISMATCH);
         }
 
+        // 검증이 끝난 파일은 봉인 — 아직 살아 있는 업로드 서명 URL(TTL 1h)로 온체인 해시와
+        // 다른 파일로 바꿔치기하지 못하게. 여기 기록된 해시가 곧 submitResult 의 resultHash 다.
+        objectStorage.seal(request.objectKey());
         job.recordResultUpload(request.objectKey(), stat.sizeBytes(), stat.sha256());
         return new ResultUploadCompleteResponse(String.valueOf(jobId), request.objectKey(), true);
     }

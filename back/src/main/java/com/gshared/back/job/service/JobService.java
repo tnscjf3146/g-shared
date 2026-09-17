@@ -31,6 +31,8 @@ import com.gshared.back.worker.websocket.WorkerMessageSender;
 import com.gshared.back.global.blockchain.EscrowProperties;
 import com.gshared.back.global.blockchain.EscrowVerification;
 import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
+import com.gshared.back.global.storage.ObjectStorage;
+import com.gshared.back.global.storage.StorageProperties;
 import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.global.wallet.WalletAuthProperties;
 import com.gshared.back.job.dto.response.FundJobResponse;
@@ -75,6 +77,8 @@ public class JobService {
     private final TrainingConfigResolver trainingConfigResolver;
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
+    private final ObjectStorage objectStorage;
+    private final StorageProperties storageProperties;
 
     /**
      * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
@@ -209,7 +213,26 @@ public class JobService {
         Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
         return JobDetailResponse.from(job, walletAuthProperties.chainId(),
-                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
+    /**
+     * 완료된 Job 의 결과물(어댑터) 내려받기 서명 URL. 파일은 스토리지에 resultObjectKey 로만 저장돼 있어서,
+     * 소유자가 조회할 때마다 유효기간이 살아 있는 URL 을 새로 발급한다 — DB 에 URL 을 저장하면 TTL 이 지나
+     * 죽은 링크가 남는다. 소유권은 이미 위(findByIdAndOwnerId)에서 확인됐다.
+     */
+    private String resultDownloadUrl(Job job) {
+        if (job.getStatus() != JobStatus.COMPLETED || job.getResultObjectKey() == null) {
+            return null;
+        }
+        try {
+            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
+        } catch (Exception e) {
+            // 다운로드 URL 은 부가 정보 — 스토리지 장애가 상세 조회 전체를 죽이면 안 된다.
+            log.error("[STORAGE] 결과물 서명 URL 발급 실패 jobId={} key={}", job.getId(), job.getResultObjectKey(), e);
+            return null;
+        }
     }
 
     /**
@@ -329,8 +352,17 @@ public class JobService {
         jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
-        if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
-            return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+        // 환불 미확인이면 문을 닫지 않는다(failJob 과 같은 원칙). FUNDED 는 돈이 체인에 잠겨 있으므로
+        // 체인이 CANCELLED 라고 확인해줄 때만 즉시 종료하고, 아니면 CANCELLING 으로 keeper 순찰에 태운다
+        // — 의뢰자가 온체인 cancelJob 을 건너뛰고 API 만 불러도 acceptTimeout 만료 후 settleTimeout 이 환불한다.
+        if (refundConfirmedOnChain(jobId)) {
+            if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
+                return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+            }
+        } else if (jobRepository.cancelToRefundWaitIfFunded(jobId, ownerId,
+                "cancel requested but the escrow is not CANCELLED — awaiting settleTimeout") > 0) {
+            log.warn("[JOB] FUNDED 취소, 환불 미확인 → CANCELLING(환불 대기) jobId={}", jobId);
+            return;
         }
         if (jobRepository.markCancellingIfActive(jobId, ownerId) == 0) {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);   // 이미 끝났거나 취소 중
@@ -339,7 +371,6 @@ public class JobService {
         jobRepository.findById(jobId)
                 .map(Job::getAssignedWorkerId)
                 .ifPresent(workerId -> sendCancel(workerId, jobId, "USER_REQUEST"));
-        // TODO: FUNDED 취소의 예치금 환불은 의뢰자가 온체인 cancelJob() — BC 연동 후 연결
     }
 
     /**
@@ -571,20 +602,41 @@ public class JobService {
      * <p>이것을 받지 않으면 Job 은 CANCELLING 에 영원히 남는다 — 컨테이너는 죽었고 예치금은
      * 돌아갔는데 기록만 취소 중인 상태.
      *
-     * TODO: 환불(블록체인) 트리거 — abortJob() 이 환불까지 하므로 Backend 는 흔적만 남기면 될 수 있음. BC 담당과 확인
+     * <p><b>환불이 체인에서 확인되지 않으면 종료하지 않는다.</b> abortTxHash 가 없거나(워커가
+     * 환불 전에 죽음) 체인이 CANCELLED 가 아니면, FAILED 로 닫는 순간 keeper·reconciler 의
+     * 순찰 대상에서 빠져 예치금이 잠긴 채 잊힌다. 대신 CANCELLING 으로 남겨 keeper 가 시한
+     * 만료 후 settleTimeout 으로 환불하게 한다. 돈이 잠긴 한 문을 닫지 않는다.
      */
     @Transactional
     public boolean failJob(String workerId, Long jobId, String code, String message,
                            String abortTxHash, Double actualRuntimeSec) {
-        // 실패 보고에는 abortJob 이 따라온다 -- 예치금이 돌아갔다는 주장이다.
-        // 체인이 CANCELLED 가 아니라고 말하면 그 주장은 거짓이고, Job 을 종료
-        // 상태로 확정하면 고객의 돈이 묶인 채로 기록만 끝난다.
-        if (abortTxHash != null && chainContradictsCancellation(jobId, workerId)) {
+        LocalDateTime now = LocalDateTime.now();
+        String reason = failReason(code, message);
+
+        if (abortTxHash != null) {
+            // 환불 주장(tx)이 있다 — 체인이 아직이라면 미채굴일 수 있으니 보류(NACK).
+            // 워커가 같은 보고를 재전송하고, 체인이 따라잡으면 아래 정상 경로로 확정된다.
+            if (chainContradictsCancellation(jobId, workerId)) {
+                return false;
+            }
+        } else if (!refundConfirmedOnChain(jobId)) {
+            // 환불 주장 자체가 없다(워커가 abortJob 전에 죽음) — 재전송을 기다려도 올 것이 없다.
+            // 종료 대신 CANCELLING 으로 순찰에 태워 keeper 가 시한 만료 후 settleTimeout 으로 환불하게 한다.
+            int held = jobRepository.failToCancellingIfRunning(jobId, workerId, reason, null,
+                    actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
+            // 이미 CANCELLING 이었으면(취소 요청 중 실패) 0행 — Job 은 이미 순찰 대상이라 충분하지만,
+            // 워커는 이 보고로 끝난 것이므로 풀어줘야 한다. 안 풀면 BUSY 고착 + 워커가 NACK 로 알고 재전송한다.
+            boolean cancellingAlready = held == 0
+                    && jobRepository.existsByIdAndAssignedWorkerIdAndStatus(jobId, workerId, JobStatus.CANCELLING);
+            if (held > 0 || cancellingAlready) {
+                log.warn("[JOB] 실패 보고(환불 주장 없음), 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+                workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+                return true;
+            }
             return false;
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        String reason = failReason(code, message);
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
         if (updated == 0) {
             updated = jobRepository.cancelIfFailedWhileCancelling(
@@ -656,6 +708,20 @@ public class JobService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 예치금이 의뢰자에게 돌아갔다고 확인됐는가. 에스크로에 묶인 적 없는 Job(체인 없는 모드)은
+     * 돌려줄 돈이 없으므로 true. CONFIRMED(체인 CANCELLED)만 true — UNKNOWN(노드 미응답)과
+     * CONTRADICTED(아직 잠김)는 모두 "확인 안 됨"이다. 모르는 돈은 잠긴 돈으로 취급한다.
+     */
+    private boolean refundConfirmedOnChain(Long jobId) {
+        Job current = jobRepository.findById(jobId).orElse(null);
+        if (current == null || current.getEscrowJobId() == null) {
+            return true;
+        }
+        return escrow.cancelledOnChain(current.getEscrowContractAddress(), current.getEscrowJobId())
+                .isConfirmed();
     }
 
     /** 이 워커의 operator 주소. 없으면 null -- 온체인 대조에서 건너뛴다. */
