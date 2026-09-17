@@ -43,6 +43,8 @@ export function sampleText(line: string): string {
 }
 
 /** 파일 SHA-256 → "0x" + 64자(back datasets.data_hash CHAR(66)). POST /datasets 의 dataHash */
+// ponytail: 파일을 통째로 메모리에 올린다(SubtleCrypto 에 스트리밍 digest 가 없다). 어댑터 상한 1 GiB 까지는 버티지만,
+// 더 큰 파일을 받게 되면 청크 sha-256 구현으로 교체할 것
 export async function hashFile(file: File): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
   return '0x' + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')

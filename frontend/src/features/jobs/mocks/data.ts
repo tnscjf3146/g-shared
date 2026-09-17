@@ -49,6 +49,9 @@ const base = {
   progressTotalEpochs: null,
   resultHash: null,
   resultUrl: null,
+  adapterName: null,
+  adapterVersion: null,
+  parentJobId: null,
   startedAt: null,
   finishedAt: null,
 }
@@ -61,8 +64,15 @@ export const MOCK_JOBS: JobDetail[] = z.array(jobDetailSchema).parse([
   { ...base, jobId: 4, status: 'CREATED', trainingMode: 'CUSTOM', epochs: 5, batchSize: 8, learningRate: 2e-5, maxLength: 40, createdAt: '2026-09-09T08:30:00' },
   {
     ...base, jobId: 3, status: 'COMPLETED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', actualRuntimeSec: 4410, actualCost: 1200, progressPercent: 100, progressEpoch: 3, progressTotalEpochs: 3,
-    resultHash: '0x9f2c1e7ab4d3c6f0e1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8', resultUrl: 'https://example.com/results/job-3.tar.gz',
+    resultHash: '0x9f2c1e7ab4d3c6f0e1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a8', resultUrl: 'https://example.com/results/job-3.tar',
+    adapterName: 'cs-상담봇', adapterVersion: 2, parentJobId: 8, // 작업 #8(v1)에서 이어서 학습한 v2 — 계보 표시·다운로드 파일 이름 확인용
     createdAt: '2026-09-08T15:00:00', startedAt: '2026-09-08T15:12:00', finishedAt: '2026-09-08T16:25:30',
+  },
+  {
+    ...base, jobId: 8, status: 'COMPLETED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', actualRuntimeSec: 3900, actualCost: 1200, progressPercent: 100, progressEpoch: 3, progressTotalEpochs: 3,
+    resultHash: '0x1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7a89f2c1e7ab4d3c6f0e', resultUrl: 'https://example.com/results/job-8.tar',
+    adapterName: 'cs-상담봇', adapterVersion: 1,
+    createdAt: '2026-09-07T13:00:00', startedAt: '2026-09-07T13:10:00', finishedAt: '2026-09-07T14:15:00',
   },
   { ...base, jobId: 2, status: 'FAILED', assignedWorkerId: 'worker-22222222-2222-4222-8222-222222222222', failReason: 'CUDA_OOM: 학습 도중 GPU 메모리가 부족했습니다(batch 16 × max length 40).', progressPercent: 18, progressEpoch: 1, progressTotalEpochs: 3, actualRuntimeSec: 900, createdAt: '2026-09-08T11:00:00', startedAt: '2026-09-08T11:05:00', finishedAt: '2026-09-08T11:20:00' },
   { ...base, jobId: 1, status: 'CANCELLED', createdAt: '2026-09-07T10:00:00' },
