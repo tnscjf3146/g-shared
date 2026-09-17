@@ -303,6 +303,21 @@ class JobCancelReconciliationTest {
                 "RUNTIME_ERROR", "학습이 죽었다", "0xabort", 12.0)).isTrue();
 
         assertThat(reload().getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);
+    }
+
+    @Test
+    @DisplayName("취소 중(CANCELLING) 실패 + 환불 미확인 — Job 은 순찰에 남기되 워커는 풀어준다 (BUSY 고착 방지)")
+    void failureDuringCancellingReleasesWorker() {
+        userCancels();   // RUNNING → CANCELLING (워커는 아직 이 Job 에 묶여 있다)
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+
+        // 보고는 접수돼야 한다(true) — false 면 워커가 NACK 로 알고 재전송 루프를 돈다.
+        assertThat(jobService.failJob(worker.getId(), job.getId(),
+                "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
+
+        assertThat(reload().getStatus()).isEqualTo(JobStatus.CANCELLING);   // 종료 금지 — keeper 가 환불
+        assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);          // 워커는 다음 일을 받을 수 있다
     }
 
     // ── 겹치지 않은 정상 경로 ───────────────────────────────────

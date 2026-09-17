@@ -308,6 +308,9 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                                   @Param("actualRuntimeSec") Double actualRuntimeSec,
                                   @Param("reconciliationReason") String reconciliationReason);
 
+    /** "이 워커의 Job 이 이 상태인가" — 실패 보고가 이미 CANCELLING 인 Job 과 겹쳤는지 확인용. */
+    boolean existsByIdAndAssignedWorkerIdAndStatus(Long id, String assignedWorkerId, JobStatus status);
+
     /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
      * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.

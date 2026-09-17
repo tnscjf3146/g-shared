@@ -226,7 +226,13 @@ public class JobService {
         if (job.getStatus() != JobStatus.COMPLETED || job.getResultObjectKey() == null) {
             return null;
         }
-        return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
+        try {
+            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
+        } catch (Exception e) {
+            // 다운로드 URL 은 부가 정보 — 스토리지 장애가 상세 조회 전체를 죽이면 안 된다.
+            log.error("[STORAGE] 결과물 서명 URL 발급 실패 jobId={} key={}", job.getId(), job.getResultObjectKey(), e);
+            return null;
+        }
     }
 
     /**
@@ -599,17 +605,28 @@ public class JobService {
         LocalDateTime now = LocalDateTime.now();
         String reason = failReason(code, message);
 
-        if (!refundConfirmedOnChain(jobId)) {
-            // 예치금이 아직 잠겨 있(을 수 있)다 → 종료 대신 CANCELLING 으로 순찰에 태운다.
-            // 이미 CANCELLING 이었으면(취소 요청 중 실패) 0행 — 그대로 순찰에 남아 있으니 충분하다.
-            int held = jobRepository.failToCancellingIfRunning(jobId, workerId, reason, abortTxHash,
+        if (abortTxHash != null) {
+            // 환불 주장(tx)이 있다 — 체인이 아직이라면 미채굴일 수 있으니 보류(NACK).
+            // 워커가 같은 보고를 재전송하고, 체인이 따라잡으면 아래 정상 경로로 확정된다.
+            if (chainContradictsCancellation(jobId, workerId)) {
+                return false;
+            }
+        } else if (!refundConfirmedOnChain(jobId)) {
+            // 환불 주장 자체가 없다(워커가 abortJob 전에 죽음) — 재전송을 기다려도 올 것이 없다.
+            // 종료 대신 CANCELLING 으로 순찰에 태워 keeper 가 시한 만료 후 settleTimeout 으로 환불하게 한다.
+            int held = jobRepository.failToCancellingIfRunning(jobId, workerId, reason, null,
                     actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
-            if (held > 0) {
-                log.warn("[JOB] 실패 보고, 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
+            // 이미 CANCELLING 이었으면(취소 요청 중 실패) 0행 — Job 은 이미 순찰 대상이라 충분하지만,
+            // 워커는 이 보고로 끝난 것이므로 풀어줘야 한다. 안 풀면 BUSY 고착 + 워커가 NACK 로 알고 재전송한다.
+            boolean cancellingAlready = held == 0
+                    && jobRepository.existsByIdAndAssignedWorkerIdAndStatus(jobId, workerId, JobStatus.CANCELLING);
+            if (held > 0 || cancellingAlready) {
+                log.warn("[JOB] 실패 보고(환불 주장 없음), 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
                         jobId, workerId, reason);
                 workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+                return true;
             }
-            return held > 0;
+            return false;
         }
 
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
