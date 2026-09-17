@@ -16,7 +16,19 @@ powershell -ExecutionPolicy Bypass -File system\worker\packaging\build.ps1
 | selfcheck | 번들 안에서 검사, 하나라도 FAIL이면 빌드 실패 |
 | 정리 | `selfcheck.exe` 삭제(배포 안 함), exe 크기·SHA-256 출력 |
 
-`build\`, `dist\`는 git-ignore. exe는 커밋하지 않는다.
+`build\`, `dist\`는 git-ignore.
+
+## 배포
+
+빌드 산출물(`dist\G-shared.exe`)은 커밋하지 않는다. **검증을 통과한 exe만 `system/G-shared/G-shared.exe`로 복사해 커밋한다** — 이 파일이 배포 기준(source of truth)이다.
+
+| 단계 | 내용 |
+|---|---|
+| 빌드 | 위 `build.ps1` — selfcheck PASS, 크기·SHA-256 확인 |
+| 교체 | `dist\G-shared.exe` → `system/G-shared/G-shared.exe`. 다른 경로에 exe를 중복 커밋하지 않는다 |
+| 커밋 | 기능 커밋과 분리해 exe만 담은 커밋으로 (`[sys-chore] … 배포 실행파일 갱신`) |
+| 배포 | Frontend Docker 빌드가 이 파일을 `public/downloads/`로 복사 → `https://<도메인>/downloads/G-shared.exe` (`frontend/Dockerfile`, `docker-compose.yml`의 `worker` build context) |
+| 확인 | 배포 후 내려받은 파일의 SHA-256이 커밋한 exe와 같은지 |
 
 ## 파일
 
@@ -83,6 +95,7 @@ WSL2 · NVIDIA Driver · Docker Engine · NVIDIA Container Toolkit.
 |---|---|
 | 상태 | 시작 · 환경 확인 · 런타임 준비 · 인증 · 등록 필요 · 연결 중 · 온라인 · 작업 준비/실행 · 종료 중 · 오류 |
 | 정보 | GPU(모델·VRAM), Worker(연결 상태, 축약 ID), 현재 작업, 진행률(JOB_PROGRESS가 있을 때) |
+| 작업 단계 | 수락 후 학습 전까지 **작업 준비 중** — 실행 정보 확인 → 모델 준비(처음이면 "처음 내려받는 중, 몇 분") → 데이터셋 → 어댑터(있을 때) → 실행 이미지 확인. 이어서 **학습 진행 중**(진행률) → **결과를 올리고 정산하는 중** |
 | 로그 | 기존 진행 문구 최근 200줄. 토큰·JWT·키·서명 URL 쿼리는 가림 |
 | [종료] / X | 같은 처리. 작업이 없으면 바로 종료, 작업 중이면 "작업을 마치고 결과를 보낸 뒤 종료"를 묻고 새 작업은 받지 않음. 기다리는 중 한 번 더 누르면 "지금 종료"를 다시 확인 |
 
