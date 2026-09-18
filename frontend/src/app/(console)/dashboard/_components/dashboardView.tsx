@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
 import { jobMessageFor } from '@/features/jobs/errors'
-import { ACTIVE_STATUSES } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
 import { deleteWorker, getMyWorkers, getNetworkStats } from '@/features/workers/api'
 import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
@@ -36,7 +35,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [now, setNow] = useState(() => Date.now())
   const [notice, setNotice] = useState<string | null>(null)
   const [jobPage, setJobPage] = useState(0)
-  const [jobView, setJobView] = useState<'active' | 'latest' | 'oldest' | 'completed' | 'cancelled'>('active') // 목록 정렬·필터
+  const [jobView, setJobView] = useState<'latest' | 'oldest' | 'done'>('latest') // 목록 정렬·필터
 
   // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
   const load = useCallback((silent = false) => {
@@ -71,18 +70,8 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
   // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
-  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요)
-  const isDone = (j: JobSummary) => !ACTIVE_STATUSES.has(j.status)
-  const displayList =
-    jobView === 'latest'
-      ? jobList
-      : jobView === 'oldest'
-        ? jobList.slice().reverse()
-        : jobView === 'completed'
-          ? jobList.filter((j) => j.status === 'COMPLETED')
-          : jobView === 'cancelled'
-            ? jobList.filter((j) => j.status === 'FAILED' || j.status === 'CANCELLED')
-            : jobList.slice().sort((a, b) => (isDone(a) ? 1 : 0) - (isDone(b) ? 1 : 0)) // 'active': 진행·대기 먼저, 끝난 건 아래(묶음 내 최신순 유지)
+  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요). 서버가 최신순으로 준다
+  const displayList = jobView === 'oldest' ? jobList.slice().reverse() : jobView === 'done' ? jobList.filter((j) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED') : jobList // 'latest'
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
@@ -166,11 +155,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
                   }}
                   className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-dark focus:border-primary focus:outline-none"
                 >
-                  <option value="active">진행 먼저</option>
                   <option value="latest">최신순</option>
                   <option value="oldest">오래된순</option>
-                  <option value="completed">완료만</option>
-                  <option value="cancelled">취소·실패만</option>
+                  <option value="done">완료·취소·실패</option>
                 </select>
               </label>
             )}
