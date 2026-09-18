@@ -12,10 +12,10 @@ import { Pager } from './pager'
 // 도넛 조각 — 상태 4묶음. 채도·명도를 맞춘 조화 팔레트(초록·앰버·슬레이트·로즈, 모두 중간 톤)로 한 벌처럼 보이게 한다.
 // 브랜드 그린(버튼용 #76B900)은 쨍해서 다른 색과 따로 놀아, 차트에는 톤을 낮춘 초록을 쓴다
 const SEGMENTS = [
-  { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', color: '#4E9F6D' }, // green
-  { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', color: '#E0B04A' }, // amber
-  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', color: '#8A94A6' }, // slate
-  { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', color: '#D2696C' }, // rose
+  { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', color: 'var(--color-chart-green)' },
+  { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', color: 'var(--color-chart-amber)' },
+  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', color: 'var(--color-chart-slate)' },
+  { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', color: 'var(--color-chart-rose)' },
 ]
 
 export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {

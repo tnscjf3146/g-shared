@@ -79,6 +79,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       : jobView === 'done'
         ? jobList.filter((j) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED').sort(newestFirst)
         : jobList.slice().sort(newestFirst) // 'latest'
+  // 폴링으로 목록이 줄면 현재 페이지가 범위를 넘을 수 있다 → 마지막 페이지로 클램프(빈 화면 방지)
+  const totalJobPages = Math.max(1, Math.ceil(displayList.length / JOBS_PER_PAGE))
+  const safeJobPage = Math.min(jobPage, totalJobPages - 1)
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
@@ -184,13 +187,13 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
           {jobs.status === 'ready' && displayList.length > 0 && (
             <>
               <ul className="flex flex-col gap-3">
-                {displayList.slice(jobPage * JOBS_PER_PAGE, (jobPage + 1) * JOBS_PER_PAGE).map((j, i) => (
-                  <DashboardJobRow key={j.jobId} job={j} index={jobPage * JOBS_PER_PAGE + i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
+                {displayList.slice(safeJobPage * JOBS_PER_PAGE, (safeJobPage + 1) * JOBS_PER_PAGE).map((j, i) => (
+                  <DashboardJobRow key={j.jobId} job={j} index={safeJobPage * JOBS_PER_PAGE + i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
                 ))}
               </ul>
               {/* 메인 목록은 실무 관례대로 페이지 번호 + 화살표 */}
               <div className="flex justify-center">
-                <Pager page={jobPage} totalPages={Math.ceil(displayList.length / JOBS_PER_PAGE)} onChange={setJobPage} numbered />
+                <Pager page={safeJobPage} totalPages={totalJobPages} onChange={setJobPage} numbered />
               </div>
             </>
           )}

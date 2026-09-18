@@ -9,7 +9,7 @@ import type { Catalog, JobSummary } from '@/features/jobs/types'
 
 // 작업 카드 — 작업마다 카드 하나, 세로로 쌓인다.
 // 접힘: [>] "순번. 워크로드" | 상태 | 생성 | 상세·취소 (비율 그리드라 카드마다 컬럼 위치가 같다).
-// 진행/대기/완료는 줄 어디를 눌러도 아래로 표가 펼쳐진다(상세·취소 제외). 끝난 실패·취소는 펼치지 않고 [상세]로만 본다.
+// 진행·대기(active)만 줄을 눌러 아래로 표가 펼쳐진다(상세·취소 버튼 제외). 끝난 작업(완료·실패·취소)은 펼치지 않고 [상세]로만 본다.
 export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, style }: { job: JobSummary; index: number; workloadName: string; catalog: Catalog | null; onCancel: (id: number) => void; style?: React.CSSProperties }) {
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false) // 한 번 열리면 표를 계속 붙여 둔다 → 닫힘 모션 동안에도 내용이 남아 높이가 자연스럽게 줄어든다

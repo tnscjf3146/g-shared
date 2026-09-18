@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { renameAdapter } from '../api'
+import { downloadFile } from '../download'
 import { jobMessageFor } from '../errors'
 import { adapterFileName, adapterLabel } from '../format'
 import { ADAPTER_NAME_MAX, adapterNameSchema } from '../schema'
@@ -40,26 +41,13 @@ export function AdapterCard({ job, onRenamed }: Props) {
     }
   }
 
-  // 다운로드 파일 이름을 어댑터 이름으로 강제한다. 크로스 오리진 스토리지에선 <a download> 의 파일명이 무시되므로(→ URL 끝 이름) blob 으로 받아 이름을 붙인다.
-  // CORS 로 blob 을 못 받으면 새 탭으로 여는 것으로 물러선다 — 그 경우 이름은 서버 Content-Disposition 이 정해야 한다(job.md §11)
+  // 다운로드 파일 이름을 어댑터 이름으로 강제(downloadFile 이 크로스 오리진·CORS 실패·URL 해제까지 처리)
   const [downloading, setDownloading] = useState(false)
   const download = async () => {
     if (!job.resultUrl) return
-    const name = adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl)
     setDownloading(true)
     try {
-      const res = await fetch(job.resultUrl)
-      if (!res.ok) throw new Error('download failed')
-      const url = URL.createObjectURL(await res.blob())
-      const a = document.createElement('a')
-      a.href = url
-      a.download = name
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
-    } catch {
-      window.open(job.resultUrl, '_blank', 'noopener')
+      await downloadFile(job.resultUrl, adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl))
     } finally {
       setDownloading(false)
     }

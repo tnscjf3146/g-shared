@@ -7,8 +7,9 @@ import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
+import { downloadFile } from '../download'
 import { jobMessageFor } from '../errors'
-import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
+import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, adapterFileName, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
 import { AdapterCard } from './adapterCard'
 import { FundPanel } from './fundPanel'
@@ -221,14 +222,25 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       {/* 상세는 탭으로 — 진행 아래에서 설정·데이터셋·비용·어댑터를 하나씩 (스크롤 대신). 진행 카드와 간격을 둔다 */}
       <div className="mt-3">
-        <div role="tablist" className="flex gap-2 overflow-x-auto pb-1">
+        <div role="tablist" aria-label="작업 상세" className="flex gap-2 overflow-x-auto pb-1">
           {tabs.map((t) => (
             <button
               key={t.key}
+              id={`jobtab-${t.key}`}
               type="button"
               role="tab"
               aria-selected={activeTab === t.key}
+              aria-controls="jobtab-panel"
+              tabIndex={activeTab === t.key ? 0 : -1} // 로빙 tabindex — 활성 탭만 Tab 으로 들어오고, 좌우 화살표로 이동
               onClick={() => setTab(t.key)}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+                e.preventDefault()
+                const i = tabs.findIndex((x) => x.key === activeTab)
+                const nextKey = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length].key
+                setTab(nextKey)
+                document.getElementById(`jobtab-${nextKey}`)?.focus()
+              }}
               className={`flex-none rounded-md px-4 py-2 text-[15px] font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
             >
               {t.label}
@@ -236,7 +248,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           ))}
         </div>
 
-        <div className="pt-4">
+        <div id="jobtab-panel" role="tabpanel" aria-labelledby={`jobtab-${activeTab}`} tabIndex={0} className="pt-4">
           {activeTab === 'config' && (
             <section className="card flex flex-col gap-3 px-6 py-5">
               <DetailGrid
@@ -307,9 +319,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
               <section className="card flex flex-col gap-3 px-6 py-5">
                 <div className="flex flex-wrap items-center gap-3">
                   {job.resultUrl && (
-                    <a href={job.resultUrl} rel="noreferrer" className="btn btn-md btn-primary">
+                    <button type="button" onClick={() => void downloadFile(job.resultUrl!, adapterFileName(job.jobId, `${name.workload}-job-${job.jobId}`, null, job.resultUrl!))} className="btn btn-md btn-primary">
                       결과 다운로드
-                    </a>
+                    </button>
                   )}
                   {job.resultHash && (
                     <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
