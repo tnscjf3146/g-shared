@@ -98,13 +98,22 @@ class BenchmarkUpdate:
     #: versions are not comparable, and a Scheduler ranking across them would
     #: be ranking on the wrong thing.
     benchmark_version: str
+    #: The most VRAM the benchmark actually used, in MiB. **Not** the card's
+    #: capacity: ``vramMb`` is what the driver reports for the whole card, and
+    #: part of that is already spent on the driver and the display. This is a
+    #: measurement of what a real training workload took on this machine.
+    #:
+    #: Optional, and left out of the request when it is unknown -- a Backend
+    #: that does not read it must not be sent a null, and this Worker must keep
+    #: working against a Backend that has no column for it yet.
+    peak_vram_mb: int | None = None
 
     def as_payload(self):
         return {
             "gpuModel": self.gpu_model,
             "vramMb": int(self.vram_mb),
-            "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
-            "benchmarkVersion": self.benchmark_version,
+            **_benchmark_payload(self.benchmark_tokens_per_sec,
+                                 self.benchmark_version, self.peak_vram_mb),
         }
 
 
@@ -131,6 +140,11 @@ class WorkerRegistrationRequest:
     vram_mb: int
     benchmark_tokens_per_sec: float
     benchmark_version: str
+    #: What the benchmark's peak VRAM was, in MiB. See
+    #: :attr:`BenchmarkUpdate.peak_vram_mb` -- the same measurement, sent at
+    #: registration so the Backend knows it from the first day rather than only
+    #: after somebody re-measures.
+    peak_vram_mb: int | None = None
 
     @classmethod
     def describing(
@@ -142,6 +156,7 @@ class WorkerRegistrationRequest:
         client_version: str,
         benchmark_version: str,
         wsl_available: bool = True,
+        peak_vram_mb: int | None = None,
     ) -> "WorkerRegistrationRequest":
         """This machine, plus what has to be measured or made rather than read."""
         return cls(
@@ -153,6 +168,7 @@ class WorkerRegistrationRequest:
             vram_mb=facts.vram_mb,
             benchmark_tokens_per_sec=benchmark_tokens_per_sec,
             benchmark_version=benchmark_version,
+            peak_vram_mb=peak_vram_mb,
         )
 
     def as_payload(self):
@@ -167,10 +183,9 @@ class WorkerRegistrationRequest:
                 "gpuModel": self.gpu_model,
                 "vramMb": int(self.vram_mb),
             },
-            "benchmark": {
-                "benchmarkTokensPerSec": float(self.benchmark_tokens_per_sec),
-                "benchmarkVersion": self.benchmark_version,
-            },
+            "benchmark": _benchmark_payload(
+                self.benchmark_tokens_per_sec, self.benchmark_version,
+                self.peak_vram_mb),
         }
 
     def benchmark_update(self) -> BenchmarkUpdate:
@@ -178,7 +193,20 @@ class WorkerRegistrationRequest:
         return BenchmarkUpdate(
             self.gpu_model, self.vram_mb,
             self.benchmark_tokens_per_sec, self.benchmark_version,
+            self.peak_vram_mb,
         )
+
+
+def _benchmark_payload(tokens_per_sec: float, version: str,
+                       peak_vram_mb: int | None) -> dict[str, Any]:
+    """The benchmark half of a request. One shape for both endpoints."""
+    payload: dict[str, Any] = {
+        "benchmarkTokensPerSec": float(tokens_per_sec),
+        "benchmarkVersion": version,
+    }
+    if peak_vram_mb is not None:
+        payload["peakVramMb"] = int(peak_vram_mb)
+    return payload
 
 
 class HttpWorkerRegistry:
