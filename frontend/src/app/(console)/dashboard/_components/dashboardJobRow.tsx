@@ -27,7 +27,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
   const panelId = `job-detail-${job.jobId}`
   const gray = 'color-mix(in srgb, var(--color-hairline-strong) 70%, var(--color-surface-2))'
   const rowBg = failed ? 'var(--color-danger-tint)' : completed || cancelled ? gray : undefined
-  const strike = cancelled ? 'text-text-muted line-through decoration-1' : ''
+  const strike = cancelled && !failed ? 'text-text-muted line-through decoration-1' : '' // 실패+취소 겹치면 빨강 배경만(취소선과 충돌 방지)
   return (
     <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={{ ...style, ...(rowBg && { background: rowBg }) }}>
       {/* 펼칠 수 있는 줄만 클릭 토글. 상세·취소는 전파를 막아 토글되지 않게 */}

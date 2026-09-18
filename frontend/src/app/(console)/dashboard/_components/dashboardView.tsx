@@ -81,7 +81,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
         : jobList.slice().sort(newestFirst) // 'latest'
   // 폴링으로 목록이 줄면 현재 페이지가 범위를 넘을 수 있다 → 마지막 페이지로 클램프(빈 화면 방지)
   const totalJobPages = Math.max(1, Math.ceil(displayList.length / JOBS_PER_PAGE))
-  const safeJobPage = Math.min(jobPage, totalJobPages - 1)
+  const safeJobPage = Math.min(jobPage, totalJobPages - 1) // 렌더는 항상 범위 안(폴링으로 줄어도 빈 화면 안 남)
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 

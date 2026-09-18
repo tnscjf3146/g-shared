@@ -5,7 +5,6 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { renameAdapter } from '../api'
-import { downloadFile } from '../download'
 import { jobMessageFor } from '../errors'
 import { adapterFileName, adapterLabel } from '../format'
 import { ADAPTER_NAME_MAX, adapterNameSchema } from '../schema'
@@ -41,17 +40,6 @@ export function AdapterCard({ job, onRenamed }: Props) {
     }
   }
 
-  // 다운로드 파일 이름을 어댑터 이름으로 강제(downloadFile 이 크로스 오리진·CORS 실패·URL 해제까지 처리)
-  const [downloading, setDownloading] = useState(false)
-  const download = async () => {
-    if (!job.resultUrl) return
-    setDownloading(true)
-    try {
-      await downloadFile(job.resultUrl, adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl))
-    } finally {
-      setDownloading(false)
-    }
-  }
 
   return (
     <section className="card flex flex-col gap-3 px-6 py-5">
@@ -115,9 +103,9 @@ export function AdapterCard({ job, onRenamed }: Props) {
       {job.status === 'COMPLETED' && (job.resultUrl || job.resultHash) ? (
         <div className="flex flex-wrap items-center gap-3">
           {job.resultUrl && (
-            <button type="button" onClick={() => void download()} disabled={downloading} className="btn btn-md btn-primary">
-              {downloading ? '내려받는 중…' : '어댑터 다운로드'}
-            </button>
+            <a href={job.resultUrl} download={adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl)} rel="noreferrer" className="btn btn-md btn-primary">
+              어댑터 다운로드
+            </a>
           )}
           {job.resultHash && (
             <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">

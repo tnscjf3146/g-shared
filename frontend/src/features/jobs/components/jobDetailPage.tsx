@@ -7,7 +7,6 @@ import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
-import { downloadFile } from '../download'
 import { jobMessageFor } from '../errors'
 import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, adapterFileName, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
@@ -248,7 +247,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           ))}
         </div>
 
-        <div id="jobtab-panel" role="tabpanel" aria-labelledby={`jobtab-${activeTab}`} tabIndex={0} className="pt-4">
+        <div id="jobtab-panel" role="tabpanel" aria-labelledby={`jobtab-${activeTab}`} className="pt-4">
           {activeTab === 'config' && (
             <section className="card flex flex-col gap-3 px-6 py-5">
               <DetailGrid
@@ -319,9 +318,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
               <section className="card flex flex-col gap-3 px-6 py-5">
                 <div className="flex flex-wrap items-center gap-3">
                   {job.resultUrl && (
-                    <button type="button" onClick={() => void downloadFile(job.resultUrl!, adapterFileName(job.jobId, `${name.workload}-job-${job.jobId}`, null, job.resultUrl!))} className="btn btn-md btn-primary">
+                    <a href={job.resultUrl} download={adapterFileName(job.jobId, `${name.workload}-job-${job.jobId}`, null, job.resultUrl)} rel="noreferrer" className="btn btn-md btn-primary">
                       결과 다운로드
-                    </button>
+                    </a>
                   )}
                   {job.resultHash && (
                     <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
