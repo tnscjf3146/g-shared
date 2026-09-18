@@ -69,8 +69,8 @@ public class LocalObjectStorage implements ObjectStorage {
         if (downloadFilename == null || downloadFilename.isBlank()) {
             return plain;
         }
-        // filename 은 서명에 넣지 않는다 — 저장 이름 표시일 뿐 접근 권한과 무관하고,
-        // 서명에 묶으면 이름이 바뀔 때마다(어댑터 이름 변경) 기존 URL 형식과 갈라진다.
+        // filename 은 서명에 넣지 않는다 — 저장 이름 "표시"일 뿐 접근 권한과 무관하다 (내용·키·만료는 서명이 지킨다).
+        // 대가: URL 소지자가 자기 링크의 저장 이름만 바꿔 재공유할 수 있다. 헤더 주입은 컨트롤러가 걸러낸다.
         String encoded = UriUtils.encodeQueryParam(downloadFilename, StandardCharsets.UTF_8);
         return new SignedUrl(plain.url() + "&filename=" + encoded, plain.expiresAt());
     }
