@@ -19,6 +19,16 @@ public interface ObjectStorage {
     /** 내려받기용 서명 URL. */
     SignedUrl presignDownload(String objectKey, Duration ttl);
 
+    /**
+     * 내려받기용 서명 URL + 저장 파일 이름. 브라우저는 크로스 오리진 다운로드에서 프런트가 지정한
+     * 이름을 무시하므로, 서버가 Content-Disposition 으로 이름을 실어 준다(프런트 요청 2026-09-18).
+     * S3/MinIO 로 옮기면 이 파라미터가 {@code response-content-disposition} 오버라이드가 된다 — 계약은 유지.
+     * 일부러 default 를 주지 않는다 — 새 구현체가 이 메서드를 잊으면 컴파일 에러로 드러나야 한다.
+     * (default 로 조용히 이름을 버리면 "기능이 소리 없이 사라지는" 함정이 된다. 이름이 필요 없는 구현은
+     * 명시적으로 {@code presignDownload(objectKey, ttl)} 에 위임하라.)
+     */
+    SignedUrl presignDownload(String objectKey, Duration ttl, String downloadFilename);
+
     /** 오브젝트가 실제로 존재하는지와 그 크기·해시. 없으면 empty. (업로드 완료 검증용 — 규격 §18) */
     Optional<ObjectStat> stat(String objectKey);
 

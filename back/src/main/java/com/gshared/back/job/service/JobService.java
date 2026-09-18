@@ -305,12 +305,44 @@ public class JobService {
             return null;
         }
         try {
-            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
+            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl(),
+                    downloadFilename(job)).url();
         } catch (Exception e) {
             // 다운로드 URL 은 부가 정보 — 스토리지 장애가 상세 조회 전체를 죽이면 안 된다.
             log.error("[STORAGE] 결과물 서명 URL 발급 실패 jobId={} key={}", job.getId(), job.getResultObjectKey(), e);
             return null;
         }
+    }
+
+    /**
+     * 저장 파일 이름 조립 (프런트 요청 2026-09-18) — 어댑터 이름은 서버가 정본이라 서버가 규칙대로 만든다.
+     * <ul>
+     *   <li>학습(어댑터 이름 있음): {@code <어댑터이름>-v<버전>.<확장자>} — 예: cs-상담봇-v2.tar
+     *   <li>그 외(추론·평가 등): {@code <워크로드이름>-job-<id>.<확장자>} — 스토리지 키를 그대로 노출하지 않는다
+     * </ul>
+     * 확장자는 실제 저장 키(resultObjectKey)의 것을 따른다 — 이름 규칙과 실물 형식이 어긋나지 않게.
+     */
+    String downloadFilename(Job job) {
+        String ext = extensionOf(job.getResultObjectKey());
+        if (job.getAdapterName() != null && !job.getAdapterName().isBlank()) {
+            int version = job.getAdapterVersion() != null ? job.getAdapterVersion() : 1;
+            return safeName(job.getAdapterName()) + "-v" + version + ext;
+        }
+        String workloadName = workloadRepository.findById(job.getWorkloadId())
+                .map(Workload::getName).orElse("결과");
+        return safeName(workloadName) + "-job-" + job.getId() + ext;
+    }
+
+    /** 파일 이름에 못 들어가는 문자만 바꾼다(윈도우 금지 문자 + 경로 구분자). 한글은 그대로 — 헤더가 RFC 5987 로 싣는다. */
+    private static String safeName(String name) {
+        return name.replaceAll("[\\\\/:*?\"<>|\\r\\n]", "_").trim();
+    }
+
+    /** 저장 키의 확장자(점 포함). 없으면 빈 문자열 — 없는 확장자를 지어내지 않는다. */
+    private static String extensionOf(String objectKey) {
+        String fileName = objectKey.substring(objectKey.lastIndexOf('/') + 1);
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(dot) : "";
     }
 
     /**

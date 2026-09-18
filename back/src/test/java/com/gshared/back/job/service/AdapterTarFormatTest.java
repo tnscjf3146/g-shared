@@ -37,6 +37,11 @@ class AdapterTarFormatTest {
         }
 
         @Override
+        public SignedUrl presignDownload(String objectKey, Duration ttl, String downloadFilename) {
+            throw new UnsupportedOperationException();   // 이 테스트는 다운로드 URL 을 쓰지 않는다
+        }
+
+        @Override
         public Optional<ObjectStat> stat(String objectKey) {
             return Optional.of(new ObjectStat(content.length, ""));
         }

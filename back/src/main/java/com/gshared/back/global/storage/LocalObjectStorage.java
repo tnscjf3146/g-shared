@@ -4,6 +4,7 @@ import com.gshared.back.global.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -60,6 +61,20 @@ public class LocalObjectStorage implements ObjectStorage {
     @Override
     public SignedUrl presignDownload(String objectKey, Duration ttl) {
         return presign("GET", objectKey, ttl);
+    }
+
+    @Override
+    public SignedUrl presignDownload(String objectKey, Duration ttl, String downloadFilename) {
+        SignedUrl plain = presign("GET", objectKey, ttl);
+        if (downloadFilename == null || downloadFilename.isBlank()) {
+            return plain;
+        }
+        // filename 은 서명에 넣지 않는다 — 저장 이름 "표시"일 뿐 접근 권한과 무관하다 (내용·키·만료는 서명이 지킨다).
+        // 대가: URL 소지자가 자기 링크의 저장 이름만 바꿔 재공유할 수 있다. 헤더 주입은 컨트롤러가 걸러낸다.
+        // encodeQueryParam 이 아니라 encode — 전자는 '+' 를 그대로 두는데 톰캣이 쿼리의 '+' 를
+        // 공백으로 디코드해 이름이 변질된다. encode 는 unreserved 외 전부 %인코딩이라 안전.
+        String encoded = UriUtils.encode(downloadFilename, StandardCharsets.UTF_8);
+        return new SignedUrl(plain.url() + "&filename=" + encoded, plain.expiresAt());
     }
 
     private SignedUrl presign(String method, String objectKey, Duration ttl) {
