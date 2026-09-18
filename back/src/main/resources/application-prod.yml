@@ -11,6 +11,12 @@ spring:
     hibernate:
       ddl-auto: validate  # 스키마는 Flyway 가 만들고, JPA 는 검증만
 
+  flyway:
+    placeholders:
+      # 배포 컨테이너는 2026-09-18 전까지 UTC 로 돌아 모든 DATETIME 이 UTC 벽시계다. Dockerfile 이 TZ 를 Asia/Seoul 로
+      # 바꾸는 것과 같은 배포에서 V20 이 기존 값을 +9h 민다. 한 번 적용되면 Flyway 가 다시 돌리지 않으므로 이 값은 그대로 둔다.
+      tz_shift_hours: 9
+
   data:
     redis:
       host: ${REDIS_HOST:redis}

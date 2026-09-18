@@ -5,6 +5,12 @@ spring:
   jpa:
     open-in-view: false     # 지연 로딩이 컨트롤러까지 새는 걸 막음
 
+  flyway:
+    placeholders:
+      # V20(UTC→KST 시각 보정)이 몇 시간 밀지. 기본 0 = 아무것도 안 함 — 로컬·테스트는 호스트가 KST 라 밀면 틀어진다.
+      # 배포 컨테이너는 그동안 UTC 로 저장했으므로 prod 프로필이 9 로 덮어쓴다. 값이 없으면 Flyway 가 기동을 거부한다.
+      tz_shift_hours: 0
+
   data:
     redis:
       port: 6379
