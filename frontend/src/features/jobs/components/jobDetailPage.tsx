@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
+import { StatusBadge } from '@/components/ui/statusBadge'
 import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
@@ -15,10 +16,23 @@ import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
 import { JobDetailSkeleton } from './jobSkeleton'
-import { PlainTable } from './plainTable'
 
-// /jobs/[id] 본문(job.md §5) — 대시보드와 같은 톤: 배지·모션 없이 제목 줄 + 격자 표. 진행 중 상태면 10초 폴링, 끝나면 중단. 이름(workload·모델·GPU)은 카탈로그로 id→이름
+// /jobs/[id] 본문(job.md §5) — 대시보드와 같은 톤: 배지·모션 없이 제목 줄 + 속성 카드. 진행 중 상태면 10초 폴링, 끝나면 중단. 이름(workload·모델·GPU)은 카탈로그로 id→이름
 const POLL_MS = 10_000
+
+// 한 건의 속성을 읽기 쉽게 — 표 대신 "라벨(작게·회색) 위, 값(크게·진하게)" 키-값 그리드. 테두리 대신 여백으로 구분
+function DetailGrid({ items }: { items: [string, React.ReactNode][] }) {
+  return (
+    <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3 lg:grid-cols-4">
+      {items.map(([k, v]) => (
+        <div key={k} className="flex min-w-0 flex-col gap-1">
+          <dt className="text-[12px] font-medium tracking-eyebrow text-text-muted">{k}</dt>
+          <dd className="text-[17px] font-semibold break-words tabular-nums text-dark">{v}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
 type State = { status: 'loading' } | { status: 'notfound' } | { status: 'error' } | { status: 'ready'; job: JobDetail }
 
 export function JobDetailPage({ jobId }: { jobId: number }) {
@@ -152,8 +166,12 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-4">
-            <h1 className="min-w-0 break-words text-h1 font-bold tracking-heading text-dark">{name.workload}</h1>
-            <span className="text-[17px] font-medium text-dark">{meta.label}</span>
+            <h1 className={`min-w-0 break-words text-h1 font-bold tracking-heading ${job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-2' : 'text-dark'}`}>{name.workload}</h1>
+            {job.status === 'COMPLETED' ? (
+              <StatusBadge tone="success">완료</StatusBadge>
+            ) : (
+              <span className={`text-[17px] font-medium ${meta.tone === 'danger' ? 'text-danger' : job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>{meta.label}</span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" href={`/jobs/${job.jobId}/chain`}>
@@ -196,10 +214,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">설정</h2>
-        <PlainTable
-          minWidth={900}
-          widths={['16%', '24%', '12%', '12%', '12%', '12%', '12%']}
-          cols={[
+        <DetailGrid
+          items={[
             ['작업 종류', name.workload],
             ['베이스 모델', name.model],
             ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
@@ -223,10 +239,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
       {dataset && (
         <section className="card flex flex-col gap-3 px-6 py-5">
           <h2 className="text-[17px] font-bold tracking-heading text-dark">데이터셋</h2>
-          <PlainTable
-            minWidth={840}
-            widths={['12%', '12%', '15%', '15%', '13%', '13%', '20%']}
-            cols={[
+          <DetailGrid
+            items={[
               ['크기', formatBytes(dataset.sizeBytes)],
               ['샘플', `${dataset.sampleCount.toLocaleString('ko-KR')}개`],
               ['토큰(근사)', dataset.totalTokens.toLocaleString('ko-KR')],
@@ -241,10 +255,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">비용 · 시간</h2>
-        <PlainTable
-          minWidth={900}
-          widths={['11%', '11%', '12%', '12%', '18%', '18%', '18%']} // 날짜 칸을 넓게
-          cols={[
+        <DetailGrid
+          items={[
             ['예상 비용', formatCost(job.estimatedCost)],
             ['실제 비용', job.actualCost != null ? formatCost(job.actualCost) : dash],
             ['예상 소요', formatDuration(job.predictedRuntimeSec)],

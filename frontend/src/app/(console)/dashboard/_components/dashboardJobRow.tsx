@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { StatusBadge } from '@/components/ui/statusBadge'
 import { JobDetailInline } from '@/features/jobs/components/jobDetailInline'
 import { CANCELLABLE_STATUSES, formatDateTime, jobStatusMeta } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
@@ -20,7 +21,9 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
   const panelId = `job-detail-${job.jobId}`
   // 끝난 상태 구분: 실패 = 빨간 틴트 배경, 완료·취소됨 = 어두운 회색 배경(가라앉은 느낌)
   const failed = jobStatusMeta(job.status, job.failReason).tone === 'danger'
-  const done = job.status === 'COMPLETED' || job.status === 'CANCELLED'
+  const completed = job.status === 'COMPLETED'
+  const cancelled = job.status === 'CANCELLED'
+  const done = completed || cancelled
   const rowBg = failed ? 'var(--color-danger-tint)' : done ? 'color-mix(in srgb, var(--color-hairline-strong) 45%, var(--color-surface-2))' : undefined
   return (
     <li className="card animate-enter flex flex-col gap-4 px-6 py-4" style={{ ...style, ...(rowBg && { background: rowBg }) }}>
@@ -42,11 +45,18 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          <h3 className="truncate text-[17px] font-bold tracking-heading text-dark">
+          <h3 className={`truncate text-[17px] font-bold tracking-heading ${cancelled ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>
             <span className="tabular-nums">{index}.</span> {workloadName}
           </h3>
         </div>
-        <div className={`hidden text-[17px] font-medium md:block ${failed ? 'text-danger' : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason).label}</div>
+        {/* 완료는 초록 배지로 눈에 띄게, 취소됨은 취소선, 나머지는 글자만(실패는 빨강) */}
+        <div className="hidden md:block">
+          {completed ? (
+            <StatusBadge tone="success">완료</StatusBadge>
+          ) : (
+            <span className={`text-[17px] font-medium ${failed ? 'text-danger' : cancelled ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason).label}</span>
+          )}
+        </div>
         <div className="hidden md:block">
           <div className="text-[14px] text-text-muted">생성</div>
           <div className="text-[17px] font-medium tabular-nums text-dark">{formatDateTime(job.createdAt)}</div>
