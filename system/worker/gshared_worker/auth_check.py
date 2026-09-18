@@ -291,7 +291,10 @@ def _enrol(
         facts, measured.result.tokens_per_sec,
         operator_address=wallet.address,
         client_version=__version__,
-        benchmark_version=BENCHMARK_VERSION)
+        benchmark_version=BENCHMARK_VERSION,
+        # Measured by the same benchmark run. The card's reported capacity says
+        # what it has; this says what a real training workload took on it.
+        peak_vram_mb=measured.result.peak_vram_mb)
 
     say("")
     say("  이 PC를 등록하는 중...")
