@@ -219,8 +219,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         )}
       </section>
 
-      {/* 상세는 탭으로 — 진행 아래에서 설정·데이터셋·비용·어댑터를 하나씩 (스크롤 대신) */}
-      <div>
+      {/* 상세는 탭으로 — 진행 아래에서 설정·데이터셋·비용·어댑터를 하나씩 (스크롤 대신). 진행 카드와 간격을 둔다 */}
+      <div className="mt-3">
         <div role="tablist" className="flex gap-2 overflow-x-auto pb-1">
           {tabs.map((t) => (
             <button
