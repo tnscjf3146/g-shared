@@ -9,12 +9,13 @@ import { Pager } from './pager'
 // 작업 탭 상단(대시보드.png 참고 구조, 프로필 사진 없음): 히어로 배너 + 상태 도넛 → KPI 카드 4개 → 워크로드별 작업 · 진행 중 작업(진행률)
 // 데이터는 DashboardView 가 이미 들고 있는 작업 목록·카탈로그를 그대로 받는다(추가 fetch 없음, 15초 폴링도 거기서)
 
-// 도넛 조각 — 상태 4묶음. 색은 정적 클래스(Tailwind v4 는 소스에 있는 클래스만 뽑는다)
+// 도넛 조각 — 상태 4묶음. 채도·명도를 맞춘 조화 팔레트(초록·앰버·슬레이트·로즈, 모두 중간 톤)로 한 벌처럼 보이게 한다.
+// 브랜드 그린(버튼용 #76B900)은 쨍해서 다른 색과 따로 놀아, 차트에는 톤을 낮춘 초록을 쓴다
 const SEGMENTS = [
-  { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', cls: 'stroke-primary', dot: 'bg-primary' },
-  { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', cls: 'stroke-accent-mint', dot: 'bg-accent-mint' },
-  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', cls: 'stroke-text-muted', dot: 'bg-text-muted' },
-  { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-danger', dot: 'bg-danger' },
+  { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', color: '#4E9F6D' }, // green
+  { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', color: '#E0B04A' }, // amber
+  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', color: '#8A94A6' }, // slate
+  { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', color: '#D2696C' }, // rose
 ]
 
 export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {
@@ -58,7 +59,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
             <ul className="flex min-w-0 flex-1 flex-col gap-2">
               {SEGMENTS.map((s, i) => (
                 <li key={s.key} className="flex items-center gap-2 text-[14px] text-dark">
-                  <span aria-hidden className={`size-2 flex-none rounded-pill ${s.dot}`} />
+                  <span aria-hidden className="size-2 flex-none rounded-pill" style={{ backgroundColor: s.color }} />
                   <span className="min-w-0 flex-1 truncate">{s.key}</span>
                   <span className="font-semibold tabular-nums">{total ? Math.round((counts[i] / total) * 100) : 0}%</span>
                 </li>
@@ -147,7 +148,7 @@ function Donut({ counts, total }: { counts: number[]; total: number }) {
         {total === 0 && <circle cx="60" cy="60" r={R} fill="none" strokeWidth="12" className="stroke-neutral-tint" />}
         {counts.map(
           (n, i) =>
-            n > 0 && <circle key={SEGMENTS[i].key} cx="60" cy="60" r={R} fill="none" strokeWidth="12" strokeDasharray={`${lens[i]} ${C - lens[i]}`} strokeDashoffset={-starts[i]} className={SEGMENTS[i].cls} />,
+            n > 0 && <circle key={SEGMENTS[i].key} cx="60" cy="60" r={R} fill="none" strokeWidth="12" strokeDasharray={`${lens[i]} ${C - lens[i]}`} strokeDashoffset={-starts[i]} style={{ stroke: SEGMENTS[i].color }} />,
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
