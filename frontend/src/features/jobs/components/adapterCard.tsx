@@ -40,6 +40,31 @@ export function AdapterCard({ job, onRenamed }: Props) {
     }
   }
 
+  // 다운로드 파일 이름을 어댑터 이름으로 강제한다. 크로스 오리진 스토리지에선 <a download> 의 파일명이 무시되므로(→ URL 끝 이름) blob 으로 받아 이름을 붙인다.
+  // CORS 로 blob 을 못 받으면 새 탭으로 여는 것으로 물러선다 — 그 경우 이름은 서버 Content-Disposition 이 정해야 한다(job.md §11)
+  const [downloading, setDownloading] = useState(false)
+  const download = async () => {
+    if (!job.resultUrl) return
+    const name = adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl)
+    setDownloading(true)
+    try {
+      const res = await fetch(job.resultUrl)
+      if (!res.ok) throw new Error('download failed')
+      const url = URL.createObjectURL(await res.blob())
+      const a = document.createElement('a')
+      a.href = url
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      window.open(job.resultUrl, '_blank', 'noopener')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <section className="card flex flex-col gap-3 px-6 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -52,8 +77,11 @@ export function AdapterCard({ job, onRenamed }: Props) {
       </div>
 
       {editing === null ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[15px] font-semibold text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-[12px] font-medium tracking-eyebrow text-text-muted">어댑터 이름</span>
+            <span className="text-[17px] font-semibold break-words text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
+          </div>
           <button type="button" onClick={() => setEditing(job.adapterName ?? '')} className="text-[13px] text-primary hover:underline">
             이름 변경
           </button>
@@ -99,9 +127,9 @@ export function AdapterCard({ job, onRenamed }: Props) {
       {job.status === 'COMPLETED' && (job.resultUrl || job.resultHash) ? (
         <div className="flex flex-wrap items-center gap-3">
           {job.resultUrl && (
-            <a href={job.resultUrl} download={adapterFileName(job.jobId, job.adapterName, job.adapterVersion, job.resultUrl)} rel="noreferrer" className="btn btn-md btn-primary">
-              어댑터 다운로드
-            </a>
+            <button type="button" onClick={() => void download()} disabled={downloading} className="btn btn-md btn-primary">
+              {downloading ? '내려받는 중…' : '어댑터 다운로드'}
+            </button>
           )}
           {job.resultHash && (
             <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">

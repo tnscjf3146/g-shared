@@ -18,6 +18,7 @@ import { JobDetailSkeleton } from './jobSkeleton'
 
 // /jobs/[id] 본문(job.md §5) — 대시보드와 같은 톤: 배지·모션 없이 제목 줄 + 속성 카드. 진행 중 상태면 10초 폴링, 끝나면 중단. 이름(workload·모델·GPU)은 카탈로그로 id→이름
 const POLL_MS = 10_000
+type TabKey = 'config' | 'dataset' | 'cost' | 'adapter'
 
 // 한 건의 속성을 읽기 쉽게 — 표 대신 "라벨(작게·회색) 위, 값(크게·진하게)" 키-값 그리드. 테두리 대신 여백으로 구분
 function DetailGrid({ items }: { items: [string, React.ReactNode][] }) {
@@ -41,6 +42,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmOpen, setConfirmOpen] = useState(false) // 작업 취소 확인 대화상자
+  const [tab, setTab] = useState<TabKey>('config') // 진행 아래 상세를 탭으로(설정·데이터셋·비용·어댑터)
 
   const load = useCallback(
     (silent = false) =>
@@ -118,6 +120,16 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   // 어댑터를 만드는 작업인가. 카탈로그를 못 받았으면 결과물 유무로 대신 판단한다(카탈로그 실패로 다운로드가 사라지면 안 된다)
   const workloadKind = catalog?.workloads.find((w) => w.id === job.workloadId)?.kind
   const isTrain = workloadKind ? workloadKind === 'TRAIN_LORA' : job.adapterName != null || job.resultUrl != null || job.resultHash != null
+
+  // 진행 아래 상세 탭 — 데이터셋은 받았을 때만, 어댑터/결과 탭은 결과물이 있는 작업만
+  const hasResultTab = isTrain || (job.status === 'COMPLETED' && !!(job.resultUrl || job.resultHash))
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: 'config', label: '설정' },
+    ...(dataset ? [{ key: 'dataset' as TabKey, label: '데이터셋' }] : []),
+    { key: 'cost', label: '비용 · 시간' },
+    ...(hasResultTab ? [{ key: 'adapter' as TabKey, label: isTrain ? '어댑터' : '결과' }] : []),
+  ]
+  const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'config'
 
   // FUNDED 는 에스크로 금고에 GSC 가 잠겨 있다 — 온체인 cancelJob 으로 환불을 먼저 받고(MetaMask 서명 1회),
   // 그 다음 기존 취소 API 로 서버 상태를 맞춘다. 그 외 상태(CREATED·ASSIGNED)는 서버 취소만
@@ -201,97 +213,114 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           ))}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
         {job.assignedWorkerId && (
-          <p className="text-[14px] tabular-nums text-text-muted" title={job.assignedWorkerId}>
-            배정 워커 {shortWorkerId(job.assignedWorkerId)}
+          <p className="text-[14px] text-text-muted" title={job.assignedWorkerId}>
+            배정 워커 <span className="font-medium tabular-nums text-dark">{shortWorkerId(job.assignedWorkerId)}</span>
           </p>
         )}
       </section>
 
-      <section className="card flex flex-col gap-3 px-6 py-5">
-        <h2 className="text-[17px] font-bold tracking-heading text-dark">설정</h2>
-        <DetailGrid
-          items={[
-            ['작업 종류', name.workload],
-            ['베이스 모델', name.model],
-            ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
-            ['에폭', String(job.epochs)],
-            ['배치 크기', String(job.batchSize)],
-            ['학습률', String(job.learningRate)],
-            ['최대 길이', String(job.maxLength)],
-          ]}
-        />
-        {/* 입력 어댑터(이어서 학습·업로드) — 예치 전 업로드 여부까지 한 줄로 */}
-        <p className="text-[13px] text-text-muted">
-          입력 어댑터{' '}
-          <span className="font-medium text-dark">
-            {/* adapterUploaded 는 끝난 작업의 파일을 cleanup 이 지우면 다시 false 가 된다 — "업로드 필요"는 예치 전(CREATED)에만 맞는 말 */}
-            {!job.hasAdapter ? '없음 (처음부터 학습)' : job.parentJobId != null ? `작업 #${job.parentJobId} 에서 이어서` : job.status === 'CREATED' && job.adapterUploaded === false ? '업로드 필요' : '업로드됨'}
-          </span>
-        </p>
-      </section>
+      {/* 상세는 탭으로 — 진행 아래에서 설정·데이터셋·비용·어댑터를 하나씩 (스크롤 대신) */}
+      <div>
+        <div role="tablist" className="flex gap-2 overflow-x-auto pb-1">
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === t.key}
+              onClick={() => setTab(t.key)}
+              className={`flex-none rounded-md px-4 py-2 text-[15px] font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
-      {/* 데이터셋 — 3단계에서 브라우저가 뽑은 메타 + 파일 해시. GET /datasets/{datasetId}(파일명은 서버에 없다) */}
-      {dataset && (
-        <section className="card flex flex-col gap-3 px-6 py-5">
-          <h2 className="text-[17px] font-bold tracking-heading text-dark">데이터셋</h2>
-          <DetailGrid
-            items={[
-              ['크기', formatBytes(dataset.sizeBytes)],
-              ['샘플', `${dataset.sampleCount.toLocaleString('ko-KR')}개`],
-              ['토큰(근사)', dataset.totalTokens.toLocaleString('ko-KR')],
-              ['유효 토큰', dataset.effectiveTokens.toLocaleString('ko-KR')],
-              ['평균 길이', String(Math.round(dataset.avgSeqLength))],
-              ['최대 길이', String(dataset.maxSeqLength)],
-              ['파일 해시', dataset.dataHash ? <span title={dataset.dataHash}>{dataset.dataHash.slice(0, 12)}…</span> : dash],
-            ]}
-          />
-        </section>
-      )}
+        <div className="pt-4">
+          {activeTab === 'config' && (
+            <section className="card flex flex-col gap-3 px-6 py-5">
+              <DetailGrid
+                items={[
+                  ['작업 종류', name.workload],
+                  ['베이스 모델', name.model],
+                  ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
+                  ['에폭', String(job.epochs)],
+                  ['배치 크기', String(job.batchSize)],
+                  ['학습률', String(job.learningRate)],
+                  ['최대 길이', String(job.maxLength)],
+                ]}
+              />
+              {/* 입력 어댑터(이어서 학습·업로드) — 예치 전 업로드 여부까지 한 줄로 */}
+              <p className="text-[14px] text-text-muted">
+                입력 어댑터{' '}
+                <span className="font-medium text-dark">
+                  {/* adapterUploaded 는 끝난 작업의 파일을 cleanup 이 지우면 다시 false 가 된다 — "업로드 필요"는 예치 전(CREATED)에만 맞는 말 */}
+                  {!job.hasAdapter ? '없음 (처음부터 학습)' : job.parentJobId != null ? `작업 #${job.parentJobId} 에서 이어서` : job.status === 'CREATED' && job.adapterUploaded === false ? '업로드 필요' : '업로드됨'}
+                </span>
+              </p>
+            </section>
+          )}
 
-      <section className="card flex flex-col gap-3 px-6 py-5">
-        <h2 className="text-[17px] font-bold tracking-heading text-dark">비용 · 시간</h2>
-        <DetailGrid
-          items={[
-            ['예상 비용', formatCost(job.estimatedCost)],
-            ['실제 비용', job.actualCost != null ? formatCost(job.actualCost) : dash],
-            ['예상 소요', formatDuration(job.predictedRuntimeSec)],
-            ['실제 소요', job.actualRuntimeSec != null ? formatDuration(job.actualRuntimeSec) : dash],
-            ['생성', formatDateTime(job.createdAt)],
-            ['시작', job.startedAt ? formatDateTime(job.startedAt) : dash],
-            ['종료', job.finishedAt ? formatDateTime(job.finishedAt) : dash],
-          ]}
-        />
-        {job.finishedAt == null && (
-          <p className="text-[12px] text-text-muted">
-            예상 소요는 순수 학습 시간입니다. 매칭 대기와 워커의 실행 환경 준비(이미지·데이터 다운로드)는 포함되지 않아, 특히 첫 실행은 10분 이상 더 걸릴
-            수 있어요.
-          </p>
-        )}
-      </section>
+          {/* 데이터셋 — 3단계에서 브라우저가 뽑은 메타 + 파일 해시. GET /datasets/{datasetId}(파일명은 서버에 없다) */}
+          {activeTab === 'dataset' && dataset && (
+            <section className="card flex flex-col gap-3 px-6 py-5">
+              <DetailGrid
+                items={[
+                  ['크기', formatBytes(dataset.sizeBytes)],
+                  ['샘플', `${dataset.sampleCount.toLocaleString('ko-KR')}개`],
+                  ['토큰(근사)', dataset.totalTokens.toLocaleString('ko-KR')],
+                  ['유효 토큰', dataset.effectiveTokens.toLocaleString('ko-KR')],
+                  ['평균 길이', String(Math.round(dataset.avgSeqLength))],
+                  ['최대 길이', String(dataset.maxSeqLength)],
+                  ['파일 해시', dataset.dataHash ? <span title={dataset.dataHash}>{dataset.dataHash.slice(0, 12)}…</span> : dash],
+                ]}
+              />
+            </section>
+          )}
 
-      {/* 어댑터 — 학습 결과물. 이름은 다운로드 파일 이름이라 끝난 뒤에도 바꿀 수 있다. 어댑터를 만들지 않는 워크로드(추론·평가)는 결과 파일만 */}
-      {isTrain ? (
-        <AdapterCard job={job} onRenamed={(next) => setState({ status: 'ready', job: next })} />
-      ) : (
-        job.status === 'COMPLETED' &&
-        (job.resultUrl || job.resultHash) && (
-          <section className="card flex flex-col gap-3 px-6 py-5">
-            <h2 className="text-[17px] font-bold tracking-heading text-dark">결과</h2>
-            <div className="flex flex-wrap items-center gap-3">
-              {job.resultUrl && (
-                <a href={job.resultUrl} rel="noreferrer" className="btn btn-md btn-primary">
-                  결과 다운로드
-                </a>
+          {activeTab === 'cost' && (
+            <section className="card flex flex-col gap-3 px-6 py-5">
+              <DetailGrid
+                items={[
+                  ['예상 비용', formatCost(job.estimatedCost)],
+                  ['실제 비용', job.actualCost != null ? formatCost(job.actualCost) : dash],
+                  ['예상 소요', formatDuration(job.predictedRuntimeSec)],
+                  ['실제 소요', job.actualRuntimeSec != null ? formatDuration(job.actualRuntimeSec) : dash],
+                  ['생성', formatDateTime(job.createdAt)],
+                  ['시작', job.startedAt ? formatDateTime(job.startedAt) : dash],
+                  ['종료', job.finishedAt ? formatDateTime(job.finishedAt) : dash],
+                ]}
+              />
+              {job.finishedAt == null && (
+                <p className="text-[13px] text-text-muted">
+                  예상 소요는 순수 학습 시간입니다. 매칭 대기와 워커의 실행 환경 준비(이미지·데이터 다운로드)는 포함되지 않아, 특히 첫 실행은 10분 이상 더 걸릴 수 있어요.
+                </p>
               )}
-              {job.resultHash && (
-                <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
-                  해시 {job.resultHash.slice(0, 10)}… 복사
-                </button>
-              )}
-            </div>
-          </section>
-        )
-      )}
+            </section>
+          )}
+
+          {/* 어댑터 — 학습 결과물. 어댑터를 만들지 않는 워크로드(추론·평가)는 결과 파일만 */}
+          {activeTab === 'adapter' &&
+            (isTrain ? (
+              <AdapterCard job={job} onRenamed={(next) => setState({ status: 'ready', job: next })} />
+            ) : (
+              <section className="card flex flex-col gap-3 px-6 py-5">
+                <div className="flex flex-wrap items-center gap-3">
+                  {job.resultUrl && (
+                    <a href={job.resultUrl} rel="noreferrer" className="btn btn-md btn-primary">
+                      결과 다운로드
+                    </a>
+                  )}
+                  {job.resultHash && (
+                    <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
+                      해시 {job.resultHash.slice(0, 10)}… 복사
+                    </button>
+                  )}
+                </div>
+              </section>
+            ))}
+        </div>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}
