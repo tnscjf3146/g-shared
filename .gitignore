@@ -16,3 +16,7 @@ blockchain/.claude/
 system/**/gshared-debug.log
 system/**/worker-config.json
 system/**/worker-wallet.json
+
+# 운영 백업 산출물 (infra/backup/backup.sh). users 테이블에 이메일·비밀번호 해시·지갑 주소가 들어간다.
+backup-*.sql
+backup-*.tar.gz
