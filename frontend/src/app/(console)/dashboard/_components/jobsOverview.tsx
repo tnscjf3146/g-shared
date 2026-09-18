@@ -14,7 +14,7 @@ const SEGMENTS = [
   { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', cls: 'stroke-primary', dot: 'bg-primary' },
   { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', cls: 'stroke-accent-mint', dot: 'bg-accent-mint' },
   { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', cls: 'stroke-dark', dot: 'bg-dark' },
-  { key: '종료', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-hairline-strong', dot: 'bg-hairline-strong' },
+  { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-danger', dot: 'bg-danger' },
 ]
 
 export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {
