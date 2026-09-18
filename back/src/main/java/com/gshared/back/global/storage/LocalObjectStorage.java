@@ -4,6 +4,7 @@ import com.gshared.back.global.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.web.util.UriUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -60,6 +61,18 @@ public class LocalObjectStorage implements ObjectStorage {
     @Override
     public SignedUrl presignDownload(String objectKey, Duration ttl) {
         return presign("GET", objectKey, ttl);
+    }
+
+    @Override
+    public SignedUrl presignDownload(String objectKey, Duration ttl, String downloadFilename) {
+        SignedUrl plain = presign("GET", objectKey, ttl);
+        if (downloadFilename == null || downloadFilename.isBlank()) {
+            return plain;
+        }
+        // filename 은 서명에 넣지 않는다 — 저장 이름 표시일 뿐 접근 권한과 무관하고,
+        // 서명에 묶으면 이름이 바뀔 때마다(어댑터 이름 변경) 기존 URL 형식과 갈라진다.
+        String encoded = UriUtils.encodeQueryParam(downloadFilename, StandardCharsets.UTF_8);
+        return new SignedUrl(plain.url() + "&filename=" + encoded, plain.expiresAt());
     }
 
     private SignedUrl presign(String method, String objectKey, Duration ttl) {

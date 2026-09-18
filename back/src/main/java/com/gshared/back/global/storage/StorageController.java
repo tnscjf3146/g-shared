@@ -52,6 +52,7 @@ public class StorageController {
     public ResponseEntity<Resource> download(
             @RequestParam("expires") long expires,
             @RequestParam("sig") String signature,
+            @RequestParam(value = "filename", required = false) String filename,
             HttpServletRequest request
     ) {
         String objectKey = objectKey(request);
@@ -59,8 +60,27 @@ public class StorageController {
         Path file = storage.read(objectKey);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + file.getFileName() + "\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        contentDisposition(filename != null ? filename : file.getFileName().toString()))
                 .body(new FileSystemResource(file));
+    }
+
+    /**
+     * 저장 파일 이름 헤더 (RFC 6266/5987). 한글 등 비 ASCII 는 {@code filename*=UTF-8''…} 로,
+     * 그것을 모르는 옛 클라이언트를 위한 ASCII 대체 이름도 함께 싣는다.
+     * 이름은 표시용 파라미터라 서명에 안 묶여 있다 — 헤더 주입(CR/LF)과 경로 문자만 걸러낸다.
+     */
+    private static String contentDisposition(String filename) {
+        String cleaned = filename.replaceAll("[\\r\\n\"\\\\/;]", "_").trim();
+        if (cleaned.isEmpty()) {
+            cleaned = "download";
+        }
+        if (cleaned.length() > 150) {
+            cleaned = cleaned.substring(cleaned.length() - 150);   // 확장자가 뒤에 있으니 앞을 자른다
+        }
+        String ascii = cleaned.replaceAll("[^\\x20-\\x7E]", "_");
+        String encoded = UriUtils.encode(cleaned, StandardCharsets.UTF_8);
+        return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
     }
 
     /**
