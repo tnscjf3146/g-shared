@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
 import { jobMessageFor } from '@/features/jobs/errors'
+import { ACTIVE_STATUSES } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
 import { deleteWorker, getMyWorkers, getNetworkStats } from '@/features/workers/api'
 import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
@@ -67,7 +68,8 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       .catch(() => {})
   }, [])
 
-  const jobList = jobs.status === 'ready' ? jobs.data : []
+  // 진행·대기(아직 할 일 있는 작업)를 위로, 끝난 작업(완료·취소·실패)은 아래로. 각 묶음 안에서는 서버 순서(최신순) 유지(정렬 안정)
+  const jobList = (jobs.status === 'ready' ? jobs.data : []).slice().sort((a, b) => (ACTIVE_STATUSES.has(a.status) ? 0 : 1) - (ACTIVE_STATUSES.has(b.status) ? 0 : 1))
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 

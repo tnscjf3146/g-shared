@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { JobDetailInline } from '@/features/jobs/components/jobDetailInline'
-import { CANCELLABLE_STATUSES, formatDateTime, jobStatusMeta } from '@/features/jobs/format'
+import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, formatDateTime, jobStatusMeta } from '@/features/jobs/format'
 import type { Catalog, JobSummary } from '@/features/jobs/types'
 
 // 작업 카드 — 작업마다 카드 하나, 세로로 쌓인다.
@@ -17,8 +17,8 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
   const failed = jobStatusMeta(job.status, job.failReason).tone === 'danger'
   const completed = job.status === 'COMPLETED'
   const cancelled = job.status === 'CANCELLED'
-  // 실패·취소는 펼치지 않는다 — [상세] 버튼으로만 본다
-  const expandable = !failed && !cancelled
+  // 끝난 작업(완료·실패·취소)은 펼치지 않는다 — [상세] 버튼으로만 본다. 진행·대기만 인라인으로 펼침
+  const expandable = ACTIVE_STATUSES.has(job.status)
   const toggle = () => {
     if (!expandable) return
     setOpen((o) => !o)

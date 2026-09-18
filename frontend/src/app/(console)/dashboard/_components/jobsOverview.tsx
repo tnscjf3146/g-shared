@@ -13,7 +13,7 @@ import { Pager } from './pager'
 const SEGMENTS = [
   { key: '진행', match: (j: JobSummary) => j.status === 'RUNNING', cls: 'stroke-primary', dot: 'bg-primary' },
   { key: '대기', match: (j: JobSummary) => ACTIVE_STATUSES.has(j.status) && j.status !== 'RUNNING', cls: 'stroke-accent-mint', dot: 'bg-accent-mint' },
-  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', cls: 'stroke-dark', dot: 'bg-dark' },
+  { key: '완료', match: (j: JobSummary) => j.status === 'COMPLETED', cls: 'stroke-text-muted', dot: 'bg-text-muted' },
   { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', cls: 'stroke-danger', dot: 'bg-danger' },
 ]
 
