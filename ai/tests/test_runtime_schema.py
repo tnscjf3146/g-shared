@@ -63,6 +63,46 @@ class TestAValidRequest:
         assert request.dataset.effective_tokens == 2874100
 
 
+class TestTheMeasuredPeakVram:
+    """Worker가 등록할 때 이미 재는 값. 아직 예측에는 쓰지 않고 받아만 둔다."""
+
+    def test_it_is_optional(self):
+        request = RuntimePredictionRequest(**request_payload())
+
+        assert request.gpu_candidates[0].benchmark_peak_vram_mb is None
+
+    def test_it_is_read_when_sent(self):
+        candidate = dict(CANDIDATE, benchmarkPeakVramMb=5878)
+
+        request = RuntimePredictionRequest(**request_payload(gpuCandidates=[candidate]))
+
+        assert request.gpu_candidates[0].benchmark_peak_vram_mb == 5878
+
+    def test_an_explicit_null_is_the_same_as_absent(self):
+        # 옛 Worker가 등록한 GPU는 Backend 컬럼이 NULL이라 이렇게 온다.
+        candidate = dict(CANDIDATE, benchmarkPeakVramMb=None)
+
+        request = RuntimePredictionRequest(**request_payload(gpuCandidates=[candidate]))
+
+        assert request.gpu_candidates[0].benchmark_peak_vram_mb is None
+
+    @pytest.mark.parametrize("value", [0, -1, 5878.5, "5878", True])
+    def test_a_value_that_is_not_a_real_measurement_is_refused(self, value):
+        with pytest.raises(ValidationError):
+            GpuCandidate(**dict(CANDIDATE, benchmarkPeakVramMb=value))
+
+    def test_it_is_not_a_prediction_feature_yet(self):
+        # 열을 늘리면 모델을 다시 학습해야 한다. 지금은 계약으로만 받는다.
+        from app.scheduler.runtime_features import RUNTIME_FEATURE_NAMES
+
+        assert "benchmark_peak_vram_mb" not in RUNTIME_FEATURE_NAMES
+
+    def test_the_total_vram_still_means_the_card(self):
+        candidate = GpuCandidate(**dict(CANDIDATE, benchmarkPeakVramMb=5878))
+
+        assert candidate.vram_mb == 8188
+
+
 class TestTheDataset:
     """기존 DatasetMetadata를 물려받았으므로 그 규칙도 그대로 살아 있어야 한다."""
 

@@ -79,6 +79,21 @@ class GpuCandidate(SchedulerSchema):
             "이것 하나이며, 예전의 benchmarkScore는 쓰지 않는다."
         ),
     )
+    benchmark_peak_vram_mb: PositiveInt | None = Field(
+        default=None,
+        description=(
+            "그 벤치마크가 이 GPU에서 실제로 쓴 최대 VRAM(MB). Worker가 등록할 때 "
+            "이미 재고 있는 값이며, vramMb(드라이버가 보고하는 카드 총량)와 다르다 "
+            "-- 총량에는 드라이버와 화면 출력이 이미 쓰고 있는 몫이 들어 있어, "
+            "학습에 실제로 내줄 수 있는 양을 말해 주지 않는다.\n\n"
+            "**선택 필드다.** 이 값을 보내지 않는 Backend와 이 값을 모르는 옛 "
+            "Worker가 등록한 GPU가 함께 있는 동안에도 요청이 거절되면 안 되므로 "
+            "None을 허용한다. 지금은 계약으로만 받아 두고 예측 feature에는 넣지 "
+            "않는다 -- feature 목록을 바꾸면 모델을 다시 학습해야 하고, 값이 한 "
+            "대도 쌓이지 않은 열은 예측을 나아지게 하지 못한다 "
+            "(app.scheduler.runtime_features의 FEATURE_SCHEMA_VERSION 참고)."
+        ),
+    )
 
 
 class RuntimePredictionRequest(SchedulerSchema):
