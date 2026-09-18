@@ -40,6 +40,7 @@ export function AdapterCard({ job, onRenamed }: Props) {
     }
   }
 
+
   return (
     <section className="card flex flex-col gap-3 px-6 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -52,8 +53,11 @@ export function AdapterCard({ job, onRenamed }: Props) {
       </div>
 
       {editing === null ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[15px] font-semibold text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="text-[12px] font-medium tracking-eyebrow text-text-muted">어댑터 이름</span>
+            <span className="text-[17px] font-semibold break-words text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
+          </div>
           <button type="button" onClick={() => setEditing(job.adapterName ?? '')} className="text-[13px] text-primary hover:underline">
             이름 변경
           </button>

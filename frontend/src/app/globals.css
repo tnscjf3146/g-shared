@@ -67,6 +67,12 @@
   --color-neutral: #5e5c63;
   --color-neutral-tint: #ecefe8;
 
+  /* 작업 상태 도넛 — 채도·명도를 맞춘 조화 팔레트(진행·대기·완료·취소/실패) */
+  --color-chart-green: #4e9f6d;
+  --color-chart-amber: #e0b04a;
+  --color-chart-slate: #8a94a6;
+  --color-chart-rose: #d2696c;
+
   /* 깊이별 그림자 — 위로 갈수록 y-offset/blur 증가, 투명도 감소 */
   --shadow-1: 0 1px 3px rgba(13, 15, 11, 0.08);
   --shadow-2: 0 2px 8px rgba(13, 15, 11, 0.1), 0 1px 2px rgba(13, 15, 11, 0.06);

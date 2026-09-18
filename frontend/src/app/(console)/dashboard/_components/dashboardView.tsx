@@ -35,6 +35,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [now, setNow] = useState(() => Date.now())
   const [notice, setNotice] = useState<string | null>(null)
   const [jobPage, setJobPage] = useState(0)
+  const [jobView, setJobView] = useState<'latest' | 'oldest' | 'done'>('latest') // 목록 정렬·필터
 
   // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
   const load = useCallback((silent = false) => {
@@ -67,7 +68,20 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       .catch(() => {})
   }, [])
 
+  // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
+  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요).
+  // 생성일 기준으로 프론트에서 직접 정렬(ISO 문자열은 사전순=시간순). 서버 순서에 의존하지 않는다
+  const newestFirst = (a: JobSummary, b: JobSummary) => b.createdAt.localeCompare(a.createdAt)
+  const displayList =
+    jobView === 'oldest'
+      ? jobList.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      : jobView === 'done'
+        ? jobList.filter((j) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED').sort(newestFirst)
+        : jobList.slice().sort(newestFirst) // 'latest'
+  // 폴링으로 목록이 줄면 현재 페이지가 범위를 넘을 수 있다 → 마지막 페이지로 클램프(빈 화면 방지)
+  const totalJobPages = Math.max(1, Math.ceil(displayList.length / JOBS_PER_PAGE))
+  const safeJobPage = Math.min(jobPage, totalJobPages - 1) // 렌더는 항상 범위 안(폴링으로 줄어도 빈 화면 안 남)
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
@@ -140,6 +154,23 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
         <section className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-[24px] font-bold tracking-heading text-dark">내 학습 작업</h2>
+            {jobs.status === 'ready' && jobList.length > 0 && (
+              <label className="flex items-center gap-2 text-[13px] text-text-muted">
+                분류
+                <select
+                  value={jobView}
+                  onChange={(e) => {
+                    setJobView(e.target.value as typeof jobView)
+                    setJobPage(0) // 분류 바뀌면 첫 페이지로
+                  }}
+                  className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-dark focus:border-primary focus:outline-none"
+                >
+                  <option value="latest">최신순</option>
+                  <option value="oldest">오래된순</option>
+                  <option value="done">완료·취소·실패</option>
+                </select>
+              </label>
+            )}
           </div>
           {jobs.status === 'error' && <Retry what="작업 목록" onRetry={() => { setJobs({ status: 'loading' }); load() }} />}
           {jobs.status === 'loading' && <ListSkeleton />}
@@ -150,16 +181,19 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
               <Button href="/jobs/new" size="lg">첫 워크로드 등록</Button>
             </section>
           )}
-          {jobs.status === 'ready' && jobList.length > 0 && (
+          {jobs.status === 'ready' && jobList.length > 0 && displayList.length === 0 && (
+            <p className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-text-muted">이 분류에 해당하는 작업이 없습니다.</p>
+          )}
+          {jobs.status === 'ready' && displayList.length > 0 && (
             <>
               <ul className="flex flex-col gap-3">
-                {jobList.slice(jobPage * JOBS_PER_PAGE, (jobPage + 1) * JOBS_PER_PAGE).map((j, i) => (
-                  <DashboardJobRow key={j.jobId} job={j} index={jobPage * JOBS_PER_PAGE + i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
+                {displayList.slice(safeJobPage * JOBS_PER_PAGE, (safeJobPage + 1) * JOBS_PER_PAGE).map((j, i) => (
+                  <DashboardJobRow key={j.jobId} job={j} index={safeJobPage * JOBS_PER_PAGE + i + 1} workloadName={nameOf(j.workloadId)} catalog={catalog} onCancel={onCancel} style={{ animationDelay: `${Math.min(i, 7) * 40}ms` }} />
                 ))}
               </ul>
               {/* 메인 목록은 실무 관례대로 페이지 번호 + 화살표 */}
               <div className="flex justify-center">
-                <Pager page={jobPage} totalPages={Math.ceil(jobList.length / JOBS_PER_PAGE)} onChange={setJobPage} numbered />
+                <Pager page={safeJobPage} totalPages={totalJobPages} onChange={setJobPage} numbered />
               </div>
             </>
           )}
