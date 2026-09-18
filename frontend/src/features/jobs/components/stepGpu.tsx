@@ -31,6 +31,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
 
   const current = result && result.key === key ? result : null
   const options = current && 'options' in current ? current.options : null
+  // VRAM 부족(INSUFFICIENT) 등급은 고를 수 없으니 목록에서 아예 숨긴다
+  const visible = options ? options.filter((g) => g.fit !== 'INSUFFICIENT') : null
 
   // GPU 를 고르면 견적. 스펙·GPU 가 바뀌면 다시(부모가 gpuId 변경 시 estimate 를 null 로 비운다)
   const [estimateError, setEstimateError] = useState<string | null>(null)
@@ -66,24 +68,23 @@ export function StepGpu({ spec, state, onChange }: Props) {
           {current.error}
         </p>
       )}
-      {options && options.length === 0 && (
+      {visible && visible.length === 0 && (
         <p role="status" className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
           현재 작업 가능한 GPU가 없습니다. 등급 목록은 켜져 있는 공급자 PC 로 만들어져서, 잠시 후 다시 오면 나타날 수 있습니다.
         </p>
       )}
-      {options && options.length > 0 && (
+      {visible && visible.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="sr-only">GPU 등급</legend>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {options.map((g) => {
+            {visible.map((g) => {
               const on = state.gpuId === g.id
-              const disabled = g.fit === 'INSUFFICIENT'
               return (
                 <label
                   key={g.id}
-                  className={`card-quiet flex flex-col gap-2 p-4 transition-colors ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${on ? 'border-primary/60 ring-2 ring-primary/30' : disabled ? '' : 'hover:border-border'}`}
+                  className={`card-quiet flex cursor-pointer flex-col gap-2 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}
                 >
-                  <input type="radio" name="gpuId" value={g.id} checked={on} disabled={disabled} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
+                  <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-[15px] font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
                     <StatusBadge tone={FIT[g.fit].tone}>{FIT[g.fit].label}</StatusBadge>
@@ -96,7 +97,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
               )
             })}
           </div>
-          {options[0] && <p className="text-[12px] tabular-nums text-text-muted">필요 VRAM 약 {Math.round(options[0].requiredVramMb / 1024)} GB 기준. 대기 워커가 0대인 등급은 배정까지 기다릴 수 있습니다.</p>}
+          {visible[0] && <p className="text-[12px] tabular-nums text-text-muted">필요 VRAM 약 {Math.round(visible[0].requiredVramMb / 1024)} GB 기준. 대기 워커가 0대인 등급은 배정까지 기다릴 수 있습니다.</p>}
         </fieldset>
       )}
 
