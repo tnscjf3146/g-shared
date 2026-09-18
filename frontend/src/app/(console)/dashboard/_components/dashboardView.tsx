@@ -70,8 +70,15 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
   // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
-  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요). 서버가 최신순으로 준다
-  const displayList = jobView === 'oldest' ? jobList.slice().reverse() : jobView === 'done' ? jobList.filter((j) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED') : jobList // 'latest'
+  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요).
+  // 생성일 기준으로 프론트에서 직접 정렬(ISO 문자열은 사전순=시간순). 서버 순서에 의존하지 않는다
+  const newestFirst = (a: JobSummary, b: JobSummary) => b.createdAt.localeCompare(a.createdAt)
+  const displayList =
+    jobView === 'oldest'
+      ? jobList.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      : jobView === 'done'
+        ? jobList.filter((j) => j.status === 'COMPLETED' || j.status === 'FAILED' || j.status === 'CANCELLED').sort(newestFirst)
+        : jobList.slice().sort(newestFirst) // 'latest'
   const workerList = workers.status === 'ready' ? workers.data : []
   const nameOf = (id: number) => catalog?.workloads.find((w) => w.id === id)?.name ?? `워크로드 ${id}`
 
