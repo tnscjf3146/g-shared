@@ -4,12 +4,12 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
-import { StatusBadge } from '@/components/ui/statusBadge'
 import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
 import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
+import { markCompletedViewed } from '../viewed'
 import type { Catalog, Dataset, JobDetail } from '../types'
 import { AdapterCard } from './adapterCard'
 import { FundPanel } from './fundPanel'
@@ -70,6 +70,11 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
       .then(setCatalog)
       .catch(() => {})
   }, [])
+  // 완료 작업을 열어 보면 "확인함"으로 — 목록에서 초록 → 회색으로 가라앉는다
+  const viewedJobId = state.status === 'ready' && state.job.status === 'COMPLETED' ? state.job.jobId : null
+  useEffect(() => {
+    if (viewedJobId != null) markCompletedViewed(viewedJobId)
+  }, [viewedJobId])
   const datasetId = state.status === 'ready' ? state.job.datasetId : null
   useEffect(() => {
     if (datasetId == null) return
@@ -166,12 +171,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-4">
-            <h1 className={`min-w-0 break-words text-h1 font-bold tracking-heading ${job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-2' : 'text-dark'}`}>{name.workload}</h1>
-            {job.status === 'COMPLETED' ? (
-              <StatusBadge tone="success">완료</StatusBadge>
-            ) : (
-              <span className={`text-[17px] font-medium ${meta.tone === 'danger' ? 'text-danger' : job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>{meta.label}</span>
-            )}
+            <h1 className={`min-w-0 break-words text-h1 font-bold tracking-heading ${job.status === 'CANCELLED' ? 'text-text-muted' : 'text-dark'}`}>{name.workload}</h1>
+            <span className={`text-[17px] font-medium ${job.status === 'COMPLETED' ? 'font-semibold text-success' : meta.tone === 'danger' ? 'text-danger' : job.status === 'CANCELLED' ? 'text-text-muted' : 'text-dark'}`}>{meta.label}</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" href={`/jobs/${job.jobId}/chain`}>
