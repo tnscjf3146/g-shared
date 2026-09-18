@@ -772,6 +772,47 @@ class TestWeb3TransportSettings(unittest.TestCase):
             for line in logged.output))
 
 
+class TestLegacyChainTransactions(unittest.TestCase):
+    def test_the_node_gas_price_is_explicit_in_every_transaction(self):
+        """SSAFY blocks have no EIP-1559 ``baseFeePerGas`` field."""
+        built = []
+
+        class Call:
+            def build_transaction(self, transaction):
+                built.append(transaction)
+                return transaction
+
+        class Eth:
+            gas_price = 0
+            account = SimpleNamespace(sign_transaction=lambda tx, key:
+                                      SimpleNamespace(raw_transaction=b"signed"))
+
+            def get_transaction_count(self, sender, block):
+                return 7
+
+            def send_raw_transaction(self, raw):
+                return b"hash"
+
+        web3 = SimpleNamespace(
+            eth=Eth(),
+            to_checksum_address=lambda address: address,
+            to_hex=lambda value: "0x" + value.hex(),
+        )
+        chain = object.__new__(Web3Escrow)
+        chain._settings = SETTINGS
+        chain._wallet = SimpleNamespace(
+            address=OPERATOR, private_key="test-only")
+        chain._connection = lambda: web3
+
+        self.assertEqual(chain._send(Call()), "0x68617368")
+        self.assertEqual(built, [{
+            "from": OPERATOR,
+            "nonce": 7,
+            "chainId": 31221,
+            "gasPrice": 0,
+        }])
+
+
 class TestNothingIsSignedOnAnUncheckedFact(unittest.TestCase):
     """Every one of these must end with no transaction sent."""
 

@@ -40,6 +40,8 @@ from .status_events import (
     JobChanged,
     JobEnd,
     JobEnded,
+    JobPhase,
+    JobPhaseChanged,
     JobStage,
     StageChanged,
     WorkerOnline,
@@ -687,6 +689,7 @@ def _settle_runtime(
         say("  이 PC에서는 아직 결과를 서비스로 보내는 단계가 동작하지 않습니다.")
         return
     say("  결과를 저장하고 에스크로를 정산하는 중...")
+    status_events.publish(JobPhaseChanged(job.job_id, JobPhase.SETTLING))
 
 
 def _settle_cancellation(

@@ -43,6 +43,25 @@ public class Job extends BaseTimeEntity {
     private LocalDateTime datasetUploadedAt;
     private LocalDateTime datasetDeletedAt;   // cleanup 이 파일을 지운 시각 — 키는 남긴다
 
+    // 입력 LoRA 어댑터 — "어디서부터 학습을 시작할지" (V17). 데이터셋 원본과 수명·검증이 같아 모양도 같다.
+    // 출처는 둘 중 하나다: 사용자가 올린 .tar(adapterObjectKey) 또는 이어서 학습할 부모 Job 의 결과물(parentJobId).
+    @Column(nullable = false)
+    private boolean adapterRequired;   // 어댑터를 얹고 시작하는가. true 인데 입력이 없으면 /fund 가 거절한다
+    @Column(length = 512)
+    private String adapterObjectKey;   // jobs/{id}/input/adapter.tar — 올린 경우에만
+    private Long adapterSizeBytes;
+    @Column(length = 64)
+    private String adapterSha256;      // 업로드 완료 검증 때 실제 파일에서 계산한 해시 (0x 없음)
+    private LocalDateTime adapterUploadedAt;
+    private LocalDateTime adapterDeletedAt;
+
+    // 결과물(어댑터)의 이름·버전·계보 (V18). 이름은 내려받을 파일 이름이 되고, 버전은 내 계보에서 몇 번째인가다.
+    @Column(length = 60)
+    private String adapterName;
+    @Column(nullable = false)
+    private Integer adapterVersion = 1;
+    private Long parentJobId;          // 이어서 학습한 원본 Job — 그 결과물이 이번 학습의 입력 어댑터
+
     @Column(nullable = false, length = 10)
     private String trainingMode;      // AUTO / CUSTOM — "누가 정했는가" 기록용
 
@@ -110,6 +129,8 @@ public class Job extends BaseTimeEntity {
     private String submitTxHash;      // submitResult() 트랜잭션 (JOB_RESULT)
     @Column(length = 66)
     private String abortTxHash;       // abortJob() 트랜잭션 (JOB_FAILED / JOB_CANCELLED)
+    // 종료 상태와 별개로 체인에서 환불을 확인한 시각. 과거 미환불 종료 작업도 재조회한다.
+    private LocalDateTime refundConfirmedAt;
     @Column(columnDefinition = "TEXT")
     private String failReason;        // 실패·거절 시 에러코드+메시지 (긴 에러 대비 TEXT)
     // 온체인 상태와 DB 가 어긋났을 가능성 — 값이 있으면 자동 진행을 멈추고(fail closed) 대조가 필요하다는 표시
@@ -225,6 +246,61 @@ public class Job extends BaseTimeEntity {
     /** cleanup 이 원본을 지웠다. 키·해시는 남겨 "무엇이 있었는지"는 추적된다. */
     public void markDatasetDeleted(LocalDateTime deletedAt) {
         this.datasetDeletedAt = deletedAt;
+    }
+
+    // ── 입력 어댑터 · 결과물 이름/버전 ────────────────────────────
+
+    /**
+     * 주문 때 정해지는 어댑터 조건. 버전·부모는 서버가 계산한 값이고(클라이언트 값은 믿지 않는다),
+     * 이름만 사용자가 고른다. 생성 인자를 더 늘리는 대신 저장 직전에 한 번 적는다.
+     *
+     * @param required   어댑터를 얹고 시작하는가 (올린 .tar 이든 부모 결과물이든)
+     * @param name       결과물 이름 = 내려받을 파일 이름
+     * @param version    내 계보에서 몇 번째 (처음부터·외부 파일이면 1, 이어서 학습이면 부모+1)
+     * @param parentJobId 이어서 학습할 원본 Job (없으면 null)
+     */
+    public void assignAdapterOrder(boolean required, String name, int version, Long parentJobId) {
+        this.adapterRequired = required;
+        this.adapterName = name;
+        this.adapterVersion = version;
+        this.parentJobId = parentJobId;
+    }
+
+    /** 결과물 이름만 바꾼다. 파일도 계보(parentJobId)도 그대로 — 이름은 계보의 근거가 아니다. */
+    public void renameAdapter(String name) {
+        this.adapterName = name;
+    }
+
+    /** 입력 어댑터 업로드 완료 검증 기록. 데이터셋과 같은 의미다 — 이게 있어야 /fund 가 받는다. */
+    public void recordAdapterUpload(String objectKey, Long sizeBytes, String sha256, LocalDateTime uploadedAt) {
+        this.adapterObjectKey = objectKey;
+        this.adapterSizeBytes = sizeBytes;
+        this.adapterSha256 = sha256;
+        this.adapterUploadedAt = uploadedAt;
+        this.adapterDeletedAt = null;
+    }
+
+    /** 사용자가 올린 어댑터 파일이 스토리지에 있는가 (검증 끝났고 아직 안 지워짐). */
+    public boolean hasAdapterFile() {
+        return adapterUploadedAt != null && adapterDeletedAt == null;
+    }
+
+    /** 이어서 학습인가 — 입력 어댑터가 부모 Job 의 결과물이라 따로 올릴 파일이 없다. */
+    public boolean isContinuedTraining() {
+        return parentJobId != null;
+    }
+
+    /**
+     * 입력 어댑터가 준비됐는가. 이어서 학습은 부모 결과물을 쓰므로 업로드를 기다리지 않는다 —
+     * 부모가 COMPLETED 이고 결과물이 있다는 것은 주문(POST /jobs) 때 이미 확인했다.
+     */
+    public boolean isAdapterInputReady() {
+        return !adapterRequired || isContinuedTraining() || hasAdapterFile();
+    }
+
+    /** cleanup 이 어댑터 파일을 지웠다. */
+    public void markAdapterDeleted(LocalDateTime deletedAt) {
+        this.adapterDeletedAt = deletedAt;
     }
 
     /**

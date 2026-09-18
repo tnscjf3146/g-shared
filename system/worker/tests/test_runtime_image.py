@@ -17,6 +17,7 @@ from __future__ import annotations
 import unittest
 
 from gshared_worker.runtime_image import (
+    ADAPTER_CAPABLE_DIGESTS,
     APPROVED_DIGESTS,
     APPROVED_REPOSITORIES,
     CANONICAL_RUNTIME_DIGEST,
@@ -24,11 +25,14 @@ from gshared_worker.runtime_image import (
     CANONICAL_RUNTIME_REPOSITORY,
     CANONICAL_RUNTIME_TAG,
     PLACEHOLDER_DIGEST,
+    PREVIOUS_RUNTIME_DIGEST,
+    PREVIOUS_RUNTIME_TAG,
     ImageRefused,
     check_image,
     check_pulled,
     inspect_command,
     pull_command,
+    supports_adapter,
 )
 
 REPO = "gshared/qlora-sft-runtime"
@@ -40,12 +44,15 @@ REF = f"{REPO}@{DIGEST}"
 #: A digest of the right shape that is not the approved runtime.
 UNKNOWN_DIGEST = "sha256:" + "ab" * 32
 
-#: The runtime as published on Docker Hub -- the real 0.2.0 digest, read from
+#: The runtime as published on Docker Hub -- the real 0.3.0 digest, read from
 #: the registry after the push, not a made-up value. Written out here once on
 #: purpose: if the module constant changes, this test is the one that says so.
 HUB_REPO = "le3560/gshared-qlora-sft-runtime"
-HUB_DIGEST = "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"
+HUB_DIGEST = "sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170"
 HUB_REF = f"{HUB_REPO}@{HUB_DIGEST}"
+
+#: 0.2.0, what the Backend's catalog carries until its migration.
+HUB_PREVIOUS_DIGEST = "sha256:acda63bc4ad4d7b300c25f28725fed514b045119ac27697cd36f95faae68126d"
 
 
 class TestTheCanonicalRuntime(unittest.TestCase):
@@ -54,19 +61,31 @@ class TestTheCanonicalRuntime(unittest.TestCase):
     def test_it_is_the_published_docker_hub_image(self):
         self.assertEqual(CANONICAL_RUNTIME_REPOSITORY, HUB_REPO)
         self.assertEqual(CANONICAL_RUNTIME_DIGEST, HUB_DIGEST)
-        self.assertEqual(CANONICAL_RUNTIME_TAG, "0.2.0")
+        self.assertEqual(CANONICAL_RUNTIME_TAG, "0.3.0")
 
     def test_the_reference_is_repository_at_digest(self):
         self.assertEqual(CANONICAL_RUNTIME_REFERENCE, HUB_REF)
-        self.assertNotIn(":0.2.0", CANONICAL_RUNTIME_REFERENCE)
+        self.assertNotIn(":0.3.0", CANONICAL_RUNTIME_REFERENCE)
 
     def test_it_is_accepted(self):
         image = check_image(CANONICAL_RUNTIME_REFERENCE, CANONICAL_RUNTIME_DIGEST)
 
         self.assertEqual(image.reference, CANONICAL_RUNTIME_REFERENCE)
 
-    def test_it_is_the_only_approved_digest(self):
-        self.assertEqual(APPROVED_DIGESTS, (CANONICAL_RUNTIME_DIGEST,))
+    def test_the_approved_digests_are_it_and_the_previous_runtime_only(self):
+        self.assertEqual(APPROVED_DIGESTS,
+                         (CANONICAL_RUNTIME_DIGEST, PREVIOUS_RUNTIME_DIGEST))
+
+    def test_the_previous_runtime_is_the_published_0_2_0(self):
+        self.assertEqual(PREVIOUS_RUNTIME_DIGEST, HUB_PREVIOUS_DIGEST)
+        self.assertEqual(PREVIOUS_RUNTIME_TAG, "0.2.0")
+        self.assertNotEqual(PREVIOUS_RUNTIME_DIGEST, CANONICAL_RUNTIME_DIGEST)
+
+    def test_what_the_backend_catalog_carries_today_still_runs(self):
+        # Refusing 0.2.0 before the Backend migration would refuse every Job.
+        image = check_image(f"{HUB_REPO}@{HUB_PREVIOUS_DIGEST}", HUB_PREVIOUS_DIGEST)
+
+        self.assertEqual(image.digest, HUB_PREVIOUS_DIGEST)
 
     def test_its_repository_is_approved(self):
         self.assertIn(CANONICAL_RUNTIME_REPOSITORY, APPROVED_REPOSITORIES)
@@ -79,6 +98,20 @@ class TestTheCanonicalRuntime(unittest.TestCase):
             check_image(seed, PLACEHOLDER_DIGEST)
 
         self.assertIn("placeholder", str(caught.exception))
+
+
+class TestWhichRuntimesContinueFromAnAdapter(unittest.TestCase):
+    def test_the_canonical_runtime_does(self):
+        self.assertTrue(supports_adapter(check_image(HUB_REF, HUB_DIGEST)))
+
+    def test_the_previous_runtime_does_not(self):
+        image = check_image(f"{HUB_REPO}@{HUB_PREVIOUS_DIGEST}", HUB_PREVIOUS_DIGEST)
+
+        self.assertFalse(supports_adapter(image))
+
+    def test_only_approved_digests_are_adapter_capable(self):
+        self.assertEqual(ADAPTER_CAPABLE_DIGESTS, (CANONICAL_RUNTIME_DIGEST,))
+        self.assertTrue(set(ADAPTER_CAPABLE_DIGESTS) <= set(APPROVED_DIGESTS))
 
 
 class TestTheApprovedDigest(unittest.TestCase):
@@ -165,7 +198,7 @@ class TestTheApprovedRepository(unittest.TestCase):
 
     def test_the_docker_hub_repository_still_needs_a_digest(self):
         with self.assertRaises(ImageRefused):
-            check_image(f"{HUB_REPO}:0.2.0", HUB_DIGEST)
+            check_image(f"{HUB_REPO}:0.3.0", HUB_DIGEST)
 
     def test_the_docker_hub_repository_still_refuses_the_placeholder(self):
         with self.assertRaises(ImageRefused) as caught:

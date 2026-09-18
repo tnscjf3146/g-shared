@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getJob } from '../api'
-import { STATUS_META, formatDuration } from '../format'
+import { formatDuration, jobStatusMeta } from '../format'
 import type { Catalog, JobDetail, JobSummary } from '../types'
 import { JobProgress } from './jobProgress'
 import { PlainTable } from './plainTable'
@@ -38,7 +38,7 @@ export function JobDetailInline({ job, catalog }: { job: JobSummary; catalog: Ca
     <PlainTable
       widths={COLS}
       cols={[
-        ['상태', STATUS_META[job.status].label],
+        ['상태', jobStatusMeta(job.status, job.failReason).label],
         ['작업 종류', workload],
         ['배정 워커', detail ? (detail.assignedWorkerId ? <span title={detail.assignedWorkerId}>{shortWorkerId(detail.assignedWorkerId)}</span> : <span className="text-text-muted">미배정</span>) : pendingCell],
         ['예상 소요', detail ? formatDuration(detail.predictedRuntimeSec) : pendingCell],

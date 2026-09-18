@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { formatUnits } from '@/features/wallet/ethereum'
-import { AUTO_MODE_META, formatBytes, formatCost } from '../format'
+import { AUTO_MODE_META, adapterLabel, formatBytes, formatCost } from '../format'
 import { ONE_GSC, hasEnough, type Funds } from '../hooks/use-wallet-funds'
 import type { Catalog, JobSpec } from '../types'
 import { EstimateCard } from './estimateCard'
-import type { WizardState } from './workloadWizard'
+import { chosenAdapterFile, chosenParent, resultAdapterName, resultAdapterVersion, type WizardState } from './workloadWizard'
 
 // 5단계: 업로드 — 선택 요약 + 4단계 견적 + 지갑 잔액 확인(job.md §4). 잔액 상태(funds)는 위저드가 들고 있고(하단 [업로드] 버튼 활성 판단), 여기선 보여 주기만.
-// 잔액 부족이면 [예치금 예치하기], 지갑이 없으면 [지갑 연결하기] + [지갑 연결 확인]. 파일은 하단 업로드 버튼을 눌러야 서버로 간다
+// 잔액 부족이면 [예치금 예치하기], 지갑이 없으면 [지갑 연결하기] + [지갑 연결 확인]. 파일(데이터셋·어댑터)은 하단 업로드 버튼을 눌러야 서버로 간다
 type Props = { catalog: Catalog; spec: JobSpec; state: WizardState; funds: Funds; onRecheck: () => void }
 
 export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
@@ -19,7 +19,13 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
   const gpu = catalog.gpus.find((g) => g.id === state.gpuId)
   const dataset = state.datasetFile ? `${state.datasetFile.name} (${formatBytes(state.datasetFile.size)})` : undefined
   const meta = spec.datasetMetadata
-  const uploads = [state.datasetFile && '데이터셋', state.adapterFile && '어댑터'].filter(Boolean).join(' · ')
+  const isTrain = workload?.kind === 'TRAIN_LORA'
+  // 어댑터: 출발점(이어서 학습할 작업 또는 올릴 .tar)과 결과물 이름 — 결과 버전은 서버가 확정하므로 아는 경우에만 붙인다
+  const parent = chosenParent(state)
+  const adapterFile = chosenAdapterFile(state)
+  const source = parent ? `${adapterLabel(parent.jobId, parent.name, parent.version)} (작업 #${parent.jobId}) 이어서` : adapterFile ? `${adapterFile.name} (${formatBytes(adapterFile.size)})` : isTrain ? '처음부터' : '없음'
+  const resultName = resultAdapterName(state, model?.name) // 2단계 안내·전송과 같은 값
+  const resultVersion = resultAdapterVersion(state)
 
   const cost = state.estimate?.estimatedCost ?? 0
   const needWei = BigInt(Math.ceil(cost)) * ONE_GSC
@@ -38,7 +44,8 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
           [
             ['워크로드', workload?.name],
             ['모델', `${model?.name} (${model?.params})`],
-            ['어댑터', state.adapterFile?.name ?? '없음'],
+            [isTrain ? '학습 시작점' : '어댑터', source],
+            ...(isTrain ? ([['만들어질 어댑터', `${resultName}${resultVersion ? ` v${resultVersion}` : ''}`]] as [string, string][]) : []),
             ['설정', workload?.kind === 'TRAIN_LORA' ? (typeof state.custom === 'object' && state.custom ? '직접 설정' : `자동 · ${AUTO_MODE_META[state.level].label}`) : '—'],
             ['데이터셋', dataset],
             ['데이터셋 분석', `샘플 ${meta.sampleCount.toLocaleString('ko-KR')}개 · 약 ${meta.totalTokens.toLocaleString('ko-KR')} 토큰 · 평균 ${Math.round(meta.avgSeqLength)} · 최대 ${meta.maxSeqLength}`],
@@ -114,7 +121,10 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
       </section>
 
       {state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}
-      {uploads && <p className="text-[13px] text-text-muted">파일({uploads})은 저장 위치가 정해질 때까지 서버로 보내지 않습니다. 지금은 데이터셋 분석 정보와 파일 해시만 등록됩니다.</p>}
+      <p className="text-[13px] text-text-muted">
+        데이터셋{adapterFile ? '과 어댑터 파일은' : '은'} 등록 직후 서버에 올라가 해시를 검증한 뒤 작업에 사용됩니다.
+        {isTrain ? ' 어댑터 이름은 등록 뒤에도 작업 상세에서 바꿀 수 있고, 다운로드 파일 이름이 됩니다.' : ''}
+      </p>
     </>
   )
 }

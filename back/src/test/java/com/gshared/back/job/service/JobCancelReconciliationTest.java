@@ -277,14 +277,88 @@ class JobCancelReconciliationTest {
     }
 
     @Test
-    @DisplayName("abortTxHash 가 없는 JOB_FAILED 는 체인에 묻지 않는다 — 환불을 주장하지 않았다")
-    void failureWithoutAbortIsNotChecked() {
+    @DisplayName("환불이 확인되지 않은 JOB_FAILED 는 종료하지 않는다 — CANCELLING 으로 남아 keeper 가 환불을 마무리한다")
+    void failureWithoutRefundStaysOpenForKeeper() {
+        // abortTxHash 없음 + 체인은 아직 잠김(CONTRADICTED). 예전에는 체인에 묻지도 않고 FAILED 로
+        // 닫았다 — 종료되는 순간 keeper·reconciler 순찰에서 빠져 예치금이 잠긴 채 잊혔다.
         when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
 
         assertThat(jobService.failJob(worker.getId(), job.getId(),
                 "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
 
+        Job held = reload();
+        assertThat(held.getStatus()).isEqualTo(JobStatus.CANCELLING);              // 순찰 대상 유지
+        assertThat(held.getFailReason()).contains("RUNTIME_ERROR");                // 실패 사실은 화면 구분용으로 보존
+        assertThat(held.getReconciliationReason()).isNotNull();                    // 어긋남 표시
+        assertThat(held.getFinishedAt()).isNull();                                 // 아직 안 끝났다
+        assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);                 // 워커는 풀어준다
+    }
+
+    @Test
+    @DisplayName("환불이 체인에서 확인된 JOB_FAILED 는 그대로 FAILED 로 종료한다")
+    void failureWithConfirmedRefundEndsAsFailed() {
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONFIRMED);
+
+        assertThat(jobService.failJob(worker.getId(), job.getId(),
+                "RUNTIME_ERROR", "학습이 죽었다", "0xabort", 12.0)).isTrue();
+
         assertThat(reload().getStatus()).isEqualTo(JobStatus.FAILED);
+        assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);
+    }
+
+    @Test
+    @DisplayName("취소 중(CANCELLING) 실패 + 환불 미확인 — Job 은 순찰에 남기되 워커는 풀어준다 (BUSY 고착 방지)")
+    void failureDuringCancellingReleasesWorker() {
+        userCancels();   // RUNNING → CANCELLING (워커는 아직 이 Job 에 묶여 있다)
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+
+        // 보고는 접수돼야 한다(true) — false 면 워커가 NACK 로 알고 재전송 루프를 돈다.
+        assertThat(jobService.failJob(worker.getId(), job.getId(),
+                "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
+
+        assertThat(reload().getStatus()).isEqualTo(JobStatus.CANCELLING);   // 종료 금지 — keeper 가 환불
+        assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);          // 워커는 다음 일을 받을 수 있다
+    }
+
+    // ── FUNDED 취소 — 환불 확인 없이는 문을 닫지 않는다 ─────────────
+
+    /** 배정 전(FUNDED) 에스크로 Job — 취소 경로 검증용. */
+    private Job fundedOnlyJob() {
+        Dataset dataset = datasetRepository.save(Dataset.create(
+                client, 52_428_800L, 10_000, 2_500_000L, 1_800_000L, 250.0, 1024, null, null));
+        BaseModel baseModel = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow();
+        Job funded = jobRepository.save(Job.create(client, baseModel.getWorkload().getId(), baseModel.getId(),
+                dataset.getId(), "AUTO", 1, 16, 0.0002, 512, 985.882, "runtime-xgb-v1",
+                worker.getId(), 9L));
+        em.flush();
+        jobRepository.fundIfCreated(funded.getId(), 31221L, null, ESCROW_JOB_ID, null);
+        em.clear();
+        return funded;
+    }
+
+    @Test
+    @DisplayName("FUNDED 취소 + 환불 미확인 — CANCELLED 로 닫지 않고 CANCELLING 으로 keeper 순찰에 남긴다")
+    void fundedCancelWithoutRefundStaysOpen() {
+        Job funded = fundedOnlyJob();
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+
+        jobService.cancelJob(client.getId(), funded.getId());
+
+        Job held = jobRepository.findById(funded.getId()).orElseThrow();
+        assertThat(held.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(held.getReconciliationReason()).contains("not CANCELLED");
+    }
+
+    @Test
+    @DisplayName("FUNDED 취소 + 체인 CANCELLED 확인 — 지금처럼 즉시 CANCELLED")
+    void fundedCancelWithConfirmedRefundEndsImmediately() {
+        Job funded = fundedOnlyJob();
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONFIRMED);
+
+        jobService.cancelJob(client.getId(), funded.getId());
+
+        assertThat(jobRepository.findById(funded.getId()).orElseThrow().getStatus())
+                .isEqualTo(JobStatus.CANCELLED);
     }
 
     // ── 겹치지 않은 정상 경로 ───────────────────────────────────

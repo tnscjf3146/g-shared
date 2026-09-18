@@ -8,11 +8,13 @@ import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
 import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
 import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
 import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.job.domain.AdapterName;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.dto.request.CreateJobRequest;
 import com.gshared.back.job.dto.response.CreateJobResponse;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.workload.domain.Workload;
+import com.gshared.back.workload.domain.WorkloadKind;
 import com.gshared.back.workload.exception.WorkloadErrorCode;
 import com.gshared.back.workload.repository.BaseModelRepository;
 import com.gshared.back.workload.repository.WorkloadRepository;
@@ -31,6 +33,8 @@ import com.gshared.back.worker.websocket.WorkerMessageSender;
 import com.gshared.back.global.blockchain.EscrowProperties;
 import com.gshared.back.global.blockchain.EscrowVerification;
 import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
+import com.gshared.back.global.storage.ObjectStorage;
+import com.gshared.back.global.storage.StorageProperties;
 import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.global.wallet.WalletAuthProperties;
 import com.gshared.back.job.dto.response.FundJobResponse;
@@ -75,6 +79,8 @@ public class JobService {
     private final TrainingConfigResolver trainingConfigResolver;
     private final WorkerMessageSender messageSender;
     private final ObjectMapper objectMapper;
+    private final ObjectStorage objectStorage;
+    private final StorageProperties storageProperties;
 
     /**
      * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
@@ -99,6 +105,9 @@ public class JobService {
         if (!baseModel.getWorkload().getId().equals(request.workloadId())) {
             throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
         }
+
+        // 어댑터 주문 확인 — 이름 규칙·부모 조건은 Scheduler(외부 HTTP)를 부르기 전에 본다. 틀린 주문에 추천을 사 올 이유가 없다.
+        AdapterOrder adapterOrder = resolveAdapterOrder(ownerId, request, baseModel.getSlug());
 
         SchedulerRecommendRequest.DatasetMeta datasetMeta = new SchedulerRecommendRequest.DatasetMeta(
                 dataset.getSizeBytes(), dataset.getSampleCount(),
@@ -164,6 +173,8 @@ public class JobService {
                 recommendedRuntime(rec), rec.schedulerModelVersion(), rec.recommendedWorkerId(),
                 providerWallet, estimateCost(dataset, config)
         );
+        // ⑦ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
+        job.assignAdapterOrder(adapterOrder.required(), adapterOrder.name(), adapterOrder.version(), adapterOrder.parentJobId());
         jobRepository.save(job);
 
         return CreateJobResponse.of(job, walletAuthProperties.chainId(),
@@ -200,6 +211,77 @@ public class JobService {
         return JobCostPolicy.estimate(dataset.getEffectiveTokens(), config.epochs());
     }
 
+    /** 서버가 확정한 어댑터 주문 — {@link Job#assignAdapterOrder} 의 인자 그대로. */
+    private record AdapterOrder(boolean required, String name, int version, Long parentJobId) {
+    }
+
+    /**
+     * 주문에 담긴 어댑터 조건을 확정한다.
+     *
+     * <p>세 필드(hasAdapter·adapterName·parentJobId)가 전부 없으면 예전 요청과 똑같이 동작한다 —
+     * 어댑터 없음, v1, 모델 slug 기반 기본 이름.
+     *
+     * <p>{@code parentJobId} 가 오면 그 Job 이 <b>내 것이고, 완료됐고, 결과물이 있고, 같은 베이스 모델로 학습한 것인지</b>
+     * 여기서 확인한다. 프런트도 목록을 그 조건으로 좁혀 보여 주지만 신뢰 경계는 여기다. 확인이 끝나면 버전은 부모 + 1 이고,
+     * 이름을 안 보냈으면 부모 이름을 잇는다(같은 계보는 같은 이름을 쓰는 게 자연스럽다).
+     */
+    private AdapterOrder resolveAdapterOrder(Long ownerId, CreateJobRequest request, String baseModelSlug) {
+        String name = AdapterName.normalize(request.adapterName());
+        if (name != null && !AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+
+        Job parent = null;
+        if (request.parentJobId() != null) {
+            parent = jobRepository.findByIdAndOwnerId(request.parentJobId(), ownerId)
+                    .orElseThrow(() -> new BusinessException(JobErrorCode.PARENT_JOB_NOT_FOUND));
+            if (parent.getStatus() != JobStatus.COMPLETED) {
+                throw new BusinessException(JobErrorCode.PARENT_JOB_NOT_COMPLETED);
+            }
+            // 결과물이 없으면(아직 안 올라왔거나 지워졌거나) 이어서 학습할 입력이 없다
+            if (parent.getResultObjectKey() == null) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // 어댑터를 만드는 작업(학습)의 결과물이어야 한다 — 추론·평가의 result.tar 에는 어댑터가 없다.
+            // 여기서 막지 않으면 예치까지 끝난 뒤 Runtime 이 거절해 돈과 워커 시간이 날아간다.
+            if (workloadRepository.findById(parent.getWorkloadId())
+                    .map(w -> w.getKind() != WorkloadKind.TRAIN_LORA).orElse(true)) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // LoRA 어댑터는 학습한 베이스 모델에만 얹힌다 — 다른 모델에 이어 붙이면 Runtime 이 로드 단계에서 거절한다.
+            if (!parent.getBaseModelId().equals(request.baseModelId())) {
+                throw new BusinessException(JobErrorCode.PARENT_BASE_MODEL_MISMATCH);
+            }
+        }
+
+        boolean required = parent != null || Boolean.TRUE.equals(request.hasAdapter());
+        int version = parent == null ? 1 : parent.getAdapterVersion() + 1;
+        if (name == null) {
+            name = parent != null && parent.getAdapterName() != null
+                    ? parent.getAdapterName()
+                    : AdapterName.defaultFor(baseModelSlug);
+        }
+        return new AdapterOrder(required, name, version, parent == null ? null : parent.getId());
+    }
+
+    /**
+     * 결과 어댑터 이름 변경. 파일도 계보도 건드리지 않으므로 상태 제한이 없다 —
+     * 완료된 Job 을 내려받기 직전에 이름을 고치는 것이 주 사용처다.
+     */
+    @Transactional
+    public JobDetailResponse renameAdapter(Long ownerId, Long jobId, String rawName) {
+        String name = AdapterName.normalize(rawName);
+        if (!AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        job.renameAdapter(name);
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
     /**
      * Job 단건 조회. 본인 Job만 조회 가능(소유권 확인).
      * findByIdAndOwnerId 로 "id가 42면서 동시에 주인이 나인" Job을 찾는다 →
@@ -209,7 +291,26 @@ public class JobService {
         Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
         return JobDetailResponse.from(job, walletAuthProperties.chainId(),
-                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
+    /**
+     * 완료된 Job 의 결과물(어댑터) 내려받기 서명 URL. 파일은 스토리지에 resultObjectKey 로만 저장돼 있어서,
+     * 소유자가 조회할 때마다 유효기간이 살아 있는 URL 을 새로 발급한다 — DB 에 URL 을 저장하면 TTL 이 지나
+     * 죽은 링크가 남는다. 소유권은 이미 위(findByIdAndOwnerId)에서 확인됐다.
+     */
+    private String resultDownloadUrl(Job job) {
+        if (job.getStatus() != JobStatus.COMPLETED || job.getResultObjectKey() == null) {
+            return null;
+        }
+        try {
+            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl()).url();
+        } catch (Exception e) {
+            // 다운로드 URL 은 부가 정보 — 스토리지 장애가 상세 조회 전체를 죽이면 안 된다.
+            log.error("[STORAGE] 결과물 서명 URL 발급 실패 jobId={} key={}", job.getId(), job.getResultObjectKey(), e);
+            return null;
+        }
     }
 
     /**
@@ -255,6 +356,11 @@ public class JobService {
         // 데이터셋 원본이 올라와 검증된 뒤에만 예치를 받는다 — 예치금이 묶인 채 워커가 내려받을 파일이 없는 상황을 막는다.
         if (!job.hasDatasetFile()) {
             throw new BusinessException(JobErrorCode.DATASET_NOT_UPLOADED);
+        }
+        // 입력 어댑터도 같은 이유로 준비돼 있어야 한다. 이어서 학습(parentJobId)은 부모 결과물을 쓰므로
+        // 올릴 파일이 없고, 부모가 완료·결과물 보유인지는 주문 때 확인했다.
+        if (!job.isAdapterInputReady()) {
+            throw new BusinessException(JobErrorCode.ADAPTER_NOT_UPLOADED);
         }
         // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
         jobRepository.findByFundTxHash(hash)
@@ -329,8 +435,17 @@ public class JobService {
         jobRepository.findByIdAndOwnerId(jobId, ownerId)
                 .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
 
-        if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
-            return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+        // 환불 미확인이면 문을 닫지 않는다(failJob 과 같은 원칙). FUNDED 는 돈이 체인에 잠겨 있으므로
+        // 체인이 CANCELLED 라고 확인해줄 때만 즉시 종료하고, 아니면 CANCELLING 으로 keeper 순찰에 태운다
+        // — 의뢰자가 온체인 cancelJob 을 건너뛰고 API 만 불러도 acceptTimeout 만료 후 settleTimeout 이 환불한다.
+        if (refundConfirmedOnChain(jobId)) {
+            if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
+                return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+            }
+        } else if (jobRepository.cancelToRefundWaitIfFunded(jobId, ownerId,
+                "cancel requested but the escrow is not CANCELLED — awaiting settleTimeout") > 0) {
+            log.warn("[JOB] FUNDED 취소, 환불 미확인 → CANCELLING(환불 대기) jobId={}", jobId);
+            return;
         }
         if (jobRepository.markCancellingIfActive(jobId, ownerId) == 0) {
             throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);   // 이미 끝났거나 취소 중
@@ -339,7 +454,6 @@ public class JobService {
         jobRepository.findById(jobId)
                 .map(Job::getAssignedWorkerId)
                 .ifPresent(workerId -> sendCancel(workerId, jobId, "USER_REQUEST"));
-        // TODO: FUNDED 취소의 예치금 환불은 의뢰자가 온체인 cancelJob() — BC 연동 후 연결
     }
 
     /**
@@ -571,20 +685,39 @@ public class JobService {
      * <p>이것을 받지 않으면 Job 은 CANCELLING 에 영원히 남는다 — 컨테이너는 죽었고 예치금은
      * 돌아갔는데 기록만 취소 중인 상태.
      *
-     * TODO: 환불(블록체인) 트리거 — abortJob() 이 환불까지 하므로 Backend 는 흔적만 남기면 될 수 있음. BC 담당과 확인
+     * <p><b>환불이 체인에서 확인되지 않으면 종료하지 않는다.</b> abortTxHash 가 없거나(워커가
+     * 환불 전에 죽음) 체인이 CANCELLED 가 아니면, FAILED 로 닫는 순간 keeper·reconciler 의
+     * 순찰 대상에서 빠져 예치금이 잠긴 채 잊힌다. 대신 CANCELLING 으로 남겨 keeper 가 시한
+     * 만료 후 settleTimeout 으로 환불하게 한다. 돈이 잠긴 한 문을 닫지 않는다.
      */
     @Transactional
     public boolean failJob(String workerId, Long jobId, String code, String message,
                            String abortTxHash, Double actualRuntimeSec) {
-        // 실패 보고에는 abortJob 이 따라온다 -- 예치금이 돌아갔다는 주장이다.
-        // 체인이 CANCELLED 가 아니라고 말하면 그 주장은 거짓이고, Job 을 종료
-        // 상태로 확정하면 고객의 돈이 묶인 채로 기록만 끝난다.
-        if (abortTxHash != null && chainContradictsCancellation(jobId, workerId)) {
+        LocalDateTime now = LocalDateTime.now();
+        String reason = failReason(code, message);
+
+        if (abortTxHash != null) {
+            // 환불 주장(tx)이 있다 — 체인이 아직이라면 미채굴일 수 있으니 보류(NACK).
+            // 워커가 같은 보고를 재전송하고, 체인이 따라잡으면 아래 정상 경로로 확정된다.
+            if (chainContradictsCancellation(jobId, workerId)) {
+                return false;
+            }
+        } else if (!refundConfirmedOnChain(jobId)) {
+            // 환불 주장 자체가 없다(워커가 abortJob 전에 죽음) — 재전송을 기다려도 올 것이 없다.
+            // 종료 대신 CANCELLING 으로 순찰에 태워 keeper 가 시한 만료 후 settleTimeout 으로 환불하게 한다.
+            int held = jobRepository.holdFailureForRefund(jobId, workerId, reason,
+                    actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
+            if (held > 0) {
+                log.warn("[JOB] 실패 보고(환불 주장 없음), 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+                workerRepository.findById(workerId)
+                        .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                        .ifPresent(worker -> worker.finishJob());
+                return true;
+            }
             return false;
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        String reason = failReason(code, message);
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
         if (updated == 0) {
             updated = jobRepository.cancelIfFailedWhileCancelling(
@@ -597,7 +730,9 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
-        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
         return true;
     }
 
@@ -616,7 +751,9 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
-        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
         return true;
     }
 
@@ -656,6 +793,20 @@ public class JobService {
             return true;
         }
         return false;
+    }
+
+    /**
+     * 예치금이 의뢰자에게 돌아갔다고 확인됐는가. 에스크로에 묶인 적 없는 Job(체인 없는 모드)은
+     * 돌려줄 돈이 없으므로 true. CONFIRMED(체인 CANCELLED)만 true — UNKNOWN(노드 미응답)과
+     * CONTRADICTED(아직 잠김)는 모두 "확인 안 됨"이다. 모르는 돈은 잠긴 돈으로 취급한다.
+     */
+    private boolean refundConfirmedOnChain(Long jobId) {
+        Job current = jobRepository.findById(jobId).orElse(null);
+        if (current == null || current.getEscrowJobId() == null) {
+            return true;
+        }
+        return escrow.cancelledOnChain(current.getEscrowContractAddress(), current.getEscrowJobId())
+                .isConfirmed();
     }
 
     /** 이 워커의 operator 주소. 없으면 null -- 온체인 대조에서 건너뛴다. */

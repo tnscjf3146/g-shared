@@ -58,6 +58,19 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findDatasetFilesToClean(@Param("abandonedBefore") LocalDateTime abandonedBefore);
 
+    /** 같은 조건의 어댑터 판 — 끝난 Job 과 예치 없이 방치된 CREATED Job 의 입력 어댑터(V17). */
+    @Query("""
+            SELECT j FROM Job j
+             WHERE j.adapterUploadedAt IS NOT NULL
+               AND j.adapterDeletedAt IS NULL
+               AND (j.status IN (com.gshared.back.job.domain.JobStatus.COMPLETED,
+                                 com.gshared.back.job.domain.JobStatus.FAILED,
+                                 com.gshared.back.job.domain.JobStatus.CANCELLED)
+                    OR (j.status = com.gshared.back.job.domain.JobStatus.CREATED
+                        AND j.createdAt < :abandonedBefore))
+            """)
+    java.util.List<Job> findAdapterFilesToClean(@Param("abandonedBefore") LocalDateTime abandonedBefore);
+
     /**
      * 원자적 취소 ①: 아직 워커 손에 가지 않은 Job(CREATED/FUNDED)은 바로 CANCELLED.
      * 확인→변경 사이 틈(경쟁 조건)이 없고, 동시 이중 취소도 한쪽만 성공(영향 행 수로 판별).
@@ -280,6 +293,43 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                       @Param("failReason") String failReason, @Param("abortTxHash") String abortTxHash,
                       @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
+    /** 실패 보고를 환불 순찰에 남긴다. 이미 취소 중이어도 실패 원인을 기록한다. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.failReason = COALESCE(j.failReason, :failReason),
+                   j.actualRuntimeSec = COALESCE(j.actualRuntimeSec, :actualRuntimeSec),
+                   j.reconciliationReason = :reconciliationReason
+             WHERE j.id = :jobId
+               AND j.assignedWorkerId = :workerId
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.RUNNING,
+                                com.gshared.back.job.domain.JobStatus.CANCELLING)
+            """)
+    int holdFailureForRefund(@Param("jobId") Long jobId, @Param("workerId") String workerId,
+                             @Param("failReason") String failReason,
+                             @Param("actualRuntimeSec") Double actualRuntimeSec,
+                             @Param("reconciliationReason") String reconciliationReason);
+
+    /**
+     * FUNDED 취소인데 환불이 체인에서 확인되지 않은 경우: FUNDED → <b>CANCELLING</b>.
+     * holdFailureForRefund 와 같은 원칙 — 돈이 잠긴 한 종료(CANCELLED)로 문을 닫지 않고
+     * keeper 순찰에 남겨 acceptTimeout 만료 후 settleTimeout 으로 환불하게 한다.
+     * 배정 전(assignedWorkerId IS NULL)일 때만 — 그 사이 매칭이 배정했으면 0행 → ASSIGNED 취소 경로가 잇는다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.reconciliationReason = :reconciliationReason
+             WHERE j.id = :jobId
+               AND j.owner.id = :ownerId
+               AND j.assignedWorkerId IS NULL
+               AND j.status = com.gshared.back.job.domain.JobStatus.FUNDED
+            """)
+    int cancelToRefundWaitIfFunded(@Param("jobId") Long jobId, @Param("ownerId") Long ownerId,
+                                   @Param("reconciliationReason") String reconciliationReason);
+
     /**
      * 원자적 배정(매칭): "아직 FUNDED 일 때만" ASSIGNED 전이.
      * 매칭이 Job 을 읽은 뒤 사용자가 취소해도, 조건 불일치(0행)로 취소를 되살리지 않는다.
@@ -360,6 +410,39 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findOpenOnChain();
 
+    /** 종료됐지만 환불 확인 기록이 없는 작업. 과거 FAILED와 수락 전 거절도 포함한다. */
+    @Query("""
+            SELECT j FROM Job j JOIN FETCH j.owner
+             WHERE j.escrowJobId IS NOT NULL AND j.refundConfirmedAt IS NULL
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.FAILED,
+                                com.gshared.back.job.domain.JobStatus.CANCELLED)
+             ORDER BY j.id ASC
+            """)
+    java.util.List<Job> findRefundRecoveryCandidates();
+
+    /** 예치 정보와 미정산 상태를 확인한 종료 작업만 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.finishedAt = NULL,
+                   j.reconciliationReason = :reason
+             WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.FAILED,
+                                com.gshared.back.job.domain.JobStatus.CANCELLED)
+            """)
+    int reopenForRefundIfTerminal(@Param("jobId") Long jobId, @Param("reason") String reason);
+
+    /** 실제 체인 CANCELLED를 확인한 종료 작업은 복구 순찰에서 제외한다. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j SET j.refundConfirmedAt = :now, j.reconciliationReason = NULL
+             WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
+               AND j.status IN (com.gshared.back.job.domain.JobStatus.FAILED,
+                                com.gshared.back.job.domain.JobStatus.CANCELLED)
+            """)
+    int confirmRefundIfTerminal(@Param("jobId") Long jobId, @Param("now") LocalDateTime now);
+
     /** 대조 필요 표시가 남은 Job. 자동 진행은 멈춰 있고 reconciliation 이 체인을 다시 본다. */
     @Query("""
             SELECT j FROM Job j
@@ -378,8 +461,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
-                   j.abortTxHash = :txHash,
-                   j.failReason = :reason,
+                   j.abortTxHash = COALESCE(:txHash, j.abortTxHash),
+                   j.refundConfirmedAt = :now,
                    j.finishedAt = :now
              WHERE j.id = :jobId
                AND j.status IN (com.gshared.back.job.domain.JobStatus.FUNDED,
@@ -388,5 +471,5 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                                 com.gshared.back.job.domain.JobStatus.CANCELLING)
             """)
     int cancelByChainIfOpen(@Param("jobId") Long jobId, @Param("txHash") String txHash,
-                            @Param("reason") String reason, @Param("now") LocalDateTime now);
+                            @Param("now") LocalDateTime now);
 }

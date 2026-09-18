@@ -32,6 +32,21 @@ public class EscrowSettlementService {
     private final WorkerRepository workerRepository;
     private final JobService jobService;
 
+    /** 호출자가 예치의 동일성과 미정산 상태를 체인에서 확인한 뒤 사용한다. */
+    public boolean recoverRefund(Long jobId) {
+        int updated = jobRepository.reopenForRefundIfTerminal(jobId,
+                "REFUND_RECOVERY: deposit still locked; awaiting settleTimeout");
+        if (updated > 0) {
+            log.warn("[REFUND] 미환불 종료 작업을 CANCELLING으로 복구 jobId={}", jobId);
+        }
+        return updated > 0;
+    }
+
+    /** 이미 환불된 종료 작업은 상태와 원래 실패 사유를 보존한다. */
+    public void confirmTerminalRefund(Long jobId) {
+        jobRepository.confirmRefundIfTerminal(jobId, LocalDateTime.now());
+    }
+
     /** reconciliation 이 체인에서 확인한 예치. {@link JobRepository#fundIfCreated} 그대로. */
     public boolean fundFromChain(Long jobId, Long chainId, String contractAddress,
                                  EscrowChainClient.JobFundedEvent event, String txHash) {
@@ -66,11 +81,12 @@ public class EscrowSettlementService {
                 || before.getStatus() == JobStatus.RUNNING
                 || before.getStatus() == JobStatus.CANCELLING;
 
-        int updated = jobRepository.cancelByChainIfOpen(jobId, txHash, reason, LocalDateTime.now());
+        int updated = jobRepository.cancelByChainIfOpen(jobId, txHash, LocalDateTime.now());
         if (updated == 0) {
             return false;
         }
-        log.info("[RECONCILE] 체인 CANCELLED → DB CANCELLED jobId={} from={} tx={}", jobId, before.getStatus(), txHash);
+        log.info("[RECONCILE] 체인 CANCELLED → DB CANCELLED jobId={} from={} tx={} reason={}",
+                jobId, before.getStatus(), txHash, reason);
         jobRepository.findById(jobId).ifPresent(Job::clearReconciliation);
         if (wasWithWorker && workerId != null) {
             workerRepository.findById(workerId)

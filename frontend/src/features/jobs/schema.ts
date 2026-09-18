@@ -7,14 +7,24 @@ export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-model
 /** 데이터셋 메타데이터 등록·조회(develop). 원본 파일 업로드가 아니라 분석 결과 저장 — 파일 저장 위치는 미정(블록체인 회의 6-3) */
 export const DATASETS_PATH = '/datasets'
 
-/** back JobStatus 7단계 */
-export const jobStatusSchema = z.enum(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'])
+/** back JobStatus 8단계 — CANCELLING 은 취소·실패 후 예치금 정리(환불) 대기 중인 중간 상태 */
+export const jobStatusSchema = z.enum(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING', 'CANCELLING', 'COMPLETED', 'FAILED', 'CANCELLED'])
 export const trainingModeSchema = z.enum(['AUTO', 'CUSTOM'])
 /** AUTO 학습 방향. 견적(estimate·gpu-options)에서는 `autoMode`, 주문(POST /jobs)에서는 `trainingPriority` 이름으로 보낸다(값은 같음) */
 export const autoModeSchema = z.enum(['SPEED', 'BALANCED', 'TRAINING'])
 
 const positiveInt = (name: string) =>
   z.number().check(z.refine(Number.isInteger, `${name}은(는) 정수여야 합니다.`), z.positive(`${name}은(는) 1 이상이어야 합니다.`))
+
+/** 어댑터 이름 — 그대로 다운로드 파일 이름이 된다. 경로 구분자·제어문자를 막아야 저장이 안전하다(한글·영숫자·공백·`-_.` 만, 앞뒤 공백 금지) */
+export const ADAPTER_NAME_MAX = 60
+export const adapterNameSchema = z
+  .string()
+  .check(
+    z.minLength(1, '어댑터 이름을 입력해 주세요.'),
+    z.maxLength(ADAPTER_NAME_MAX, `어댑터 이름은 ${ADAPTER_NAME_MAX}자까지 입력할 수 있습니다.`),
+    z.regex(/^[가-힣a-zA-Z0-9][가-힣a-zA-Z0-9 ._-]*[가-힣a-zA-Z0-9._-]$|^[가-힣a-zA-Z0-9]$/, '한글·영문·숫자와 - _ . 공백만 쓸 수 있고, 공백으로 끝날 수 없습니다.'),
+  )
 
 /** 학습 설정 4값(back SchedulerTrainingConfig 와 동일). 상한 없음 — 실행 가능성은 서버가 판단 */
 export const trainingConfigSchema = z.object({
@@ -102,6 +112,12 @@ export const createJobRequestSchema = z.object({
   trainingMode: trainingModeSchema,
   trainingPriority: z.optional(autoModeSchema),
   trainingConfig: z.optional(trainingConfigSchema),
+  /** 결과 어댑터 이름(다운로드 파일 이름). 비워 보내면 서버가 기본값을 붙인다 — 백엔드 요청 §11 */
+  adapterName: z.optional(adapterNameSchema),
+  /** 이어서 학습할 완료 작업 — 그 작업의 어댑터에서 출발해 버전이 하나 올라간다(v1 → v2 → v3). null/생략이면 처음부터 */
+  parentJobId: z.optional(z.nullable(z.number())),
+  /** 어댑터를 얹고 시작하는가(이어서 학습 또는 .tar 업로드). true 면 서버는 adapter-upload 검증까지 끝나야 예치를 허용한다 */
+  hasAdapter: z.optional(z.boolean()),
 })
 export const createJobResponseSchema = z.object({
   jobId: z.number(),
@@ -109,6 +125,8 @@ export const createJobResponseSchema = z.object({
   predictedRuntimeSec: z.number(),
   estimatedCost: z.number(),
   schedulerModelVersion: z.nullable(z.string()),
+  adapterName: z.optional(z.nullable(z.string())), // 서버가 확정한 이름·버전(백엔드 반영 전에는 안 온다)
+  adapterVersion: z.optional(z.nullable(z.number())),
 })
 
 export const jobSummarySchema = z.object({
@@ -117,6 +135,10 @@ export const jobSummarySchema = z.object({
   workloadId: z.number(),
   progressPercent: z.nullable(z.number()),
   estimatedCost: z.number(),
+  failReason: z.optional(z.nullable(z.string())), // 있으면 실패한 작업 — 상태와 조합해 "실패·환불 처리 중" 등으로 표시 (배포 전 서버 대비 optional)
+  // 어댑터 이름·버전 — 2단계 "이어서 학습" 목록이 목록 API 만으로 "이름 v2" 를 보여 줄 수 있게(백엔드 요청 §11, 반영 전 optional)
+  adapterName: z.optional(z.nullable(z.string())),
+  adapterVersion: z.optional(z.nullable(z.number())),
   createdAt: z.string(), // LocalDateTime "2026-09-09T10:00:00" (Z 없음)
 })
 export const jobPageSchema = z.object({
@@ -143,6 +165,8 @@ export const jobDetailSchema = z.object({
   escrowChainId: z.optional(z.nullable(z.number())),
   escrowContractAddress: z.optional(z.nullable(hexAddress)),
   datasetUploaded: z.optional(z.boolean()), // 원본 파일이 올라와 검증됐는가 — false 면 /fund 가 409 DATASET_NOT_UPLOADED 로 거절한다(예치 버튼을 열면 안 된다)
+  hasAdapter: z.optional(z.boolean()), // 입력 어댑터를 얹는 작업인가(이어서 학습 또는 업로드)
+  adapterUploaded: z.optional(z.boolean()), // 입력 어댑터 .tar 가 올라와 검증됐는가 — hasAdapter && !adapterUploaded 면 /fund 가 409 ADAPTER_NOT_UPLOADED
   status: jobStatusSchema,
   workloadId: z.number(),
   baseModelId: z.number(),
@@ -162,6 +186,10 @@ export const jobDetailSchema = z.object({
   progressTotalEpochs: z.nullable(z.number()),
   resultHash: z.nullable(z.string()),
   resultUrl: z.nullable(z.string()),
+  // 학습 결과물(어댑터)의 이름·버전·계보 — 백엔드 요청 §11, 반영 전에도 화면이 죽지 않게 optional
+  adapterName: z.optional(z.nullable(z.string())),
+  adapterVersion: z.optional(z.nullable(z.number())),
+  parentJobId: z.optional(z.nullable(z.number())),
   failReason: z.nullable(z.string()),
   createdAt: z.string(),
   startedAt: z.nullable(z.string()),
@@ -181,3 +209,10 @@ export const fundResponseSchema = z.object({
 export const datasetUploadSchema = z.object({ uploadUrl: z.string().check(z.minLength(1)) })
 /** POST /jobs/{id}/dataset-upload/complete — 업로드 검증 결과. verified=true 여야 다음 단계 진행 */
 export const datasetUploadCompleteSchema = z.object({ verified: z.boolean() })
+
+/** 입력 어댑터 .tar 업로드 — 데이터셋과 같은 모양(서명 URL 발급 → PUT → 검증). lora-adapter-frontend-작업 §2 */
+export const adapterUploadSchema = z.object({ uploadUrl: z.string().check(z.minLength(1)) })
+export const adapterUploadCompleteSchema = z.object({ verified: z.boolean() })
+
+/** PATCH /jobs/{id}/adapter-name — 결과 어댑터 이름만 바꾼다(파일은 그대로). 입력 어댑터 업로드(/adapter-upload)와 다른 경로다 */
+export const renameAdapterRequestSchema = z.object({ adapterName: adapterNameSchema })

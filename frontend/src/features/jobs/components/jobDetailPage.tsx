@@ -8,8 +8,9 @@ import { ApiError } from '@/lib/fetcher'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
-import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, STATUS_META, STATUS_SENTENCE, formatBytes, formatCost, formatDateTime, formatDuration } from '../format'
+import { ACTIVE_STATUSES, CANCELLABLE_STATUSES, formatBytes, formatCost, formatDateTime, formatDuration, jobStatusMeta, jobStatusSentence } from '../format'
 import type { Catalog, Dataset, JobDetail } from '../types'
+import { AdapterCard } from './adapterCard'
 import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
@@ -93,11 +94,17 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   }
 
   const { job } = state
-  const meta = STATUS_META[job.status]
+  const meta = jobStatusMeta(job.status, job.failReason)
   const name = {
     workload: catalog?.workloads.find((w) => w.id === job.workloadId)?.name ?? `#${job.workloadId}`,
     model: catalog?.baseModels.find((m) => m.id === job.baseModelId)?.name ?? `#${job.baseModelId}`,
   }
+  // 예치 전에 올라갔어야 할 파일이 빠졌는가 — 데이터셋과 입력 어댑터 둘 다 검증돼야 /fund 가 열린다
+  // 이어서 학습(parentJobId)은 어댑터가 이미 서버에 있어 업로드 대상이 아니다 — 올렸어야 하는 건 .tar 를 고른 경우뿐
+  const missingUpload = job.datasetUploaded === false ? '데이터셋' : job.hasAdapter && job.parentJobId == null && job.adapterUploaded === false ? '어댑터' : null
+  // 어댑터를 만드는 작업인가. 카탈로그를 못 받았으면 결과물 유무로 대신 판단한다(카탈로그 실패로 다운로드가 사라지면 안 된다)
+  const workloadKind = catalog?.workloads.find((w) => w.id === job.workloadId)?.kind
+  const isTrain = workloadKind ? workloadKind === 'TRAIN_LORA' : job.adapterName != null || job.resultUrl != null || job.resultHash != null
 
   // FUNDED 는 에스크로 금고에 GSC 가 잠겨 있다 — 온체인 cancelJob 으로 환불을 먼저 받고(MetaMask 서명 1회),
   // 그 다음 기존 취소 API 로 서버 상태를 맞춘다. 그 외 상태(CREATED·ASSIGNED)는 서버 취소만
@@ -168,13 +175,13 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
-        <p className={`text-[16px] ${job.status === 'FAILED' ? 'text-danger' : 'text-dark'}`}>{STATUS_SENTENCE[job.status]}</p>
+        <p className={`text-[16px] ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason)}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
         {job.status === 'CREATED' &&
-          (job.datasetUploaded === false ? (
-            // 등록 도중 업로드가 끊긴 작업 — 서버는 /fund 를 409 DATASET_NOT_UPLOADED 로 거절하고, 상세에는 재업로드가 없다(파일은 브라우저 메모리에만 있었다)
+          (missingUpload ? (
+            // 등록 도중 업로드가 끊긴 작업 — 서버는 /fund 를 409 DATASET_NOT_UPLOADED / ADAPTER_NOT_UPLOADED 로 거절하고, 상세에는 재업로드가 없다(파일은 브라우저 메모리에만 있었다)
             <p role="alert" className="rounded-md bg-warning-tint px-4 py-3 text-[14px] text-warning">
-              데이터셋 파일 업로드가 끝나지 않아 예치할 수 없습니다. 위의 [작업 취소]로 이 작업을 닫고 워크로드 등록을 다시 진행해 주세요.
+              {missingUpload} 파일 업로드가 끝나지 않아 예치할 수 없습니다. 위의 [작업 취소]로 이 작업을 닫고 워크로드 등록을 다시 진행해 주세요.
             </p>
           ) : (
             <FundPanel job={job} onFunded={() => void load()} />
@@ -202,6 +209,14 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             ['최대 길이', String(job.maxLength)],
           ]}
         />
+        {/* 입력 어댑터(이어서 학습·업로드) — 예치 전 업로드 여부까지 한 줄로 */}
+        <p className="text-[13px] text-text-muted">
+          입력 어댑터{' '}
+          <span className="font-medium text-dark">
+            {/* adapterUploaded 는 끝난 작업의 파일을 cleanup 이 지우면 다시 false 가 된다 — "업로드 필요"는 예치 전(CREATED)에만 맞는 말 */}
+            {!job.hasAdapter ? '없음 (처음부터 학습)' : job.parentJobId != null ? `작업 #${job.parentJobId} 에서 이어서` : job.status === 'CREATED' && job.adapterUploaded === false ? '업로드 필요' : '업로드됨'}
+          </span>
+        </p>
       </section>
 
       {/* 데이터셋 — 3단계에서 브라우저가 뽑은 메타 + 파일 해시. GET /datasets/{datasetId}(파일명은 서버에 없다) */}
@@ -247,22 +262,28 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         )}
       </section>
 
-      {job.status === 'COMPLETED' && (job.resultUrl || job.resultHash) && (
-        <section className="card flex flex-col gap-3 px-6 py-5">
-          <h2 className="text-[17px] font-bold tracking-heading text-dark">결과</h2>
-          <div className="flex flex-wrap items-center gap-3">
-            {job.resultUrl && (
-              <a href={job.resultUrl} rel="noreferrer" className="btn btn-md btn-primary">
-                결과 다운로드
-              </a>
-            )}
-            {job.resultHash && (
-              <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
-                해시 {job.resultHash.slice(0, 10)}… 복사
-              </button>
-            )}
-          </div>
-        </section>
+      {/* 어댑터 — 학습 결과물. 이름은 다운로드 파일 이름이라 끝난 뒤에도 바꿀 수 있다. 어댑터를 만들지 않는 워크로드(추론·평가)는 결과 파일만 */}
+      {isTrain ? (
+        <AdapterCard job={job} onRenamed={(next) => setState({ status: 'ready', job: next })} />
+      ) : (
+        job.status === 'COMPLETED' &&
+        (job.resultUrl || job.resultHash) && (
+          <section className="card flex flex-col gap-3 px-6 py-5">
+            <h2 className="text-[17px] font-bold tracking-heading text-dark">결과</h2>
+            <div className="flex flex-wrap items-center gap-3">
+              {job.resultUrl && (
+                <a href={job.resultUrl} rel="noreferrer" className="btn btn-md btn-primary">
+                  결과 다운로드
+                </a>
+              )}
+              {job.resultHash && (
+                <button type="button" title={job.resultHash} onClick={() => navigator.clipboard?.writeText(job.resultHash!).catch(() => {})} className="btn btn-md btn-secondary tabular-nums">
+                  해시 {job.resultHash.slice(0, 10)}… 복사
+                </button>
+              )}
+            </div>
+          </section>
+        )
       )}
 
       <ConfirmDialog

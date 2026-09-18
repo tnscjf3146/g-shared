@@ -30,6 +30,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from .adapter import check_adapter_directory
 from .cli import steps_for
 from .config import check_model_directory
 from .dataset import read_dataset
@@ -84,6 +85,11 @@ def run(request, events=None) -> dict:
 
     samples = read_dataset(request.dataset_path)
     model_config = check_model_directory(request.model_path)
+    # Checked with the rest of the inputs, before any weights: a job that
+    # brought a broken adapter should not spend a model load finding out.
+    adapter_path = getattr(request, "adapter_path", None)
+    init_adapter = (check_adapter_directory(adapter_path)
+                    if adapter_path is not None else None)
     total_steps = steps_for(len(samples), request.config, request.max_steps)
 
     events.training_started(
@@ -96,6 +102,7 @@ def run(request, events=None) -> dict:
         modelType=model_config.get("model_type"),
         gpuName=torch.cuda.get_device_name(0),
         computeDtype=_compute_dtype_name(torch),
+        initAdapter=init_adapter is not None,
     )
 
     tokenizer = _tokenizer(request.model_path)
@@ -104,7 +111,7 @@ def run(request, events=None) -> dict:
 
     started = time.monotonic()
     model = _load_quantized(torch, request.model_path)
-    model = _attach_adapters(model, request.config)
+    model = _attach_adapters(model, request.config, init_adapter)
     metrics = _train(torch, model, tokenizer, encoded, request,
                      total_steps, events)
     _save(model, request.output_dir)
@@ -121,6 +128,10 @@ def run(request, events=None) -> dict:
     metrics["totalSteps"] = total_steps
     metrics["gpuName"] = torch.cuda.get_device_name(0)
     metrics["trainingConfig"] = asdict(request.config)
+    # The files that were loaded, by hash. Null means a fresh adapter -- the
+    # result then proves it did not start from anything.
+    metrics["initAdapter"] = (init_adapter.describe()
+                              if init_adapter is not None else None)
     _write_metrics(request.output_dir, metrics)
     events.training_completed(
         runtime_sec=metrics["runtimeSec"],
@@ -255,15 +266,24 @@ def _load_quantized(torch, model_path):
     return model
 
 
-def _attach_adapters(model, config):
-    """4-bit base, trainable low-rank adapters on every linear layer."""
+def _attach_adapters(model, config, init_adapter=None):
+    """4-bit base, trainable low-rank adapters on every linear layer.
+
+    With ``init_adapter`` the adapters are the job's own, loaded trainable,
+    and keep that adapter's rank and targets -- continuing training means
+    continuing *that* adapter, not a new one shaped like it. Without it they
+    are freshly initialised, exactly as before.
+    """
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
     model = prepare_model_for_kbit_training(
         model, use_gradient_checkpointing=config.gradient_checkpointing)
-    model = get_peft_model(model, LoraConfig(
-        r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT,
-        bias="none", task_type="CAUSAL_LM", target_modules=LORA_TARGETS))
+    if init_adapter is not None:
+        model = _load_init_adapter(model, init_adapter)
+    else:
+        model = get_peft_model(model, LoraConfig(
+            r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT,
+            bias="none", task_type="CAUSAL_LM", target_modules=LORA_TARGETS))
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if trainable == 0:
@@ -273,6 +293,30 @@ def _attach_adapters(model, config):
             ExitCode.MODEL_LOAD_FAILED,
             "the LoRA adapters attached to no layer of this model")
     return model
+
+
+def _load_init_adapter(model, init_adapter):
+    """The job's adapter, attached trainable, or INVALID_INPUT.
+
+    PEFT refuses an adapter whose shapes or target modules do not exist in
+    this base model -- which is how an adapter trained on a different model
+    shows up. That is the job's input being wrong, not training failing.
+    """
+    import torch
+    from peft import PeftModel
+
+    try:
+        return PeftModel.from_pretrained(
+            model, str(init_adapter.path), is_trainable=True)
+    except torch.cuda.OutOfMemoryError:
+        raise TrainingFailure(
+            ExitCode.CUDA_OOM,
+            "the GPU ran out of memory while loading the initial adapter") from None
+    except Exception as error:
+        raise TrainingFailure(
+            ExitCode.INVALID_INPUT,
+            "the initial adapter does not fit this base model ("
+            + type(error).__name__ + ")") from None
 
 
 def _train(torch, model, tokenizer, encoded, request, total_steps, events) -> dict:

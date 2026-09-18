@@ -11,11 +11,14 @@ import { P } from '../progress'
 import { type Side, type Vec3, Pointer, calloutStyles as styles, countUp, enterAll, exitAll, motionRate, partOf, pinsReady, rightOfYaw, sideFor, topOf, usePins } from './callout'
 import { DRACO, MODEL } from './gpuModel'
 
-// 04 공급자 — 히트싱크가 빠져 기판이 드러나면(초크가 펌핑하고 LED 가 깜빡이는 = "일하는" 장면) 항목마다 실제 부품에 선이 붙는다(2026-09-14, animejs.com 식):
+// 04 공급자 — 히트싱크가 들리며 기판이 드러나는 동안(초크가 펌핑하고 LED 가 깜빡이는 = "일하는" 장면) 항목마다 실제 부품에 선이 붙는다(2026-09-14, animejs.com 식):
 //   가동 시간 → PWM IC(전원 제어)   수익 → 16핀 전원 커넥터   온라인 → 상태 LED   30초 생존 신호 → PCB 배선(Traces)   켜면 받고 끄면 빠짐 → I/O 브라켓(커넥터 끝). 라벨은 짧게 — 작은 화면(720 높이)에서 옆 라벨·사이드바에 닿았다
 // 숫자는 예시(챕터 3 의 600 GSC/시간 과 맞춘 3시간 12분 → 1,920 GSC)
 const CHAPTER = 3 // 사이드바 04 = 인덱스 3
-const SHOW_AT = 0.6 // 히트싱크가 이만큼 빠져나갔을 때(P.hsOff) 켠다
+// 켜는 시점(2026-09-17 밸런싱): 히트싱크가 절반 들렸을 때(P.hsLift). 이전엔 이탈이 0.6 진행된 뒤(P.hsOff)였는데 이탈 트윈이 in(3) 가속이라
+// 그 지점이 트리거 뒤 약 0.9초, 거기에 선·라벨 등장(~0.8초)이 더해져 왼쫽 카피(트리거 즉시)보다 1초 넘게 늦었다.
+// hsLift 는 inOut(2) 500ms 라 0.5 는 트리거 뒤 약 0.23초 — 카피 제목이 올라오는 동안 선이 같이 그려진다. 되감아 내려오면 같은 지점에서 꺼진다
+const SHOW_AT = 0.5
 const GAIN = { minutes: 192, gsc: 1920, at: 300, duration: 1400 }
 const LED: Vec3 = [-0.89, -0.2 + 0.012, -0.44] // statusLeds.tsx 의 heartbeat LED(BIOS IC 옆)
 const CAP_O: Vec3 = [0.3, -0.1, 0.5] // tools/gpu_model.py Cap_O0 윗면(기판 -0.19 + 캡 높이)
@@ -56,7 +59,7 @@ export function ProviderCallout() {
 
   useFrame(() => {
     const { time, gsc } = nums.current
-    const on = chapterStore.get() === CHAPTER && P.hsOff >= SHOW_AT
+    const on = chapterStore.get() === CHAPTER && P.hsLift >= SHOW_AT
     if (on === shown.current || !pinsReady(pins) || !time || !gsc) return
     shown.current = on
     const rate = motionRate()

@@ -126,6 +126,9 @@ class RuntimeFailure(Enum):
     CONTEXT_MISMATCH = "CONTEXT_MISMATCH"
     MODEL_PREPARATION_FAILED = "MODEL_PREPARATION_FAILED"
     DATASET_UNAVAILABLE = "DATASET_UNAVAILABLE"
+    #: The Job asked to continue from an adapter, and it could not be fetched
+    #: or is not an archive this Worker will unpack. Never trained without it.
+    ADAPTER_UNAVAILABLE = "ADAPTER_UNAVAILABLE"
     IMAGE_REFUSED = "IMAGE_REFUSED"
     IMAGE_PULL_FAILED = "IMAGE_PULL_FAILED"
     DOCKER_UNAVAILABLE = "DOCKER_UNAVAILABLE"
@@ -330,15 +333,23 @@ def parse_event_line(line: str) -> RuntimeEvent | None:
     return RuntimeEvent(name, payload)
 
 
-def training_arguments(training: Any) -> list[str]:
+#: Where an initial adapter is inside the container. It sits under the input
+#: mount, so it is read-only and needs no mount of its own.
+ADAPTER_MOUNT_PATH = f"{INPUT_MOUNT}/adapter"
+
+
+def training_arguments(training: Any, *, adapter: bool = False) -> list[str]:
     """The runtime's CLI, from the context's numbers.
 
     Numbers only. The container has never heard of SPEED or BALANCED -- those
     are the AI Scheduler's names for sets of numbers, and resolving them is
     done long before this point.
+
+    ``adapter`` adds the one path the runtime continues training from. It is a
+    fixed path, never anything taken from a message.
     """
     check_training(training)
-    return [
+    arguments = [
         "--model-path", MODEL_MOUNT,
         "--dataset-path", f"{INPUT_MOUNT}/dataset.jsonl",
         "--output-dir", OUTPUT_MOUNT,
@@ -347,6 +358,9 @@ def training_arguments(training: Any) -> list[str]:
         "--learning-rate", repr(float(training.learning_rate)),
         "--max-length", str(int(training.max_length)),
     ]
+    if adapter:
+        arguments += ["--adapter-path", ADAPTER_MOUNT_PATH]
+    return arguments
 
 
 def check_training(training: Any) -> None:
@@ -382,6 +396,7 @@ def run_command(
     *,
     host_path_of: Callable[[Path], Any] | None = None,
     generation: int = 0,
+    adapter: bool = False,
 ) -> list[str]:
     """The whole ``docker run``, as a list of arguments.
 
@@ -424,7 +439,7 @@ def run_command(
         "-v", f"{where(workspace.input_dir)}:{INPUT_MOUNT}:ro",
         "-v", f"{where(workspace.output_dir)}:{OUTPUT_MOUNT}",
         image_reference,
-        *training_arguments(training),
+        *training_arguments(training, adapter=adapter),
     ]
 
 
@@ -442,6 +457,7 @@ async def run_training(
     generation: int = 0,
     cancelled: Callable[[], bool] | None = None,
     on_started: Callable[[str], None] | None = None,
+    adapter: bool = False,
 ) -> RuntimeOutcome:
     """Start the container, watch it, and say what happened.
 
@@ -461,7 +477,8 @@ async def run_training(
     reaches the caller minutes before the container exits.
     """
     command = run_command(image_reference, workspace, model_path, training,
-                          host_path_of=host_path_of, generation=generation)
+                          host_path_of=host_path_of, generation=generation,
+                          adapter=adapter)
     _debug.debug("runtime: starting %s (run %s)",
                 container_name(workspace.job_id), generation)
 

@@ -93,6 +93,8 @@ public class JobDatasetService {
             throw new BusinessException(JobErrorCode.DATASET_METADATA_MISMATCH);
         }
 
+        // 검증이 끝난 원본은 봉인 — 견적·해시 검증을 통과한 파일이 살아 있는 업로드 URL 로 바뀌지 못하게.
+        objectStorage.seal(objectKey);
         job.recordDatasetUpload(objectKey, stat.sizeBytes(), stat.sha256(), LocalDateTime.now());
         return new DatasetUploadCompleteResponse(job.getId(), objectKey, true);
     }

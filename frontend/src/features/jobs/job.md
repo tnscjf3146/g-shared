@@ -214,3 +214,68 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 1. `[fe-feature] 작업 스키마·API·목업(카탈로그·견적·자동 전이·sessionStorage) + 보호 경로·네비 탭·랜딩 CTA` — schema/types/api/errors/format, mocks, `proxy.ts`, `navAuth.tsx`, `heroSection.tsx`
 2. `[fe-feature] 작업 목록·상세 화면` — `(app)/jobs`, `[jobId]`, `ui/progressBar`, `jobsPage/jobRow/jobDetailPage/jobProgress/jobSkeleton`
 3. `[fe-feature] 작업 만들기 폼` — `(app)/jobs/new`, `ui/select`, `jobCreateForm/estimateCard`, job.md 갱신
+
+## 11. 어댑터 — 버전(v2·v3) · 이름 · 다운로드 (2026-09-17, `fe-feature/adapter-versioning`)
+
+학습 결과물은 **어댑터**다. 그래서 세 가지를 바꿨다: ① 한 번 학습한 어댑터에서 **이어서 학습**(버전이 올라간다), ② 내려받을 **이름을 사용자가 정한다**(등록할 때 + 나중에), ③ 상세의 "결과 다운로드" 를 **"어댑터 다운로드"** 로.
+
+입력 어댑터 `.tar` 업로드는 별도 요청서 `lora-adapter-frontend-작업.md`(§0~§6)를 그대로 구현했다 — 아래 11-3.
+
+### 11-1. 개념
+
+- **버전**: 처음부터 학습하면 `v1`. 완료된 내 학습 작업을 골라 이어서 학습하면 그 작업의 `adapterVersion + 1`. 정본은 서버가 정한다(프론트는 미리보기만).
+- **이름**: 다운로드 파일 이름이 된다(`cs-상담봇-v2.tar`). 2단계에서 비워 두면 프론트가 제안값(`<모델명>-lora`)을 실어 보낸다 — 서버 기본값에 맡기지 않는 건 화면에 보여 준 이름과 실제가 어긋나지 않게 하기 위해서다.
+- **계보**: `parentJobId` 로만 잇는다. 이름은 자유롭게 바꿀 수 있으므로 계보의 근거가 아니다. 그래서 **외부 `.tar` 를 올려 시작한 학습은 새 계보 v1** 이다(그 파일이 남의 v5 여도 우리 쪽 계보는 모른다).
+- 허용 문자: 한글·영문·숫자와 `- _ .` 공백, 1~60자, 앞뒤 공백 금지, 시작은 한글·영숫자(`adapterNameSchema`). 경로 구분자·제어문자를 막아야 파일로 저장할 때 안전하다.
+
+### 11-2. 백엔드 계약 (2026-09-17 구현 완료 — `fe-feature/adapter-versioning`)
+
+| 메서드/경로 | 추가/변경 | 실패 |
+| --- | --- | --- |
+| `POST /api/jobs` | 본문에 **`adapterName?`**(위 규칙), **`parentJobId?`**(이어서 학습할 완료 작업), **`hasAdapter?`** 추가. 응답에 `adapterName`·`adapterVersion` 추가 | `PARENT_JOB_NOT_FOUND` 404, `PARENT_JOB_NOT_COMPLETED` 409, `PARENT_ADAPTER_NOT_FOUND` 404, `PARENT_BASE_MODEL_MISMATCH` 409(부모와 베이스 모델이 다르면 — LoRA 는 학습한 모델에만 얹힌다), `INVALID_ADAPTER_NAME` 400 |
+| `GET /api/jobs/{id}` | `adapterName`·`adapterVersion`·`parentJobId`·`hasAdapter`·`adapterUploaded` 추가 | |
+| `GET /api/jobs` (목록) | `JobSummary` 에 `adapterName`·`adapterVersion` 추가 — 2단계 "이어서 학습" 목록이 목록 API 하나로 `이름 v2` 를 보여 준다 | |
+| **`PATCH /api/jobs/{id}/adapter-name`** (신규) | 본문 `{ adapterName }` → `200 JobDetail`. 이름만 바꾼다(결과 파일은 그대로)라 **상태 제한 없음** — 완료 뒤 받기 직전에 바꾸는 게 주 사용처다. 본인 것만 | `JOB_NOT_FOUND` 404, `INVALID_ADAPTER_NAME` 400 |
+
+`parentJobId` 검증은 서버 몫이다: **본인 것 · `COMPLETED` · `TRAIN_LORA` · 결과물 존재**. 프론트도 목록을 그 조건으로 좁혀 보여 주지만 신뢰 경계는 서버다.
+
+**다운로드 파일 이름**: 프론트는 `<a download="cs-상담봇-v2.tar">` 를 붙이지만, `download` 속성은 **같은 오리진일 때만** 먹는다. 결과 파일이 외부 스토리지(서명 URL)면 무시되므로 서버가 `Content-Disposition: attachment; filename*=UTF-8''<어댑터이름>-v<버전>.tar` 를 붙여 주는 쪽이 정본이다.
+
+프론트는 새 필드를 전부 `optional` 로 받는다 — 백엔드가 아직 안 올라간 환경에서도 화면은 이름 대신 `작업 #12 어댑터`, 버전 없음으로 그냥 돈다.
+
+**백엔드 구현**(같은 브랜치): `V17__job_adapter_input.sql`(입력 어댑터 6컬럼) · `V18__job_adapter_identity.sql`(이름·버전·계보) ·
+`JobAdapterService`(발급·완료 검증·cleanup, 데이터셋 흐름 복제) · `AdapterTarFormat`(tar 헤더만 훑는 형식 검사) ·
+`AdapterName`(이름 규칙 한 곳) · `JobService.applyAdapterOrder`(부모 검증·버전 계산) · `JobService.renameAdapter` ·
+`ExecutionContextResponse.Adapter`(워커 계약). 버전·부모 검증은 **서버가 정본**이고 프런트 목록은 편의일 뿐이다.
+
+**이어서 학습은 업로드가 없다**: 입력 어댑터가 부모 Job 의 `result.tar` 라서 백엔드가 그 키로 서명 URL 을 만든다.
+그래서 `/fund` 게이트도 `adapterRequired && parentJobId == null && !hasAdapterFile()` 일 때만 막는다(`Job.isAdapterInputReady`).
+
+### 11-3. 입력 어댑터 `.tar` 업로드 — `lora-adapter-frontend-작업.md` 이행
+
+| 항목 | 구현 |
+| --- | --- |
+| 2단계 입력 | `ADAPTER_ACCEPT = '.tar'`, 고르는 즉시 `adapter-tar.ts` 가 헤더만 훑어 검사(확장자·0<크기≤1 GiB·항목 이름) 후 실패면 파일을 비우고 오류 + `tar -cf …` 안내 |
+| 검사 규칙 | 루트에 `adapter_config.json`·`adapter_model.safetensors` 필수, `training_metrics.json` 만 추가 허용. 접두사(`./`)·경로(`/`)·일반 파일 아닌 항목은 거절 → 완료 작업의 `result.tar` 는 그대로 통과 |
+| API | `POST /jobs/{id}/adapter-upload` → 서명 URL → `PUT` → `POST /jobs/{id}/adapter-upload/complete { sha256, sizeBytes }`. `sha256` 은 **`0x` 없는 소문자 64자**(데이터셋 `dataHash` 와 표기가 다르다) |
+| 등록 순서 | 데이터셋 등록 → `POST /jobs` → 데이터셋 업로드·검증 → (어댑터가 있으면) 해시 → 업로드 → 검증 → 상세로. 어느 검증이든 실패하면 상세로 보내지 않고 "취소 후 재등록" 안내 |
+| 상세 | [설정] 아래 `입력 어댑터 없음(처음부터 학습) / 작업 #N 에서 이어서 / 업로드됨 / 업로드 필요` 한 줄. `hasAdapter && !adapterUploaded` 면 예치 패널 대신 경고(서버 `ADAPTER_NOT_UPLOADED` 409 와 같은 조건) |
+| 에러 문구 | `ADAPTER_NOT_UPLOADED`·`ADAPTER_UPLOAD_MISMATCH`·`ADAPTER_INVALID_FORMAT`·`ADAPTER_TOO_LARGE`·`ADAPTER_OBJECT_NOT_FOUND` → `errors.ts` |
+| 자체 점검 | `node tools/adapter-tar-check.mjs` — tar 헤더를 직접 만들어 통과/거절 12가지를 assert (`result.tar` 통과, `./` 접두사·하위 경로·디렉터리 항목 거절, 1500B 패딩 계산) |
+
+**이어서 학습(`parentJobId`)은 업로드가 필요 없다.** 어댑터가 이미 서버에 있으니 받아서 다시 올리는 왕복을 없앤 것 — 목업은 `parentJobId` 가 있으면 `adapterUploaded` 를 예치 조건에서 빼고, 백엔드도 같은 규칙이어야 한다.
+
+### 11-4. 화면 변경
+
+| 화면 | 변경 |
+| --- | --- |
+| 2단계(`stepConfig`) | **어댑터 출발점** 3택: 처음부터 / 내 완료 작업 이어서(`adapterPicker` — `GET /jobs?status=COMPLETED` 를 TRAIN_LORA 로 좁힌 `<select>`) / `.tar` 올리기. 학습이면 그 아래 **어댑터 이름** 입력(빈칸이면 제안값, "이번 학습 결과는 v2 입니다") |
+| 5단계(`stepUpload`) | 요약에 `학습 시작점`·`만들어질 어댑터` 두 줄. "파일은 서버로 보내지 않습니다" 문구 삭제(사실이 아니게 됐다) |
+| 상세(`jobDetailPage`) | [결과] → **[어댑터]** 카드(`adapterCard`): `이름 vN` + [이름 변경](인라인, `PATCH`) + **[어댑터 다운로드]**(`download` 파일 이름 지정) + 해시 복사 + 이어받은 작업 링크. 완료 전에도 카드가 보여 이름을 미리 바꿀 수 있다 |
+
+### 11-5. 남은 것
+
+- [x] 백엔드 §11-2 반영 — 2026-09-17 구현. 테스트 37건(`JobAdapterOrderTest`·`JobAdapterUploadIntegrationTest`·`JobAdapterVersioningIntegrationTest`·`AdapterTarFormatTest`·`AdapterNameTest`).
+- [ ] `Content-Disposition` (§11-2) — 결과 파일이 외부 오리진이면 이것 없이는 파일 이름이 스토리지 키 그대로 저장된다.
+- [ ] 이어서 학습 목록이 한 페이지(50건)를 넘으면 검색 필요 — 지금은 최신 50건만 본다.
+- [ ] 이름 중복 허용 여부 — 지금은 허용(계보는 `parentJobId` 가 잡는다). 사용자 혼란이 확인되면 그때 정책을 정한다.

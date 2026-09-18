@@ -15,6 +15,11 @@ RUN ./gradlew bootJar --no-daemon
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
+# JVM 기본 타임존. 없으면 이미지가 UTC 로 떠서 LocalDateTime.now()·@CreatedDate 가 UTC 벽시계를 저장하고,
+# 브라우저(KST)는 존 없는 그 값을 로컬로 읽어 모든 서버 시각이 9시간 빠르게 보였다(2026-09-18).
+# JDBC 의 serverTimezone=Asia/Seoul 과 같은 값이어야 한다. 이미 UTC 로 저장된 행은 V20 이 같은 배포에서 보정한다.
+ENV TZ=Asia/Seoul
+
 # 1단계에서 만든 jar만 가져옴
 COPY --from=build /app/build/libs/*.jar app.jar
 

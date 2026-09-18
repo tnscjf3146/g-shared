@@ -50,6 +50,10 @@ public class EscrowStartupValidator implements ApplicationRunner {
             return;
         }
 
+        if (properties.keeperPrivateKeyOrNull() == null) {
+            log.warn("[KEEPER] ESCROW_KEEPER_PRIVATE_KEY 미설정 — 워커 환불 실패 시 자동 만료 환불이 실행되지 않습니다.");
+        }
+
         Optional<Long> chainId = chain.chainId();
         if (chainId.isEmpty()) {
             unreachable("eth_chainId");

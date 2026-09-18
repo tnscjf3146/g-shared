@@ -2,10 +2,10 @@
 
 import { useGLTF } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Mesh, MeshStandardMaterial, Object3D, Vector3 } from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { GPU_READY_EVENT, P } from '../progress'
+import { P } from '../progress'
 
 export const MODEL = '/models/gpu.glb' // backdrop.tsx 도 같은 URL 로 useGLTF(캐시 공유)
 export const DRACO = '/draco/' // Draco 디코더 자가 호스팅(public/draco, three/examples/jsm/libs/draco/gltf 복사). drei 기본값은 gstatic CDN 이라 막힌 망(PC방·사내망)에선 GLB 가 영영 안 풀린다(2026-09-14)
@@ -73,10 +73,7 @@ function mergeGroup(scene: Object3D, prefix: string) {
 
 export function GpuModel() {
   const { scene } = useGLTF(MODEL, DRACO)
-  // 이 컴포넌트가 마운트됐다 = Suspense 를 통과했다 = 모델이 있다 → 인트로를 시작해도 빈 화면이 아니다
-  useEffect(() => {
-    window.dispatchEvent(new Event(GPU_READY_EVENT))
-  }, [])
+  // 준비 신호(GPU_READY_EVENT)는 여기서 쏘지 않는다 — 셰이더 사전 컴파일이 끝난 뒤 three/precompile.tsx 가 쏜다(Suspense 마지막 자식)
 
   const parts = useMemo<Part[]>(() => {
     MERGE_GROUPS.forEach((prefix) => mergeGroup(scene, prefix))

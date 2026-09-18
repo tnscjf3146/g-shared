@@ -100,6 +100,20 @@ class DatasetContext:
 
 
 @dataclass(frozen=True)
+class AdapterContext:
+    """A LoRA adapter to continue training from: a ``.tar`` behind a signed URL.
+
+    Optional for a Job, and all-or-nothing when present. The URL is a
+    credential like the dataset's, and the hash is what the Backend computed
+    from the uploaded object -- the Worker checks the bytes against it again.
+    """
+
+    download_url: str
+    sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
 class TrainingContext:
     epochs: int
     batch_size: int
@@ -130,6 +144,9 @@ class ExecutionContext:
     dataset: DatasetContext
     training: TrainingContext
     escrow: EscrowContext
+    #: None for a Job that trains a fresh adapter -- every Job before this
+    #: field existed, and every Backend that does not send it.
+    adapter: AdapterContext | None = None
 
 
 def fetch_execution_context(
@@ -260,6 +277,26 @@ def read_context(body: dict[str, Any]) -> ExecutionContext:
             expected_price_wei=_decimal(escrow, "escrow.expectedPriceWei"),
             expected_state=_whole(escrow, "escrow.expectedState"),
         ),
+        adapter=_optional_adapter(body),
+    )
+
+
+def _optional_adapter(body: dict[str, Any]) -> AdapterContext | None:
+    """``adapter`` absent or null: no adapter. Present: every field, or refuse.
+
+    A half-described adapter is not read as "no adapter". The customer asked
+    for training to continue from one, and quietly starting fresh instead
+    would hand them a result that is not what they paid for.
+    """
+    value = body.get("adapter")
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ContextRefused("the execution context's adapter is not an object")
+    return AdapterContext(
+        download_url=_text(value, "adapter.downloadUrl"),
+        sha256=_text(value, "adapter.sha256"),
+        size_bytes=_whole(value, "adapter.sizeBytes"),
     )
 
 
