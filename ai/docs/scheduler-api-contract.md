@@ -109,8 +109,10 @@ Job마다 답이 달라지는 판단입니다. 두 곳에 두면 규칙이 정�
 | `gpuCandidates[].gpuModel` | string | `String` | — | 비어 있지 않음 | `workers` |
 | `gpuCandidates[].vramMb` | integer | `Integer` | **MiB** | > 0 | `workers` |
 | `gpuCandidates[].benchmarkTokensPerSec` | number | `Double` | tok/s | > 0, 유한 | `workers` |
+| `gpuCandidates[].benchmarkPeakVramMb` | integer \| null | `Integer` | **MiB** | > 0 또는 생략/null | `workers` |
 
 - `gpuCandidates`는 **1개 이상**, 같은 `workerId`가 두 번 오면 거절.
+- `benchmarkPeakVramMb`는 **선택**입니다. 벤치마크가 실제로 쓴 최대 VRAM으로, Worker가 등록할 때 이미 재는 값입니다. 보내지 않거나 `null`이어도 요청은 그대로 통과합니다 — 이 값을 모르는 옛 Worker가 등록한 GPU가 남아 있기 때문입니다. **지금은 계약으로만 받고 예측 feature에는 넣지 않습니다**(열을 늘리면 모델을 다시 학습해야 하고, 아직 값이 쌓이지 않았습니다). `vramMb`(카드 총량)와 다른 값이며, 서로를 대체하지 않습니다.
 - `vramMb`와 `minVramMb`는 **같은 단위(MiB)** 여야 합니다. `vramMb`는 Worker가 보고한 값(`nvidia-smi memory.total`) **그대로** 보내고, `minVramMb`는 카탈로그의 공칭 용량(예: 8192)을 보냅니다.
 - Scheduler는 비교할 때만 `vramMb`를 **공칭 용량(1 GiB 단위)** 으로 읽습니다. 바로 위 GiB 경계보다 **32 MiB 이하**로 모자란 보고값만 그 경계로 봅니다 — 드라이버가 판매 용량보다 몇 MiB 적게 보고하기 때문입니다(RTX 4070 Laptop 8188 → 8192, RTX 4080 16376 → 16384, RTX 4090 24564 → 24576). 그 밖의 값(예: 8100, 12000)은 그대로 비교합니다. 응답·예측에 쓰이는 `vramMb`는 바뀌지 않습니다. Backend는 값을 보정하지 말고 보고값을 그대로 보내면 됩니다.
 - **숫자 문자열은 거절됩니다.** `"3"`, `"8188"` 모두 422 — JSON에 숫자 타입이 있으므로 문자열로 왔다면 보내는 쪽이 잘못 만든 것이고, 조용히 고쳐 주면 그 잘못이 계속 남습니다.
