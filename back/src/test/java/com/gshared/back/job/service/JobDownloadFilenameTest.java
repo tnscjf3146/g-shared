@@ -107,6 +107,34 @@ class JobDownloadFilenameTest {
     }
 
     @Test
+    @DisplayName("'+' 가 든 이름도 변질 없이 왕복한다 — encodeQueryParam 이면 톰캣이 공백으로 디코드해 깨진다")
+    void plusSignSurvives() throws Exception {
+        storage.write(KEY, new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)));
+        String url = storage.presignDownload(KEY, Duration.ofMinutes(15), "llama+lora-v1.tar").url();
+        URI uri = URI.create(url);
+
+        String disposition = mockMvc.perform(get(URI.create(uri.getPath() + "?" + uri.getRawQuery())))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertThat(disposition).contains("filename=\"llama+lora-v1.tar\"");   // 공백으로 변질되지 않는다
+    }
+
+    @Test
+    @DisplayName("filename 으로 헤더 주입(CR/LF)을 시도해도 무해한 이름으로 걸러진다")
+    void headerInjectionBlocked() throws Exception {
+        storage.write(KEY, new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)));
+        String url = storage.presignDownload(KEY, Duration.ofMinutes(15)).url();
+        URI uri = URI.create(url);
+
+        String disposition = mockMvc.perform(get(URI.create(
+                        uri.getPath() + "?" + uri.getRawQuery() + "&filename=a%0d%0aSet-Cookie:x")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getHeader(HttpHeaders.CONTENT_DISPOSITION);
+        assertThat(disposition).doesNotContain("\r").doesNotContain("\n");
+        assertThat(disposition).contains("a_");   // CR/LF 는 _ 로 치환
+    }
+
+    @Test
     @DisplayName("filename 없이 발급된 기존 URL 은 예전처럼 저장 키 이름으로 동작한다 — 하위 호환")
     void withoutFilenameStillWorks() throws Exception {
         storage.write(KEY, new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)));
