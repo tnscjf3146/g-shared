@@ -38,7 +38,7 @@ export function JobDetailInline({ job, catalog }: { job: JobSummary; catalog: Ca
     <PlainTable
       widths={COLS}
       cols={[
-        ['상태', jobStatusMeta(job.status, job.failReason).label],
+        ['상태', jobStatusMeta(job.status, job.failReason, job.cancelReason).label],
         ['작업 종류', workload],
         ['배정 워커', detail ? (detail.assignedWorkerId ? <span title={detail.assignedWorkerId}>{shortWorkerId(detail.assignedWorkerId)}</span> : <span className="text-text-muted">미배정</span>) : pendingCell],
         ['예상 소요', detail ? formatDuration(detail.predictedRuntimeSec) : pendingCell],

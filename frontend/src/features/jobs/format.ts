@@ -26,27 +26,41 @@ export const STATUS_SENTENCE: Record<JobStatus, string> = {
 }
 /** 아직 끝나지 않은 상태 — 상세 폴링 대상 (CANCELLING 은 환불 확인까지 계속 지켜본다) */
 export const ACTIVE_STATUSES: ReadonlySet<JobStatus> = new Set(['CREATED', 'FUNDED', 'ASSIGNED', 'RUNNING', 'CANCELLING'])
-/** 사용자가 취소할 수 있는 상태(back JobService.cancelJob 과 동일) — CANCELLING 은 이미 취소 중이라 제외 */
+/** 사용자가 취소할 수 있는 상태. RUNNING 은 서버는 허용하지만 화면에선 정책상 비노출(2026-09-21) —
+ *  정산이 전액 환불뿐이라 실행 중 취소 시 공급자 진행분이 보상되지 않는다. 서버 허용은 비상용으로 유지 */
 export const CANCELLABLE_STATUSES: ReadonlySet<JobStatus> = new Set(['CREATED', 'FUNDED', 'ASSIGNED'])
 
+/** 취소 원인 제공자 (back V22 cancel_reason). 사용자가 아닌 원인이면 화면은 "실패"로 말한다 */
+export type CancelReason = 'USER_REQUEST' | 'PROVIDER_TIMEOUT' | 'SYSTEM_RECONCILED'
+
 /**
- * 실패 여부까지 구분한 표시용 메타. 상태(status)는 "돈이 어디까지 정리됐나"고,
- * 실패했는지는 failReason 의 유무가 말한다 — 실패한 작업이 환불 정리를 거치면
- * CANCELLING→CANCELLED 로 끝나므로, 라벨은 두 정보를 조합해야 정직하다.
+ * 실패·원인까지 구분한 표시용 메타. 상태(status)는 "돈이 어디까지 정리됐나"고,
+ * 무엇이 잘못됐는지는 failReason(학습 실패 상세)·cancelReason(원인 제공자)이 말한다.
+ * 규칙: 사용자가 시키지 않은 취소는 전부 "실패"로 보여준다 — "취소됨"은 내가 한 것처럼 읽히므로.
  */
-export function jobStatusMeta(status: JobStatus, failReason?: string | null): { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' | 'primary' } {
+export function jobStatusMeta(status: JobStatus, failReason?: string | null, cancelReason?: string | null): { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' | 'primary' } {
   if (failReason) {
     if (status === 'CANCELLING') return { label: '실패 · 환불 처리 중', tone: 'danger' }
     if (status === 'CANCELLED') return { label: '실패 (환불 완료)', tone: 'danger' }
   }
+  if (status === 'CANCELLED' && cancelReason && cancelReason !== 'USER_REQUEST') {
+    return cancelReason === 'PROVIDER_TIMEOUT'
+      ? { label: '실패 · 공급자 무응답 (환불 완료)', tone: 'danger' }
+      : { label: '실패 · 시스템 확인 (환불 완료)', tone: 'danger' }
+  }
   return STATUS_META[status]
 }
 
-/** 실패 여부까지 구분한 상세 한 문장 (jobStatusMeta 와 같은 조합 규칙) */
-export function jobStatusSentence(status: JobStatus, failReason?: string | null): string {
+/** 실패·원인까지 구분한 상세 한 문장 (jobStatusMeta 와 같은 조합 규칙). 모든 취소 문장은 환불 사실을 함께 말한다 */
+export function jobStatusSentence(status: JobStatus, failReason?: string | null, cancelReason?: string | null): string {
   if (failReason) {
     if (status === 'CANCELLING') return '학습이 실패했습니다. 예치금 환불을 처리하는 중입니다 — 완료되면 자동으로 반영됩니다.'
     if (status === 'CANCELLED') return '학습이 실패해 예치금이 환불됐습니다.'
+  }
+  if (status === 'CANCELLED') {
+    if (cancelReason === 'PROVIDER_TIMEOUT') return '공급자가 응답하지 않아 작업이 진행되지 못했습니다. 예치금은 전액 자동 환불되었습니다.'
+    if (cancelReason === 'SYSTEM_RECONCILED') return '확인 과정에서 작업이 정리되었습니다. 예치금은 환불되었습니다.'
+    if (cancelReason === 'USER_REQUEST') return '요청하신 취소가 완료되었습니다. 예치금이 환불되었습니다.'
   }
   return STATUS_SENTENCE[status]
 }

@@ -14,7 +14,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
   const [open, setOpen] = useState(false)
   const [mounted, setMounted] = useState(false) // 한 번 열리면 표를 계속 붙여 둔다 → 닫힘 모션 동안에도 내용이 남아 높이가 자연스럽게 줄어든다
   // 끝난 상태 구분: 실패 = 빨간 틴트, 완료·취소됨 = 어두운 회색(가라앉음). 취소됨은 상세 버튼 뺀 나머지에 취소선
-  const failed = jobStatusMeta(job.status, job.failReason).tone === 'danger'
+  const failed = jobStatusMeta(job.status, job.failReason, job.cancelReason).tone === 'danger'
   const completed = job.status === 'COMPLETED'
   const cancelled = job.status === 'CANCELLED'
   // 끝난 작업(완료·실패·취소)은 펼치지 않는다 — [상세] 버튼으로만 본다. 진행·대기만 인라인으로 펼침
@@ -58,7 +58,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
         </div>
         {/* 다른 상태와 같은 17px 글자. 완료는 검정(배경 회색으로 구분), 실패는 빨강, 취소됨은 회색+취소선 */}
         <div className="hidden md:block">
-          <span className={`text-[17px] font-medium ${failed ? 'text-danger' : cancelled ? strike : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason).label}</span>
+          <span className={`text-[17px] font-medium ${failed ? 'text-danger' : cancelled ? strike : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason, job.cancelReason).label}</span>
         </div>
         <div className={`hidden md:block ${strike}`}>
           <div className="text-[14px] text-text-muted">생성</div>
