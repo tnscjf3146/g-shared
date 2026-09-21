@@ -94,7 +94,7 @@ class JobCancelReconciliationTest {
         provider.linkWallet("0x" + "b".repeat(40));
         worker = workerRepository.save(Worker.register(
                 "worker-recon-" + UUID.randomUUID(), provider, "hash-" + UUID.randomUUID(),
-                OPERATOR, "0.1.0", "Windows 11", true, "RTX 4090", 24576, 42000.0,
+                OPERATOR, "0.1.0", "Windows 11", true, "RTX 4090", 24576, 42000.0, null,
                 "transformer-bench-v1"));
         worker.goOnline(LocalDateTime.now());
 

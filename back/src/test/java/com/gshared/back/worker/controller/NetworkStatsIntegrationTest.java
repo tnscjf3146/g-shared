@@ -61,7 +61,7 @@ class NetworkStatsIntegrationTest {
         return workerRepository.save(Worker.register(
                 "worker-stats-" + UUID.randomUUID(), owner, "hash-" + UUID.randomUUID(),
                 "0x" + "b".repeat(40), "0.1.0", "Windows 11", true,
-                "RTX 4090", 24_576, 1800.0, "transformer-bench-v1"));
+                "RTX 4090", 24_576, 1800.0, null, "transformer-bench-v1"));
     }
 
     private JsonNode stats() throws Exception {

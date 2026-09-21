@@ -84,7 +84,7 @@ class JobCreateTransactionTest {
         workerId = "worker-tx-" + UUID.randomUUID();
         Worker worker = Worker.register(workerId, owner, "hash-" + UUID.randomUUID(),
                 "0x" + "b".repeat(40), "0.1.0", "Windows 11", true,
-                "RTX 4090", 24_564, 72_000.0, "transformer-bench-v1");
+                "RTX 4090", 24_564, 72_000.0, null, "transformer-bench-v1");
         worker.goOnline(LocalDateTime.now());
         workerRepository.save(worker);
     }

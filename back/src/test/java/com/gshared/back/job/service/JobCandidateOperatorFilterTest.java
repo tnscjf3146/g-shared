@@ -94,7 +94,7 @@ class JobCandidateOperatorFilterTest {
         worker = workerRepository.save(Worker.register(
                 "worker-filter-" + UUID.randomUUID(), owner, "hash-" + UUID.randomUUID(),
                 OPERATOR, "0.1.0", "Windows 11", true,
-                "NVIDIA GeForce RTX 4070 Laptop GPU", 8188, 900.0, "transformer-bench-v1"));
+                "NVIDIA GeForce RTX 4070 Laptop GPU", 8188, 900.0, null, "transformer-bench-v1"));
         worker.goOnline(LocalDateTime.now());
         workerRepository.flush();
 

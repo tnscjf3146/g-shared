@@ -39,6 +39,12 @@ public class BaseModel extends BaseTimeEntity {
 
     private Long paramCount;
 
+    /**
+     * 이 모델을 학습하는 데 필요한 VRAM 하한(MiB). 실측으로 확정되기 전에는 NULL 이고,
+     * 그동안은 workload.minVramMb 가 대신한다 — {@link #requiredVramMb()} (V21).
+     */
+    private Integer minVramMb;
+
     @Column(length = 66)
     private String weightsHash;
 
@@ -47,4 +53,14 @@ public class BaseModel extends BaseTimeEntity {
 
     @Column(nullable = false)
     private Boolean enabled;
+
+    /**
+     * Scheduler 에 실어 보내고 gpu-options 에도 그대로 내보내는 VRAM 하한.
+     * 모델 값이 있으면 모델 값이 이긴다(더 정확한 값이라서). 없으면 워크로드 값 —
+     * 그래서 min_vram_mb 를 채우기 전에는 동작이 바뀌지 않는다.
+     * 화면 표시(requiredVramMb)와 Scheduler 판정(requirements.minVramMb)이 같은 값을 써야 하므로 한 곳에 둔다.
+     */
+    public int requiredVramMb() {
+        return minVramMb != null ? minVramMb : workload.getMinVramMb();
+    }
 }

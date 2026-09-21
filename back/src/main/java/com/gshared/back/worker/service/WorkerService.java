@@ -60,7 +60,8 @@ public class WorkerService {
                 workerId, owner, sha256(rawToken), operatorAddress, request.clientVersion(),
                 request.system().os(), request.system().wslAvailable(),
                 request.gpu().gpuModel(), request.gpu().vramMb(),
-                request.benchmark().benchmarkTokensPerSec(), request.benchmark().benchmarkVersion()
+                request.benchmark().benchmarkTokensPerSec(), request.benchmark().peakVramMb(),
+                request.benchmark().benchmarkVersion()
         );
         workerRepository.save(worker);
 
@@ -118,7 +119,7 @@ public class WorkerService {
     public void updateBenchmark(String rawToken, String workerId, UpdateBenchmarkRequest request) {
         findOwnWorker(rawToken, workerId).updateBenchmark(
                 request.gpuModel(), request.vramMb(),
-                request.benchmarkTokensPerSec(), request.benchmarkVersion());
+                request.benchmarkTokensPerSec(), request.peakVramMb(), request.benchmarkVersion());
     }
 
     /**
