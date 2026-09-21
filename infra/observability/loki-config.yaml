@@ -49,6 +49,18 @@ limits_config:
 
   allow_structured_metadata: true
 
+  # 기본값은 4MB/s(버스트 6MB)인데, 기동할 때 과거 로그를 한꺼번에 읽어 들이는 구간에서
+  # 이것을 넘긴다. 2026-09-21 에 nginx 회전본 15개를 동시에 읽다가 4,108줄(약 1MB)이
+  # reason="rate_limited" 로 버려졌다.
+  #
+  # **Alloy 로그는 "will retry" 라고 말하지만 실제로는 버려진다.** 재시도가 성공한 것처럼
+  # 보이고 오류도 남지 않아서, 회전본만 통째로 비어 있는 상태를 한참 못 알아챈다.
+  # 확인은 Loki 의 loki_discarded_samples_total 로 한다.
+  #
+  # 평소 유입은 하루 수십 MB 라 이 한도에 닿지 않는다. 오직 처음 읽어 들일 때만 필요하다.
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+
   # Loki 3.x 는 로그에서 서비스 이름을 스스로 추측해 `service_name` 라벨을 붙인다.
   # 우리는 Alloy 에서 `service` 를 직접 정하므로 중복이고, 두 라벨이 어긋나면
   # 같은 서비스가 서로 다른 스트림으로 갈린다. 빈 목록으로 끈다.
