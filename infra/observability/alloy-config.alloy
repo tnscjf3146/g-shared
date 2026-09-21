@@ -202,6 +202,43 @@ local.file_match "workers" {
 
 loki.source.file "workers" {
 	targets    = local.file_match.workers.targets
+	forward_to = [loki.process.worker_timestamp.receiver]
+}
+
+// 워커는 파이썬 `logging` 의 기본 포맷이라 백엔드와 시각 표기가 다르다.
+//
+//   워커    2026-09-18 10:12:33,456 ERROR gshared_worker.job_acceptance ...
+//   백엔드  2026-09-18T10:12:33.456+09:00  ERROR 1 --- [...] ...
+//
+// 차이가 셋이다. 날짜와 시각 사이가 `T` 가 아니라 공백이고, 소수점이 쉼표이며,
+// 시간대 표시가 없다. 시간대가 없으므로 `location` 으로 공급자 PC 의 시간대를 준다.
+// 한국이 아닌 곳의 워커가 붙으면 이 값이 틀어지는데, 그때는 워커가 시간대를 함께
+// 보내도록 고치는 편이 맞다. 지금은 전부 국내다.
+loki.process "worker_timestamp" {
+	// 파이썬 트레이스백도 자바 스택 트레이스와 같은 문제를 일으킨다.
+	stage.multiline {
+		firstline     = "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"
+		max_wait_time = "3s"
+		max_lines     = 500
+	}
+
+	// **밀리초를 버리고 초까지만 잡는다.** 파이썬 `logging` 은 밀리초 앞에 쉼표를
+	// 쓰는데(`09:45:12,101`), Go 의 시각 레이아웃은 소수점 자리에 마침표만 받는다.
+	// 쉼표를 마침표로 조립해 보려 했으나 깔끔하게 되지 않아 초 단위로 정한다.
+	// 진짜 밀리초는 본문에 그대로 남아 있다.
+	stage.regex {
+		expression = "^(?P<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})"
+	}
+
+	// 워커 로그에는 시간대 표기가 없다. `location` 을 주지 않으면 UTC 로 읽혀
+	// 아홉 시간이 밀린다. 한국이 아닌 곳의 워커가 붙으면 이 값이 틀어지는데,
+	// 그때는 워커가 시간대를 함께 쓰도록 고치는 편이 맞다. 지금은 전부 국내다.
+	stage.timestamp {
+		source   = "ts"
+		format   = "2006-01-02 15:04:05"
+		location = "Asia/Seoul"
+	}
+
 	forward_to = [loki.process.add_level.receiver]
 }
 

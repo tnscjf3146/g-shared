@@ -152,6 +152,45 @@ nginx 에 `/grafana` 경로를 두는 방법도 있지만 **이 단계에서는 
 {service="backend"} |= "no_feasible_gpu"
 ```
 
+## 확인이 안 될 때 — 조각이 아직 안 내려갔을 수 있다
+
+**로그를 넣고 바로 조회하면 안 나올 수 있다.** 특히 워커 파일처럼 항목이 몇 개뿐일 때 그렇다.
+
+Loki 는 항목을 모아 **조각(chunk)** 으로 저장하고, 조각은 가득 차거나 `max_chunk_age`(기본
+2시간)가 지나야 조회 가능한 곳으로 내려간다. 그 전까지는 **접수는 됐지만 조회에는 안 나온다.**
+
+색인과 조각이 갈린 상태가 그 신호다.
+
+```bash
+# 라벨에는 있는데
+docker exec obs-grafana wget -qO- "http://loki:3100/loki/api/v1/label/service/values?start=...&end=..."
+
+# series 는 비어 있다
+docker exec obs-grafana wget -qO- "http://loki:3100/loki/api/v1/series?start=...&end=...&match[]={service=\"worker\"}"
+```
+
+강제로 내리면 바로 나온다.
+
+```bash
+docker exec obs-grafana wget -qO- --post-data="" http://loki:3100/flush
+```
+
+**지표는 이때도 전부 정상이라고 말한다.** Alloy 드롭 0, Loki 거절 0, 오류 없음, 컴포넌트
+healthy. 그래서 "설정이 틀렸다"고 오해하기 쉽다. 설정을 고치기 전에 이것부터 확인한다.
+
+## 세는 방법 — `limit` 이 아니라 집계 질의로
+
+`query_range` 에 `limit` 을 주고 세면 **실제보다 적게 나온다.** 같은 파일이 `info`·`warn`·
+`error` 로 갈려 여러 스트림이 되는데, 한도가 그 사이에 나뉘기 때문이다.
+
+```bash
+# 이렇게 세면 틀린다
+.../query_range?query={filename="..."}&limit=1000
+
+# 이렇게 센다
+.../query?query=count_over_time({filename="..."}[25d])
+```
+
 ## 감수한 위험 — 도커 소켓
 
 Alloy 에 `/var/run/docker.sock` 을 마운트한다. **도커 소켓을 읽을 수 있는 컨테이너는 사실상
