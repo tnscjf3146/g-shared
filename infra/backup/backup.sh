@@ -38,10 +38,25 @@ echo "내보낼 위치: $OUT_DIR"
 echo
 
 # ── 1. 사전 확인 ────────────────────────────────────────────────────────────
+# storage/ 는 백엔드 컨테이너가 root 로 쓰기 때문에 `root:root` 소유이고, result.tar 은
+# 모드 600 이라 ubuntu 계정이 읽을 수 없다. 그래서 tar 에 sudo 가 필요하다.
+#
+# 여기서 미리 확인하는 이유는, 비밀번호를 물으면 스크립트가 입력을 기다리며 멈추기
+# 때문이다. 자동화나 파이프라인에서 돌리면 그대로 걸린다. `-n` 은 묻지 않고 실패한다.
+if ! sudo -n true 2>/dev/null; then
+    echo "중단: 비밀번호를 묻지 않는 sudo 권한이 필요하다." >&2
+    echo "      storage/ 의 결과물은 root 소유 모드 600 이라 sudo 없이 읽을 수 없다." >&2
+    echo "      배포 서버의 ubuntu 계정에는 NOPASSWD 가 설정되어 있다." >&2
+    exit 1
+fi
+
 # 워커가 결과물을 올리는 중에 tar 를 뜨면 반쯤 복사된 result.tar 이 백업에 들어간다.
 # 서비스가 깨지지는 않지만 그 작업의 산출물만 못 쓰게 된다.
+#
+# find 에는 sudo 를 쓰지 않는다. 디렉터리가 755 라 이름과 시각은 일반 계정으로도 읽힌다.
+# 필요하지 않은 곳까지 sudo 를 붙이면 왜 필요한지가 흐려진다.
 if [ "${SKIP_WRITE_CHECK:-0}" != "1" ]; then
-    recent="$(sudo find "$PROJECT_DIR/storage" -newermt '-2 minutes' -print -quit 2>/dev/null || true)"
+    recent="$(find "$PROJECT_DIR/storage" -newermt '-2 minutes' -print -quit 2>/dev/null || true)"
     if [ -n "$recent" ]; then
         echo "중단: storage 에 최근 2분 내 쓰기가 있다." >&2
         echo "      $recent" >&2
@@ -83,8 +98,8 @@ chmod 600 "$DB_FILE"
 # 내용물이 학습된 가중치(safetensors)라 압축률은 낮다. 부동소수점 배열에는 gzip 이
 # 찾을 반복 패턴이 거의 없다. 10% 남짓 줄면 정상이다.
 echo "스토리지 압축: $STORAGE_FILE"
-sudo tar czf "$STORAGE_FILE" -C "$PROJECT_DIR" storage
-sudo chown "$(id -u):$(id -g)" "$STORAGE_FILE"
+sudo -n tar czf "$STORAGE_FILE" -C "$PROJECT_DIR" storage
+sudo -n chown "$(id -u):$(id -g)" "$STORAGE_FILE"
 chmod 600 "$STORAGE_FILE"
 
 # ── 4. 검증 ────────────────────────────────────────────────────────────────
