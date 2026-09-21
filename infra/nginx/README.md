@@ -40,5 +40,6 @@ sudo systemctl reload nginx
 ## 참고
 
 - 방화벽(UFW): 22·80·443 개방됨.
-- 프론트 컨테이너는 `docker-compose.yml`에서 `3000:80`으로 매핑 (컨테이너 내부는 80).
-- HTTPS(443)는 미설정 — 추후 Let's Encrypt 도입 예정.
+- 프론트 컨테이너는 `docker-compose.yml`에서 `127.0.0.1:3000:3000`으로 매핑 (루프백만, 외부는 nginx 443 경유). MySQL 3306 도 `127.0.0.1` 바인딩.
+- DB 를 GUI 툴로 직접 볼 때는 SSH 터널: `ssh -i ~/.ssh/J15E204T.pem -L 3306:127.0.0.1:3306 ubuntu@j15e204.p.ssafy.io`
+- HTTPS(443)는 Let's Encrypt 로 적용됨.

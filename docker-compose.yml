@@ -49,7 +49,7 @@ services:
       - "127.0.0.1:3000:3000"  # 루프백만 — 외부는 nginx(HTTPS)를 거쳐서만 접근, 평문 3000 직통 차단
     restart: unless-stopped
     environment:
-      BACKEND_ORIGIN: http://backend:8080   # 서버 컴포넌트 fetch 가 생겨도 도커 네트워크로 백엔드 접근
+      BACKEND_ORIGIN: http://backend:8080   # 서버사이드 fetch 전용(fetcher.ts, 런타임). next.config.ts rewrite 는 빌드타임 고정이라 안 먹지만 운영은 nginx 가 /api 를 먼저 처리해 무관
 
   # AI Scheduler (FastAPI + XGBoost) — backend가 http://ai:8000 으로 내부 호출 (바깥 포트 노출 불필요)
   ai:
