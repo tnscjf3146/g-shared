@@ -103,7 +103,7 @@ class JobCreateTransactionTest {
     @DisplayName("POST /api/jobs — 테스트 트랜잭션 없이도 CREATED 행이 커밋되고, recommend 에 minVramMb 가 실린다")
     void create_commits_job_row() {
         when(schedulerClient.recommend(any())).thenReturn(new SchedulerRecommendResponse(
-                "runtime-xgb-test", workerId,
+                "runtime-xgb-test", workerId, null,
                 List.of(new SchedulerRecommendResponse.Ranking(1, workerId, 1234.5))));
 
         CreateJobResponse response = jobService.create(owner.getId(), new CreateJobRequest(
