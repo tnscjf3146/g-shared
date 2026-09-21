@@ -6,6 +6,9 @@ datasources:
   - name: Loki
     type: loki
     access: proxy
+    # uid 를 고정한다. 비워 두면 Grafana 가 만들어 내는데, 그 값이 Explore 주소에 들어간다.
+    # 볼륨을 새로 만들면 값이 달라질 수 있어서, 즐겨찾기해 둔 주소가 깨진다.
+    uid: loki
     # 도커 네트워크 안의 이름. Loki 는 호스트에 포트를 열지 않는다.
     url: http://loki:3100
     isDefault: true

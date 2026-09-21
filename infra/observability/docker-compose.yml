@@ -54,7 +54,8 @@ services:
     restart: unless-stopped
     ports:
       # 프론트엔드가 3000 을 쓰므로 3001 로 옮긴다. 그리고 루프백에만 묶는다.
-      # 접근은 SSH 터널로 한다: ssh -L 3001:127.0.0.1:3001 ubuntu@...
+      # 인터넷에서 들어오는 길은 nginx 의 /grafana 하나뿐이다. 이 포트가 0.0.0.0 으로
+      # 열리면 nginx 를 건너뛰고 직통으로 닿으므로 접두어를 절대 지우지 않는다.
       - "127.0.0.1:3001:3000"
     environment:
       # 비워 두면 기동을 거부한다. admin/admin 으로 뜨는 것을 막기 위해서다.
@@ -64,6 +65,14 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
+
+      # nginx 의 /grafana 하위 경로로 서비스한다. 이 둘이 없으면 Grafana 가 자기를
+      # 루트(/)에 있다고 여겨서, 정적 자원과 로그인 뒤 redirect 가 전부 /grafana 를
+      # 빼고 나간다. 화면이 하얗게 뜨는 흔한 원인이다.
+      #
+      # root_url 의 끝 슬래시는 필수다. 없으면 Grafana 가 경로를 한 칸 잘라 붙인다.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-https://j15e204.p.ssafy.io/grafana/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
