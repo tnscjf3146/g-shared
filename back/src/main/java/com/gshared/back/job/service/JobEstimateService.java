@@ -67,8 +67,12 @@ public class JobEstimateService {
                 recommend(request, baseModel, datasetMeta, config, grades);
         Long recommendedGradeId = gradeIdOf(recommendation.recommendedWorkerId(), grades);
 
-        // Scheduler 에 보낸 것과 같은 값 — 화면의 "VRAM 부족" 표시와 실제 판정이 갈리면 안 된다.
-        int requiredVramMb = baseModel.requiredVramMb();
+        // 필요 VRAM 은 AI 가 이 Job 의 실제 설정으로 계산한 값(Dynamic VRAM)이 정본 — 카탈로그 상수(8192)로
+        // 덮어쓰면 가벼운 학습에서도 6GB GPU 가 전부 INSUFFICIENT 로 사라진다. AI 응답에 값이 없으면
+        // (구버전/배포 순서) 기존 카탈로그 값으로 후퇴. 이 한 값이 fit 판정과 응답에 똑같이 쓰인다.
+        int requiredVramMb = recommendation.requiredVramMb() != null
+                ? recommendation.requiredVramMb()
+                : baseModel.requiredVramMb();
         return grades.stream()
                 .map(grade -> toOption(grade, requiredVramMb, recommendedGradeId))
                 .toList();

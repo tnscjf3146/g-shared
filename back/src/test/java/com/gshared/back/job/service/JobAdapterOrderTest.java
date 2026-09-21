@@ -94,7 +94,7 @@ class JobAdapterOrderTest {
         workerId = worker.getId();
 
         when(schedulerClient.recommend(any())).thenAnswer(invocation -> new SchedulerRecommendResponse(
-                "runtime-xgb-v1", workerId,
+                "runtime-xgb-v1", workerId, null,
                 List.of(new SchedulerRecommendResponse.Ranking(1, workerId, 985.882))));
     }
 

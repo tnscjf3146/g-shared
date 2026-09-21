@@ -119,7 +119,7 @@ class JobEstimateIntegrationTest {
         given(schedulerClient.trainingConfig(any()))
                 .willReturn(new SchedulerTrainingConfig(3, 8, 0.0002, 1024));
         given(schedulerClient.recommend(any()))
-                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", workerId,
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", workerId, null,
                         List.of(new SchedulerRecommendResponse.Ranking(1, workerId, 3600.0))));
     }
 
@@ -192,7 +192,7 @@ class JobEstimateIntegrationTest {
     void nominalVramFit() throws Exception {
         String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4070 Laptop GPU", 8188);
         given(schedulerClient.recommend(any()))
-                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId,
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId, null,
                         List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
 
         mockMvc.perform(post(GPU_OPTIONS_URL)
@@ -227,6 +227,47 @@ class JobEstimateIntegrationTest {
                 .andExpect(jsonPath("$[1].reason").value("VRAM 이 92 MiB 부족해 실행할 수 없습니다."));
     }
 
+    // ── Dynamic VRAM: AI 가 Job 별로 계산한 필요 VRAM 이 정본 (2026-09-21 가이드 §10) ─────────
+
+    @Test
+    @DisplayName("AI requiredVramMb=4608 이면 6 GB 카드도 후보 — 카탈로그 8192 로 덮어쓰지 않는다")
+    void dynamicVramLetsSmallGpuFit() throws Exception {
+        String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
+        given(schedulerClient.recommend(any()))
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId, 4608,
+                        List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                // 응답의 requiredVramMb 와 fit 판정이 같은 값(4608)을 쓴다 — 갈리면 화면 모순
+                .andExpect(jsonPath("$[1].model").value("NVIDIA GeForce RTX 4050 Laptop GPU"))
+                .andExpect(jsonPath("$[1].requiredVramMb").value(4608))
+                .andExpect(jsonPath("$[1].fit").value(org.hamcrest.Matchers.not("INSUFFICIENT")));
+    }
+
+    @Test
+    @DisplayName("AI requiredVramMb=7168 이면 6 GB 카드는 INSUFFICIENT — 진짜 부족은 그대로 걸러진다")
+    void dynamicVramStillBlocksTooSmallGpu() throws Exception {
+        String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
+        given(schedulerClient.recommend(any()))
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId, 7168,
+                        List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].requiredVramMb").value(7168))
+                .andExpect(jsonPath("$[1].fit").value("INSUFFICIENT"));
+    }
+
+    // null fallback(§10 Case 5)은 위 기존 테스트들이 그대로 검증한다 — 전부 requiredVramMb=null 로
+    // 응답을 목킹하고 카탈로그 값(8192·6144)을 기대하므로, fallback 이 깨지면 그 테스트들이 깨진다.
+
     // ── VRAM 하한: 모델 값이 있으면 모델 값, 없으면 워크로드 값 (V21) ─────────
 
     /**
@@ -258,7 +299,7 @@ class JobEstimateIntegrationTest {
     void requiredVramPrefersModelFloor() throws Exception {
         String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
         given(schedulerClient.recommend(any()))
-                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId,
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId, null,
                         List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
         setModelVramFloor(baseModelId, 6144);
 
