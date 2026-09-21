@@ -72,6 +72,12 @@ public class EscrowSettlementService {
      * 정산될 돈이 없으니 컨테이너를 더 돌릴 이유가 없다.
      */
     public boolean cancelFromChain(Long jobId, String txHash, String reason) {
+        // 호출 맥락을 모르면 시스템 정리로 — 사용자가 먼저 취소했다면 COALESCE 가 USER_REQUEST 를 지킨다.
+        return cancelFromChain(jobId, txHash, reason, "SYSTEM_RECONCILED");
+    }
+
+    /** @param cancelReasonCode 원인 제공자 코드 — 키퍼 시한 환불은 PROVIDER_TIMEOUT, 대조기 발견은 SYSTEM_RECONCILED */
+    public boolean cancelFromChain(Long jobId, String txHash, String reason, String cancelReasonCode) {
         Job before = jobRepository.findById(jobId).orElse(null);
         if (before == null) {
             return false;
@@ -81,7 +87,7 @@ public class EscrowSettlementService {
                 || before.getStatus() == JobStatus.RUNNING
                 || before.getStatus() == JobStatus.CANCELLING;
 
-        int updated = jobRepository.cancelByChainIfOpen(jobId, txHash, LocalDateTime.now());
+        int updated = jobRepository.cancelByChainIfOpen(jobId, txHash, cancelReasonCode, LocalDateTime.now());
         if (updated == 0) {
             return false;
         }

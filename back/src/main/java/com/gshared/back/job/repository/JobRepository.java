@@ -80,6 +80,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
+                   j.cancelReason = 'USER_REQUEST',
                    j.finishedAt = :now
              WHERE j.id = :jobId
                AND j.owner.id = :ownerId
@@ -96,7 +97,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
-               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.cancelReason = 'USER_REQUEST'
              WHERE j.id = :jobId
                AND j.owner.id = :ownerId
                AND j.status IN (com.gshared.back.job.domain.JobStatus.ASSIGNED,
@@ -112,7 +114,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
-               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.cancelReason = 'SYSTEM_RECONCILED'
              WHERE j.id = :jobId
                AND j.assignedWorkerId = :workerId
                AND j.status = com.gshared.back.job.domain.JobStatus.ASSIGNED
@@ -321,6 +324,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.cancelReason = 'USER_REQUEST',
                    j.reconciliationReason = :reconciliationReason
              WHERE j.id = :jobId
                AND j.owner.id = :ownerId
@@ -462,6 +466,7 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLED,
                    j.abortTxHash = COALESCE(:txHash, j.abortTxHash),
+                   j.cancelReason = COALESCE(j.cancelReason, :cancelReason),
                    j.refundConfirmedAt = :now,
                    j.finishedAt = :now
              WHERE j.id = :jobId
@@ -470,6 +475,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                                 com.gshared.back.job.domain.JobStatus.RUNNING,
                                 com.gshared.back.job.domain.JobStatus.CANCELLING)
             """)
+    // cancelReason 은 COALESCE — 사용자가 먼저 취소를 걸어(USER_REQUEST) 키퍼가 마무리한 경우,
+    // 원인 제공자는 여전히 사용자다. 비어 있을 때만 호출자(키퍼=PROVIDER_TIMEOUT/대조기=SYSTEM_RECONCILED)가 채운다.
     int cancelByChainIfOpen(@Param("jobId") Long jobId, @Param("txHash") String txHash,
-                            @Param("now") LocalDateTime now);
+                            @Param("cancelReason") String cancelReason, @Param("now") LocalDateTime now);
 }

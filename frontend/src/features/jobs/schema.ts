@@ -136,6 +136,7 @@ export const jobSummarySchema = z.object({
   progressPercent: z.nullable(z.number()),
   estimatedCost: z.number(),
   failReason: z.optional(z.nullable(z.string())), // 있으면 실패한 작업 — 상태와 조합해 "실패·환불 처리 중" 등으로 표시 (배포 전 서버 대비 optional)
+  cancelReason: z.optional(z.nullable(z.string())), // 취소 원인 제공자(V22) — USER_REQUEST 가 아니면 "실패"로 표시 (배포 전 서버 대비 optional)
   // 어댑터 이름·버전 — 2단계 "이어서 학습" 목록이 목록 API 만으로 "이름 v2" 를 보여 줄 수 있게(백엔드 요청 §11, 반영 전 optional)
   adapterName: z.optional(z.nullable(z.string())),
   adapterVersion: z.optional(z.nullable(z.number())),
@@ -191,6 +192,7 @@ export const jobDetailSchema = z.object({
   adapterVersion: z.optional(z.nullable(z.number())),
   parentJobId: z.optional(z.nullable(z.number())),
   failReason: z.nullable(z.string()),
+  cancelReason: z.optional(z.nullable(z.string())), // 취소 원인 제공자(V22) — 배포 전 서버 대비 optional
   createdAt: z.string(),
   startedAt: z.nullable(z.string()),
   finishedAt: z.nullable(z.string()),

@@ -109,7 +109,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   }
 
   const { job } = state
-  const meta = jobStatusMeta(job.status, job.failReason)
+  const meta = jobStatusMeta(job.status, job.failReason, job.cancelReason)
   const name = {
     workload: catalog?.workloads.find((w) => w.id === job.workloadId)?.name ?? `#${job.workloadId}`,
     model: catalog?.baseModels.find((m) => m.id === job.baseModelId)?.name ?? `#${job.baseModelId}`,
@@ -200,7 +200,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
-        <p className={`text-[16px] ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason)}</p>
+        <p className={`text-[16px] ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason, job.cancelReason)}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
         {job.status === 'CREATED' &&
           (missingUpload ? (
