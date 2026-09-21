@@ -129,6 +129,10 @@ public class Job extends BaseTimeEntity {
     private String submitTxHash;      // submitResult() 트랜잭션 (JOB_RESULT)
     @Column(length = 66)
     private String abortTxHash;       // abortJob() 트랜잭션 (JOB_FAILED / JOB_CANCELLED)
+    // 취소를 "누가" 유발했나 (V22) — USER_REQUEST / PROVIDER_TIMEOUT / SYSTEM_RECONCILED.
+    // 화면 규칙: 사용자가 아닌 원인이면 "실패"로 보여준다. 학습 자체의 실패 상세는 failReason 몫.
+    @Column(length = 32)
+    private String cancelReason;
     // 종료 상태와 별개로 체인에서 환불을 확인한 시각. 과거 미환불 종료 작업도 재조회한다.
     private LocalDateTime refundConfirmedAt;
     @Column(columnDefinition = "TEXT")

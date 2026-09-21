@@ -77,7 +77,7 @@ class JobRefundRecoveryRepositoryTest {
         ReflectionTestUtils.setField(existing, "abortTxHash", "0xoriginal");
         jobs.flush();
         jobs.reopenForRefundIfTerminal(id, "pending");
-        assertThat(jobs.cancelByChainIfOpen(id, null, LocalDateTime.now())).isOne();
+        assertThat(jobs.cancelByChainIfOpen(id, null, "PROVIDER_TIMEOUT", LocalDateTime.now())).isOne();
         Job closed = jobs.findById(id).orElseThrow();
         assertThat(closed.getStatus()).isEqualTo(JobStatus.CANCELLED);
         assertThat(closed.getFailReason()).isEqualTo("RUNTIME_ERROR: training failed");
@@ -91,7 +91,7 @@ class JobRefundRecoveryRepositoryTest {
         ReflectionTestUtils.setField(existing, "status", JobStatus.CANCELLING);
         ReflectionTestUtils.setField(existing, "failReason", null);
         jobs.flush();
-        jobs.cancelByChainIfOpen(id, "0xrefund", LocalDateTime.now());
+        jobs.cancelByChainIfOpen(id, "0xrefund", "PROVIDER_TIMEOUT", LocalDateTime.now());
         assertThat(jobs.findById(id).orElseThrow().getFailReason()).isNull();
     }
 

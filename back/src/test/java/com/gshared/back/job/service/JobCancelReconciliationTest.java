@@ -320,6 +320,39 @@ class JobCancelReconciliationTest {
         assertThat(workerStatus()).isEqualTo(WorkerStatus.ONLINE);          // 워커는 다음 일을 받을 수 있다
     }
 
+    // ── 취소 원인 기록 (V22 cancel_reason) — 화면이 "누구 잘못인지" 말할 재료 ──────
+
+    @Test
+    @DisplayName("사용자 취소는 원인도 USER_REQUEST 로 남는다")
+    void userCancelRecordsUserReason() {
+        userCancels();
+        assertThat(reload().getCancelReason()).isEqualTo("USER_REQUEST");
+    }
+
+    @Test
+    @DisplayName("키퍼 시한 환불은 PROVIDER_TIMEOUT — 화면에선 '공급자 무응답 실패'로 보인다")
+    void keeperRefundRecordsProviderTimeout() {
+        int updated = jobRepository.cancelByChainIfOpen(job.getId(), "0xsettle",
+                "PROVIDER_TIMEOUT", java.time.LocalDateTime.now());
+
+        assertThat(updated).isEqualTo(1);
+        Job done = reload();
+        assertThat(done.getStatus()).isEqualTo(JobStatus.CANCELLED);
+        assertThat(done.getCancelReason()).isEqualTo("PROVIDER_TIMEOUT");
+    }
+
+    @Test
+    @DisplayName("사용자가 먼저 취소한 것을 키퍼가 마무리하면 원인은 여전히 USER_REQUEST (COALESCE)")
+    void keeperFinishDoesNotOverwriteUserReason() {
+        userCancels();   // CANCELLING + USER_REQUEST
+        jobRepository.cancelByChainIfOpen(job.getId(), "0xsettle",
+                "PROVIDER_TIMEOUT", java.time.LocalDateTime.now());
+
+        Job done = reload();
+        assertThat(done.getStatus()).isEqualTo(JobStatus.CANCELLED);
+        assertThat(done.getCancelReason()).isEqualTo("USER_REQUEST");   // 원인 제공자는 사용자
+    }
+
     // ── FUNDED 취소 — 환불 확인 없이는 문을 닫지 않는다 ─────────────
 
     /** 배정 전(FUNDED) 에스크로 Job — 취소 경로 검증용. */

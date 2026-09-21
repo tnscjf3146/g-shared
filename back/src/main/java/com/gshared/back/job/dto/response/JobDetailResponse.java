@@ -62,6 +62,7 @@ public record JobDetailResponse(
         String resultObjectKey,
         String resultUrl,
         String failReason,
+        String cancelReason,   // 취소 원인 제공자 (V22) — USER_REQUEST 외에는 화면이 "실패"로 표시한다
         LocalDateTime createdAt,
         LocalDateTime startedAt,
         LocalDateTime finishedAt
@@ -116,6 +117,7 @@ public record JobDetailResponse(
                 // 조회 시점에 발급한 서명 URL — 엔티티의 resultUrl 은 워커가 신고한 외부 URL 자리라 별개
                 resultDownloadUrl != null ? resultDownloadUrl : job.getResultUrl(),
                 job.getFailReason(),
+                job.getCancelReason(),
                 job.getCreatedAt(),
                 job.getStartedAt(),
                 job.getFinishedAt()

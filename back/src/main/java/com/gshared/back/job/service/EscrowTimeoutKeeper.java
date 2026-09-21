@@ -119,7 +119,8 @@ public class EscrowTimeoutKeeper {
         }
         backoffs.remove(jobId);
         settlement.cancelFromChain(jobId, txHash.get(),
-                "ESCROW_TIMEOUT: settleTimeout from " + onChain.state() + " (deadline=" + onChain.deadline() + ")");
+                "ESCROW_TIMEOUT: settleTimeout from " + onChain.state() + " (deadline=" + onChain.deadline() + ")",
+                "PROVIDER_TIMEOUT");   // 시한 만료 = 공급자가 수락/제출을 안 한 것 — 화면은 "공급자 무응답 실패"로 보인다
     }
 
     private boolean receiptSucceeded(String txHash) {
