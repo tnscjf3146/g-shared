@@ -57,11 +57,13 @@ export function jobStatusSentence(status: JobStatus, failReason?: string | null,
     if (status === 'CANCELLING') return '학습이 실패했습니다. 예치금 환불을 처리하는 중입니다 — 완료되면 자동으로 반영됩니다.'
     if (status === 'CANCELLED') return '학습이 실패해 예치금이 환불됐습니다.'
   }
-  if (status === 'CANCELLED') {
-    if (cancelReason === 'PROVIDER_TIMEOUT') return '공급자가 응답하지 않아 작업이 진행되지 못했습니다. 예치금은 전액 자동 환불되었습니다.'
-    if (cancelReason === 'SYSTEM_RECONCILED') return '확인 과정에서 작업이 정리되었습니다. 예치금은 환불되었습니다.'
+  if (status === 'CANCELLED' && cancelReason) {
     if (cancelReason === 'USER_REQUEST') return '요청하신 취소가 완료되었습니다. 예치금이 환불되었습니다.'
+    if (cancelReason === 'PROVIDER_TIMEOUT') return '공급자가 응답하지 않아 작업이 진행되지 못했습니다. 예치금은 전액 자동 환불되었습니다.'
+    // SYSTEM_RECONCILED 와 미래에 추가될 미지 코드 — meta 가 '실패'로 칠하므로 문장도 같은 결로 (라벨-문장 모순 방지)
+    return '확인 과정에서 작업이 정리되었습니다. 예치금은 환불되었습니다.'
   }
+  // cancelReason 이 NULL(=V22 이전 과거 행)이면 기존 '취소된 작업입니다.' — 과거 건은 소급하지 않는다(결정 2026-09-21)
   return STATUS_SENTENCE[status]
 }
 
