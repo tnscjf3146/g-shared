@@ -44,10 +44,41 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+### 3번을 건너뛰지 않는다
+
+이 파일에는 `server` 블록 밖에 있는 것이 셋 있다. `map` 둘과 `log_format` 하나다.
+`log_format gshared` 가 그 `map` 들을 참조하므로 **셋이 함께 있어야 한다.**
+
+일부만 복사하면 `unknown "args_redacted" variable` 같은 오류가 나는데, 다행히 그 실패는
+`nginx -t` 에서 걸린다. **검사를 통과하기 전에는 reload 하지 않는다.** 실행 중인 nginx 는
+옛 설정을 그대로 들고 있으므로 이 단계에서 멈추면 서비스에 영향이 없다.
+
+```
+nginx: [emerg] unknown "args_redacted" variable   ← 여기서 멈춰야 한다
+```
+
+### log_format 을 바꿨을 때
+
+`access_log ... gshared` 지시어는 두 `server` 블록 안에 각각 있다. 새 `server` 블록을
+추가하면 **거기에도 넣어야 한다.** 빠뜨리면 그 블록만 조용히 기본 포맷(`combined`)으로
+남아서 서명 URL 이 그대로 적힌다. 오류는 나지 않는다.
+
+반영한 뒤 실제 요청으로 확인한다.
+
+```bash
+curl -sk -o /dev/null "https://j15e204.p.ssafy.io/api/storage/jobs/99/x?sig=TESTVALUE123"
+sudo tail -1 /var/log/nginx/access.log       # sig=REDACTED 로 보여야 한다
+sudo grep -c "TESTVALUE123" /var/log/nginx/access.log   # 0 이어야 한다
+```
+
+reload 는 새 요청부터 적용된다. 이미 열려 있던 연결은 옛 설정을 쓰므로, 방금 띄운 요청으로
+확인해야 한다.
+
 ## 참고
 
 - 방화벽(UFW): 22·80·443 개방됨.
 - 프론트 컨테이너는 `docker-compose.yml`에서 `127.0.0.1:3000:3000`으로 매핑 (루프백만, 외부는 nginx 443 경유). MySQL 3306 도 `127.0.0.1` 바인딩.
 - DB 를 GUI 툴로 직접 볼 때는 SSH 터널: `ssh -i ~/.ssh/J15E204T.pem -L 3306:127.0.0.1:3306 ubuntu@j15e204.p.ssafy.io`
+- 접근 로그의 서명 URL 은 `log_format gshared` 가 `sig=` 값을 지운다. 이유와 위험은 `infra/observability/README.md` 의 "로그 내용이 곧 자격 증명이 될 수 있다" 절에 있다.
 - `/grafana` 를 열면 인터넷 누구나 로그인 화면까지 닿는다. 관리자 암호가 유일한 장벽이므로 짐작할 수 없는 값으로 두고, 시험용 암호를 그대로 쓰지 않는다.
 - HTTPS(443)는 Let's Encrypt 로 적용됨.
