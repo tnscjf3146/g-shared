@@ -263,7 +263,8 @@ export function WorkloadWizard() {
         )}
 
         <div className="flex items-center justify-between border-t border-hairline pt-5">
-          <Button variant="secondary" disabled={step === 0 || submitting !== null} onClick={() => goTo(step - 1)}>
+          {/* 1단계에선 돌아갈 곳이 없다 — 회색 버튼 대신 숨긴다. invisible 로 자리는 지켜 "n/5"와 [다음] 위치가 안 흔들리게 */}
+          <Button variant="secondary" className={step === 0 ? 'invisible' : undefined} disabled={step === 0 || submitting !== null} onClick={() => goTo(step - 1)}>
             이전
           </Button>
           <span className="text-[13px] tabular-nums text-text-muted">
