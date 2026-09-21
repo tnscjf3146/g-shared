@@ -97,7 +97,7 @@ public class JobService {
                 .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
         Dataset dataset = datasetRepository.findByIdAndOwnerId(request.datasetId(), ownerId)
                 .orElseThrow(() -> new BusinessException(DatasetErrorCode.DATASET_NOT_FOUND));
-        Workload workload = workloadRepository.findByIdAndEnabledTrue(request.workloadId())
+        workloadRepository.findByIdAndEnabledTrue(request.workloadId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
         var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
@@ -137,7 +137,8 @@ public class JobService {
                 .filter(w -> !escrow.operatorApproved(
                         w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
                 .map(w -> new SchedulerRecommendRequest.GpuCandidate(
-                        w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec()))
+                        w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec(),
+                        w.getBenchmarkPeakVramMb()))   // 구버전 exe 워커는 null — Scheduler 가 허용
                 .toList();
         if (candidates.isEmpty()) {
             // 의뢰자에게는 "기다리면 된다"(409)로 충분하지만, 운영자는 왜 0 인지 알아야 한다 —
@@ -147,10 +148,10 @@ public class JobService {
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);   // 409 — 기다리면 해결
         }
 
-        // ④ Scheduler 추천 (외부 HTTP) — VRAM 하한은 카탈로그 값을 그대로 전달, 거르는 건 Scheduler 몫
+        // ④ Scheduler 추천 (외부 HTTP) — VRAM 하한은 카탈로그 값(모델 하한, 없으면 워크로드 하한)을 그대로 전달, 거르는 건 Scheduler 몫
         SchedulerRecommendResponse rec = schedulerClient.recommend(new SchedulerRecommendRequest(
                 request.baseModelId(), request.workloadId(), datasetMeta, config,
-                new SchedulerRecommendRequest.Requirements(workload.getMinVramMb()), candidates));
+                new SchedulerRecommendRequest.Requirements(baseModel.requiredVramMb()), candidates));
         // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
         if (rec.recommendedWorkerId() == null || rec.rankings() == null || rec.rankings().isEmpty()) {
             throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);

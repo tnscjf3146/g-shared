@@ -101,7 +101,7 @@ class JobStateTransitionTest {
     private Worker newWorker(String suffix, String operatorAddress) {
         return workerRepository.save(Worker.register(
                 "worker-test-" + suffix, owner, "hash-" + suffix, operatorAddress, "0.1.0",
-                "Windows 11", true, "RTX 4070", 12000, 42.5, "transformer-bench-v1"));
+                "Windows 11", true, "RTX 4070", 12000, 42.5, null, "transformer-bench-v1"));
     }
 
     // ── cancelIfUnassigned / markCancellingIfActive ─────────────
@@ -410,7 +410,7 @@ class JobStateTransitionTest {
                 "walletless-" + UUID.randomUUID() + "@gshared.io", "encoded", "지갑없음"));
         Worker noWallet = workerRepository.save(Worker.register(
                 "worker-test-no-wallet", walletless, "hash-no-wallet", "0x" + "c".repeat(40), "0.1.0",
-                "Windows 11", true, "RTX 4070", 12000, 42.5, "transformer-bench-v1"));
+                "Windows 11", true, "RTX 4070", 12000, 42.5, null, "transformer-bench-v1"));
         noWallet.goOnline(NOW);
 
         Worker ready = newWorker("ready");

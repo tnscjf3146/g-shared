@@ -79,7 +79,7 @@ class JobCreateValidationTest {
         Worker worker = workerRepository.save(Worker.register(
                 "worker-create-" + UUID.randomUUID(), owner, "hash-" + UUID.randomUUID(),
                 "0x" + "b".repeat(40), "0.1.0", "Windows 11", true,
-                "RTX 4090", 24_564, 72_000.0, "transformer-bench-v1"));
+                "RTX 4090", 24_564, 72_000.0, null, "transformer-bench-v1"));
         worker.goOnline(LocalDateTime.now());
         workerRepository.flush();   // 목 검증 전에 DB 반영
     }

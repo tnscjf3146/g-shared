@@ -10,7 +10,7 @@ import jakarta.validation.constraints.Positive;
  *
  * <p>operatorAddress 는 워커 PC 가 만든 서명 키의 <b>공개 주소</b>다. 개인키는 절대 오지 않는다.
  * gpu·benchmark 는 AI Scheduler 가 실행시간을 예측하는 입력이라 전부 필수·양수다 —
- * 비워 두면 스케줄러가 빈 값을 그대로 믿는다.
+ * 비워 두면 스케줄러가 빈 값을 그대로 믿는다. 예외는 benchmark.peakVramMb 하나 — 그 필드 주석 참고.
  */
 public record RegisterWorkerRequest(
 
@@ -55,6 +55,13 @@ public record RegisterWorkerRequest(
             @NotNull(message = "benchmark.benchmarkTokensPerSec은 필수값입니다.")
             @Positive(message = "benchmark.benchmarkTokensPerSec은 양수여야 합니다.")
             Double benchmarkTokensPerSec,
+
+            /**
+             * 벤치마크 중 실제로 쓴 VRAM 최고치(MiB). 선택이다 — 구버전 G-shared.exe 는 이 필드를 보내지 않는데,
+             * 필수로 막으면 그 공급자의 등록이 400 으로 끊겨 PC 가 일을 못 받는다. 없으면 null 로 저장한다.
+             */
+            @Positive(message = "benchmark.peakVramMb는 양수여야 합니다.")
+            Integer peakVramMb,
 
             @NotBlank(message = "benchmark.benchmarkVersion은 필수값입니다.")
             String benchmarkVersion

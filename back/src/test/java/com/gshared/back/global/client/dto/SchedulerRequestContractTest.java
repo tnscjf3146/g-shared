@@ -46,10 +46,31 @@ class SchedulerRequestContractTest {
                 3L, 1L, RECOMMEND_META,
                 new SchedulerTrainingConfig(3, 8, 0.0002, 1024),
                 new SchedulerRecommendRequest.Requirements(8192),
-                List.of(new SchedulerRecommendRequest.GpuCandidate("w-1", "RTX 4090", 24_564, 72_000.0))));
+                List.of(new SchedulerRecommendRequest.GpuCandidate("w-1", "RTX 4090", 24_564, 72_000.0, null))));
 
         assertThat(json.path("requirements").path("minVramMb").asInt()).isEqualTo(8192);
         assertThat(json.path("dataset").path("effectiveTokens").asLong()).isEqualTo(2_874_100L);
         assertThat(json.path("dataset").size()).isEqualTo(6);
+    }
+
+    /**
+     * AI 스키마(app/schemas/runtime.py GpuCandidate)는 benchmarkPeakVramMb 를 선택 필드로 받고, 모르는 키는 422 다.
+     * 이름이 어긋나거나(예: peakVramMb) 값이 있을 때 빠지면 안 된다.
+     */
+    @Test
+    @DisplayName("GPU 후보는 benchmarkPeakVramMb 를 싣는다 — 실측이 없으면 null, 있으면 그 값")
+    void candidate_carries_benchmark_peak_vram() {
+        JsonNode candidates = objectMapper.valueToTree(new SchedulerRecommendRequest(
+                3L, 1L, RECOMMEND_META,
+                new SchedulerTrainingConfig(3, 8, 0.0002, 1024),
+                new SchedulerRecommendRequest.Requirements(8192),
+                List.of(new SchedulerRecommendRequest.GpuCandidate("w-old", "RTX 4090", 24_564, 72_000.0, null),
+                        new SchedulerRecommendRequest.GpuCandidate("w-new", "RTX 4050 Laptop", 6141, 900.0, 5878))))
+                .path("gpuCandidates");
+
+        assertThat(candidates.get(0).has("benchmarkPeakVramMb")).isTrue();
+        assertThat(candidates.get(0).path("benchmarkPeakVramMb").isNull()).isTrue();
+        assertThat(candidates.get(1).path("benchmarkPeakVramMb").asInt()).isEqualTo(5878);
+        assertThat(candidates.get(1).has("peakVramMb")).isFalse();
     }
 }

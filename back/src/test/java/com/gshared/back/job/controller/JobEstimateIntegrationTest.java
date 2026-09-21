@@ -1,6 +1,7 @@
 package com.gshared.back.job.controller;
 
 import com.gshared.back.global.client.SchedulerClient;
+import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
 import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
 import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
 import com.gshared.back.global.security.jwt.JwtProvider;
@@ -17,14 +18,18 @@ import com.gshared.back.workload.repository.BaseModelRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
+
+import jakarta.persistence.EntityManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,7 +37,10 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -70,6 +78,10 @@ class JobEstimateIntegrationTest {
     private JwtProvider jwtProvider;
     @Autowired
     private tools.jackson.databind.ObjectMapper objectMapper;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private EntityManager entityManager;
 
     @MockitoBean
     private SchedulerClient schedulerClient;
@@ -98,7 +110,7 @@ class JobEstimateIntegrationTest {
                 new RegisterWorkerRequest("0x" + "b".repeat(40), "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
-                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, "transformer-bench-v1")));
+                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, null, "transformer-bench-v1")));
         workerId = registered.workerId();
         Worker worker = workerRepository.findById(workerId).orElseThrow();
         worker.goOnline(LocalDateTime.now());
@@ -215,12 +227,94 @@ class JobEstimateIntegrationTest {
                 .andExpect(jsonPath("$[1].reason").value("VRAM 이 92 MiB 부족해 실행할 수 없습니다."));
     }
 
+    // ── VRAM 하한: 모델 값이 있으면 모델 값, 없으면 워크로드 값 (V21) ─────────
+
+    /**
+     * 6 GB 카드(RTX 4050 Laptop, 드라이버 보고 6141 MiB)가 0.6B 작업에서도 후보에 못 오르던 문제.
+     * base_models.min_vram_mb 가 NULL 인 동안은 지금과 같아야 하고(8192 → INSUFFICIENT),
+     * 값을 넣으면 화면 표시(requiredVramMb)와 Scheduler 에 보내는 값(requirements.minVramMb)이 함께 바뀌어야 한다.
+     */
+    @Test
+    @DisplayName("base_models.min_vram_mb 가 NULL 이면 워크로드 하한(8192) — 6 GB 카드는 INSUFFICIENT")
+    void requiredVramFallsBackToWorkloadWhenModelHasNoFloor() throws Exception {
+        registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[1].model").value("NVIDIA GeForce RTX 4050 Laptop GPU"))
+                .andExpect(jsonPath("$[1].requiredVramMb").value(8192))
+                .andExpect(jsonPath("$[1].fit").value("INSUFFICIENT"));
+
+        ArgumentCaptor<SchedulerRecommendRequest> sent = ArgumentCaptor.forClass(SchedulerRecommendRequest.class);
+        verify(schedulerClient).recommend(sent.capture());
+        assertThat(sent.getValue().requirements().minVramMb()).isEqualTo(8192);
+    }
+
+    @Test
+    @DisplayName("base_models.min_vram_mb 가 있으면 그 값이 이긴다 — 화면 requiredVramMb 와 Scheduler requirements 가 같이 바뀐다")
+    void requiredVramPrefersModelFloor() throws Exception {
+        String laptopWorkerId = registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
+        given(schedulerClient.recommend(any()))
+                .willReturn(new SchedulerRecommendResponse("runtime-xgb-v1", laptopWorkerId,
+                        List.of(new SchedulerRecommendResponse.Ranking(1, laptopWorkerId, 3600.0))));
+        setModelVramFloor(baseModelId, 6144);
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].requiredVramMb").value(6144))
+                .andExpect(jsonPath("$[1].model").value("NVIDIA GeForce RTX 4050 Laptop GPU"))
+                .andExpect(jsonPath("$[1].requiredVramMb").value(6144))
+                .andExpect(jsonPath("$[1].fit").value("RECOMMENDED"));
+
+        ArgumentCaptor<SchedulerRecommendRequest> sent = ArgumentCaptor.forClass(SchedulerRecommendRequest.class);
+        verify(schedulerClient).recommend(sent.capture());
+        assertThat(sent.getValue().requirements().minVramMb()).isEqualTo(6144);
+    }
+
+    @Test
+    @DisplayName("GPU 후보에는 실측 peakVramMb 가 실린다 — 구버전 exe 로 등록한 워커는 null 로 (후보에서 빠지지 않는다)")
+    void candidatesCarryBenchmarkPeakVram() throws Exception {
+        String measured = registerOnlineWorker("NVIDIA GeForce RTX 4050 Laptop GPU", 6141, 5878);
+
+        mockMvc.perform(post(GPU_OPTIONS_URL)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(spec())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<SchedulerRecommendRequest> sent = ArgumentCaptor.forClass(SchedulerRecommendRequest.class);
+        verify(schedulerClient).recommend(sent.capture());
+        assertThat(sent.getValue().gpuCandidates())
+                .extracting(SchedulerRecommendRequest.GpuCandidate::workerId,
+                        SchedulerRecommendRequest.GpuCandidate::benchmarkPeakVramMb)
+                .containsExactlyInAnyOrder(
+                        tuple(workerId, null),        // setUp 의 4090 — peakVramMb 없이 등록 (구버전 exe)
+                        tuple(measured, 5878));
+    }
+
+    /** 카탈로그는 조회 전용이라 엔티티에 setter 가 없다 — 값 입력은 마이그레이션이 하므로 테스트도 SQL 로 흉내 낸다. */
+    private void setModelVramFloor(Long modelId, int minVramMb) {
+        jdbcTemplate.update("UPDATE base_models SET min_vram_mb = ? WHERE model_id = ?", minVramMb, modelId);
+        entityManager.flush();
+        entityManager.clear();   // setUp 에서 읽어 둔 BaseModel 이 1차 캐시에 남아 있어 새 값을 다시 읽게 한다
+    }
+
     private String registerOnlineWorker(String gpuModel, int vramMb) {
+        return registerOnlineWorker(gpuModel, vramMb, null);
+    }
+
+    private String registerOnlineWorker(String gpuModel, int vramMb, Integer peakVramMb) {
         RegisterWorkerResponse registered = workerService.register(userId,
                 new RegisterWorkerRequest("0x" + "c".repeat(40), "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo(gpuModel, vramMb),
-                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1")));
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, peakVramMb, "transformer-bench-v1")));
         Worker worker = workerRepository.findById(registered.workerId()).orElseThrow();
         worker.goOnline(LocalDateTime.now());
         workerRepository.flush();

@@ -45,6 +45,11 @@ public class Worker extends BaseTimeEntity {
     private Integer vramMb;
     private String driverVersion;      // 구 규격 필드 — 새 등록에서는 채우지 않는다
     private Double benchmarkTokensPerSec;
+    /**
+     * 벤치마크 중 실제로 쓴 VRAM 최고치(MiB). vramMb 는 카드의 총량이고, 이쪽이 학습에 쓸 수 있는 양에 가깝다.
+     * 구버전 exe 는 보내지 않으므로 NULL 일 수 있다 — Scheduler 로는 있으면 싣고 없으면 null 로 간다 (V21).
+     */
+    private Integer benchmarkPeakVramMb;
     @Column(length = 64)
     private String benchmarkVersion;   // 어떤 벤치마크로 잰 값인가 — 버전이 다르면 수치를 비교할 수 없다
 
@@ -58,7 +63,7 @@ public class Worker extends BaseTimeEntity {
 
     private Worker(String id, User owner, String workerToken, String operatorAddress, String clientVersion,
                    String osVersion, Boolean wslAvailable, String gpuModel, Integer vramMb,
-                   Double benchmarkTokensPerSec, String benchmarkVersion) {
+                   Double benchmarkTokensPerSec, Integer benchmarkPeakVramMb, String benchmarkVersion) {
         this.id = id;
         this.owner = owner;
         this.workerToken = workerToken;
@@ -69,17 +74,22 @@ public class Worker extends BaseTimeEntity {
         this.gpuModel = gpuModel;
         this.vramMb = vramMb;
         this.benchmarkTokensPerSec = benchmarkTokensPerSec;
+        this.benchmarkPeakVramMb = benchmarkPeakVramMb;
         this.benchmarkVersion = benchmarkVersion;
         this.status = WorkerStatus.OFFLINE;   // 등록 직후엔 아직 연결 전
     }
 
-    /** 규격 v1 등록. operatorAddress 는 정규화(소문자)된 값만 넘어온다는 전제다. */
+    /**
+     * 규격 v1 등록. operatorAddress 는 정규화(소문자)된 값만 넘어온다는 전제다.
+     * benchmarkPeakVramMb 는 선택 — 구버전 exe 는 보내지 않으니 null 그대로 둔다.
+     */
     public static Worker register(String id, User owner, String workerToken, String operatorAddress,
                                   String clientVersion, String osVersion, Boolean wslAvailable,
                                   String gpuModel, Integer vramMb,
-                                  Double benchmarkTokensPerSec, String benchmarkVersion) {
+                                  Double benchmarkTokensPerSec, Integer benchmarkPeakVramMb,
+                                  String benchmarkVersion) {
         return new Worker(id, owner, workerToken, operatorAddress, clientVersion, osVersion, wslAvailable,
-                gpuModel, vramMb, benchmarkTokensPerSec, benchmarkVersion);
+                gpuModel, vramMb, benchmarkTokensPerSec, benchmarkPeakVramMb, benchmarkVersion);
     }
 
     /**
@@ -96,10 +106,13 @@ public class Worker extends BaseTimeEntity {
      * 여기서 바뀌는 것은 "이 워커가 무엇을 제공하는가" 뿐이다.
      */
     public void updateBenchmark(String gpuModel, Integer vramMb,
-                                Double benchmarkTokensPerSec, String benchmarkVersion) {
+                                Double benchmarkTokensPerSec, Integer benchmarkPeakVramMb,
+                                String benchmarkVersion) {
         this.gpuModel = gpuModel;
         this.vramMb = vramMb;
         this.benchmarkTokensPerSec = benchmarkTokensPerSec;
+        // 구버전 exe 가 다시 재면 null 이 온다 — 이전 측정이 아직 유효하다는 뜻이 아니라(카드가 바뀌었을 수 있다) 그대로 덮는다
+        this.benchmarkPeakVramMb = benchmarkPeakVramMb;
         this.benchmarkVersion = benchmarkVersion;
     }
 

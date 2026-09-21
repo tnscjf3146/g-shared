@@ -13,7 +13,7 @@ import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.exception.JobErrorCode;
 import com.gshared.back.worker.domain.GpuGrade;
 import com.gshared.back.worker.service.GpuCatalogService;
-import com.gshared.back.workload.domain.Workload;
+import com.gshared.back.workload.domain.BaseModel;
 import com.gshared.back.workload.exception.WorkloadErrorCode;
 import com.gshared.back.workload.repository.BaseModelRepository;
 import com.gshared.back.workload.repository.WorkloadRepository;
@@ -52,7 +52,7 @@ public class JobEstimateService {
      * 상황이라, 사용자에게 설정을 고치라고 말하면 안 된다.
      */
     public List<GpuOptionResponse> getGpuOptions(JobSpecRequest request) {
-        Workload workload = loadWorkload(request);
+        BaseModel baseModel = loadBaseModel(request);
         List<GpuGrade> grades = gpuCatalogService.grades();
         if (grades.isEmpty()) {
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);
@@ -64,10 +64,11 @@ public class JobEstimateService {
 
         // Scheduler 는 워커 단위로 답한다. 어느 등급이 1순위인지 알려면 추천 워커가 어느 등급인지 되짚어야 한다.
         SchedulerRecommendResponse recommendation =
-                recommend(request, workload, datasetMeta, config, grades);
+                recommend(request, baseModel, datasetMeta, config, grades);
         Long recommendedGradeId = gradeIdOf(recommendation.recommendedWorkerId(), grades);
 
-        int requiredVramMb = workload.getMinVramMb();
+        // Scheduler 에 보낸 것과 같은 값 — 화면의 "VRAM 부족" 표시와 실제 판정이 갈리면 안 된다.
+        int requiredVramMb = baseModel.requiredVramMb();
         return grades.stream()
                 .map(grade -> toOption(grade, requiredVramMb, recommendedGradeId))
                 .toList();
@@ -81,7 +82,7 @@ public class JobEstimateService {
      */
     public EstimateResponse estimate(EstimateJobRequest request) {
         JobSpecRequest spec = request.spec();
-        Workload workload = loadWorkload(spec);
+        BaseModel baseModel = loadBaseModel(spec);
 
         GpuGrade grade = gpuCatalogService.grades().stream()
                 .filter(g -> g.id() == request.gpuId())
@@ -94,7 +95,7 @@ public class JobEstimateService {
                 spec.trainingMode(), spec.autoMode(), spec.trainingConfig(), datasetMeta);
 
         SchedulerRecommendResponse recommendation =
-                recommend(spec, workload, datasetMeta, config, List.of(grade));
+                recommend(spec, baseModel, datasetMeta, config, List.of(grade));
 
         double predictedRuntimeSec = recommendation.rankings().stream()
                 .mapToDouble(SchedulerRecommendResponse.Ranking::predictedRuntimeSec)
@@ -109,37 +110,39 @@ public class JobEstimateService {
     /**
      * 카탈로그 확인. 모델이 그 이미지에 속하지 않는 조합은 여기서 막는다 —
      * 주문 단계에서만 막으면, 견적까지 통과한 조합이 마지막에 거절당한다.
+     * 모델을 돌려주는 것은 VRAM 하한이 모델에 달려 있어서다({@link BaseModel#requiredVramMb()}) — 워크로드는 모델을 타고 간다.
      */
-    private Workload loadWorkload(JobSpecRequest request) {
-        Workload workload = workloadRepository.findByIdAndEnabledTrue(request.workloadId())
+    private BaseModel loadBaseModel(JobSpecRequest request) {
+        workloadRepository.findByIdAndEnabledTrue(request.workloadId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
-        var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
+        BaseModel baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
                 .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
         if (!baseModel.getWorkload().getId().equals(request.workloadId())) {
             throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
         }
-        return workload;
+        return baseModel;
     }
 
-    private SchedulerRecommendResponse recommend(JobSpecRequest request, Workload workload,
+    private SchedulerRecommendResponse recommend(JobSpecRequest request, BaseModel baseModel,
                                                  SchedulerRecommendRequest.DatasetMeta datasetMeta,
                                                  SchedulerTrainingConfig config,
                                                  List<GpuGrade> grades) {
         List<SchedulerRecommendRequest.GpuCandidate> candidates = grades.stream()
                 .flatMap(grade -> grade.workers().stream())
                 // 벤치마크가 없는 워커는 후보에서 뺀다 — Scheduler 가 null 을 422 로 거절한다.
+                // (benchmarkPeakVramMb 는 예외 — 구버전 exe 워커는 없고, 그건 후보에서 뺄 이유가 아니다)
                 .filter(worker -> worker.getBenchmarkTokensPerSec() != null)
                 .map(worker -> new SchedulerRecommendRequest.GpuCandidate(
                         worker.getId(), worker.getGpuModel(), worker.getVramMb(),
-                        worker.getBenchmarkTokensPerSec()))
+                        worker.getBenchmarkTokensPerSec(), worker.getBenchmarkPeakVramMb()))
                 .toList();
         if (candidates.isEmpty()) {
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);
         }
 
         SchedulerRecommendResponse response = schedulerClient.recommend(new SchedulerRecommendRequest(
-                request.baseModelId(), workload.getId(), datasetMeta, config,
-                new SchedulerRecommendRequest.Requirements(workload.getMinVramMb()), candidates));
+                request.baseModelId(), baseModel.getWorkload().getId(), datasetMeta, config,
+                new SchedulerRecommendRequest.Requirements(baseModel.requiredVramMb()), candidates));
         // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
         if (response.rankings() == null || response.rankings().isEmpty()) {
             throw new BusinessException(SchedulerErrorCode.NO_FEASIBLE_GPU);

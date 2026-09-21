@@ -78,7 +78,7 @@ class WorkerOperatorStatusIntegrationTest {
                 new RegisterWorkerRequest(OPERATOR, "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo("NVIDIA GeForce RTX 4070 Laptop GPU", 8188),
-                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1")));
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, null, "transformer-bench-v1")));
         workerId = registered.workerId();
 
         given(chain.isConfigured()).willReturn(true);
@@ -167,7 +167,7 @@ class WorkerOperatorStatusIntegrationTest {
                 new RegisterWorkerRequest(OPERATOR, "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo("RTX 3060", 12288),
-                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1"))).workerId();
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, null, "transformer-bench-v1"))).workerId();
 
         mockMvc.perform(get(statusUrl(id))
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))

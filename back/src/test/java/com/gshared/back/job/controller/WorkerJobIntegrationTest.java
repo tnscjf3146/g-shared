@@ -130,7 +130,7 @@ class WorkerJobIntegrationTest {
         return new RegisterWorkerRequest(operatorAddress, "0.1.0",
                 new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                 new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
-                new RegisterWorkerRequest.BenchmarkInfo(42000.0, "transformer-bench-v1"));
+                new RegisterWorkerRequest.BenchmarkInfo(42000.0, null, "transformer-bench-v1"));
     }
 
     private String contextUrl(Long jobId) {

@@ -66,7 +66,7 @@ class WorkerMineIntegrationTest {
                 new RegisterWorkerRequest("0x" + "b".repeat(40), "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo("RTX 4090", 24576),
-                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, "transformer-bench-v1")));
+                        new RegisterWorkerRequest.BenchmarkInfo(1800.0, null, "transformer-bench-v1")));
         workerId = registered.workerId();
     }
 
@@ -125,7 +125,7 @@ class WorkerMineIntegrationTest {
                 new RegisterWorkerRequest("0x" + "c".repeat(40), "0.1.0",
                         new RegisterWorkerRequest.SystemInfo("Windows 11", true),
                         new RegisterWorkerRequest.GpuInfo("RTX 3060", 12288),
-                        new RegisterWorkerRequest.BenchmarkInfo(900.0, "transformer-bench-v1")));
+                        new RegisterWorkerRequest.BenchmarkInfo(900.0, null, "transformer-bench-v1")));
 
         mockMvc.perform(get(MINE_URL)
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + ownerToken))
