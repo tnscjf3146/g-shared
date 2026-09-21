@@ -70,8 +70,10 @@ public class JobEstimateService {
         // 필요 VRAM 은 AI 가 이 Job 의 실제 설정으로 계산한 값(Dynamic VRAM)이 정본 — 카탈로그 상수(8192)로
         // 덮어쓰면 가벼운 학습에서도 6GB GPU 가 전부 INSUFFICIENT 로 사라진다. AI 응답에 값이 없으면
         // (구버전/배포 순서) 기존 카탈로그 값으로 후퇴. 이 한 값이 fit 판정과 응답에 똑같이 쓰인다.
-        int requiredVramMb = recommendation.requiredVramMb() != null
-                ? recommendation.requiredVramMb()
+        // 0 이하는 계약 위반(AI 스키마는 PositiveInt) — 그대로 쓰면 모든 GPU 가 "가능"이 되므로 fallback 이 안전하다.
+        Integer aiRequired = recommendation.requiredVramMb();
+        int requiredVramMb = aiRequired != null && aiRequired > 0
+                ? aiRequired
                 : baseModel.requiredVramMb();
         return grades.stream()
                 .map(grade -> toOption(grade, requiredVramMb, recommendedGradeId))
