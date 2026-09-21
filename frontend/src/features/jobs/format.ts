@@ -52,7 +52,7 @@ export function jobStatusSentence(status: JobStatus, failReason?: string | null)
 }
 
 export const AUTO_MODE_META: Record<AutoMode, { label: string; description: string }> = {
-  SPEED: { label: '빠르게', description: '결과를 빨리 봅니다. 1 epoch, 짧게 자른 시퀀스.' },
+  SPEED: { label: '빠르게', description: '결과를 빨리 봅니다.' },
   BALANCED: { label: '균형', description: '특별한 이유가 없을 때의 선택.' },
   TRAINING: { label: '충분히', description: '오래 걸려도 데이터를 더 많이, 더 여러 번 봅니다.' },
 }

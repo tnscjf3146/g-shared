@@ -120,7 +120,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
           {(
             [
               ['none', isTrain ? '처음부터 학습' : '어댑터 없이', isTrain ? '베이스 모델에서 시작해 v1 어댑터를 만듭니다.' : '베이스 모델만으로 진행합니다.'],
-              ['job', isTrain ? '이어서 학습 (버전 올리기)' : '내 학습 결과 적용', isTrain ? '완료된 내 학습 작업의 어댑터에서 이어 학습해 v2, v3 … 로 쌓습니다.' : '완료된 내 학습 작업의 어댑터를 모델에 얹습니다.'],
+              ['job', isTrain ? '이어서 학습 (버전 올리기)' : '내 학습 결과 적용', isTrain ? '완료된 내 어댑터에 이어서 학습합니다 (v2, v3…).' : '완료된 내 학습 작업의 어댑터를 모델에 얹습니다.'],
               ['file', '어댑터 파일 올리기', '다른 데서 받아 온 어댑터 .tar 를 올려 사용합니다.'],
             ] as [AdapterSource, string, string][]
           ).map(([value, label, description]) => (
@@ -137,7 +137,8 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 className="sr-only"
               />
               <span className="text-[15px] font-semibold text-dark">{label}</span>
-              <span className="text-[13px] text-text-muted">{description}</span>
+              {/* break-keep: 한국어가 단어(어절) 중간에서 끊기지 않고 띄어쓰기 단위로 줄바꿈 */}
+              <span className="text-[13px] break-keep text-text-muted">{description}</span>
             </label>
           ))}
         </div>
