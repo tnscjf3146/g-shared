@@ -27,12 +27,13 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const post = (path: string, body: unknown, init: RequestInit = {}) =>
   authFetch<unknown>(path, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify(body), ...init })
 
-/** GET /jobs?status&page&size — 최신순(서버 고정) */
-export async function getJobs(params: { status?: JobStatus; page?: number; size?: number } = {}): Promise<JobPage> {
+/** GET /jobs?status&page&size&sort — 기본 최신순(id,desc). 서버 @PageableDefault 는 "기본값"이라 sort 로 덮어쓸 수 있다 */
+export async function getJobs(params: { status?: JobStatus; page?: number; size?: number; sort?: 'id,asc' | 'id,desc' } = {}): Promise<JobPage> {
   const q = new URLSearchParams()
   if (params.status) q.set('status', params.status)
   q.set('page', String(params.page ?? 0))
   q.set('size', String(params.size ?? 10))
+  if (params.sort) q.set('sort', params.sort)
   return jobPageSchema.parse(await authFetch<unknown>(`${JOBS_PATH}?${q}`))
 }
 

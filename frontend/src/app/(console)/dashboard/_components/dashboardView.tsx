@@ -38,8 +38,10 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [jobView, setJobView] = useState<'latest' | 'oldest' | 'done'>('latest') // 목록 정렬·필터
 
   // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
+  // '오래된순'은 서버 정렬(sort=id,asc)로 다시 받는다 — 최신 50건 안에서만 뒤집으면
+  // 작업이 50건을 넘는 순간 "가장 오래된 것"이 거짓말이 된다(리뷰 지적)
   const load = useCallback((silent = false) => {
-    getJobs({ page: 0, size: PAGE_SIZE })
+    getJobs({ page: 0, size: PAGE_SIZE, sort: jobView === 'oldest' ? 'id,asc' : 'id,desc' })
       .then((p) => setJobs({ status: 'ready', data: p.content }))
       .catch(() => {
         if (!silent) setJobs({ status: 'error' })
@@ -49,7 +51,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       .catch(() => {
         if (!silent) setWorkers({ status: 'error' })
       })
-  }, [])
+  }, [jobView]) // 정렬이 바뀌면 서버에서 다시 받는다 (아래 useEffect 가 load 변경에 반응해 재호출·폴링 재설정)
 
   useEffect(() => {
     void load()
@@ -70,8 +72,8 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
   // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
-  // "내 학습 작업" 목록에 보여줄 것 — 선택한 분류로 정렬/필터(받아둔 목록 안에서, 백엔드 불필요).
-  // 생성일 기준으로 프론트에서 직접 정렬(ISO 문자열은 사전순=시간순). 서버 순서에 의존하지 않는다
+  // "내 학습 작업" 목록에 보여줄 것 — '오래된순'은 위에서 서버 정렬로 받았고, 여기 정렬은 페이지 안 표시 순서 확정용.
+  // ⚠️ 'done' 필터는 여전히 받아온 50건 기준 — 작업이 50건을 넘으면 서버 status 필터+페이징으로 옮겨야 한다
   const newestFirst = (a: JobSummary, b: JobSummary) => b.createdAt.localeCompare(a.createdAt)
   const displayList =
     jobView === 'oldest'
