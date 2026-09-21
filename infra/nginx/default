@@ -3,7 +3,16 @@
 # 이 파일은 서버 설정의 "기록/백업본"입니다. 반영 방법은 같은 폴더 README.md 참고.
 #
 # /api → 백엔드(8080), / → 프론트(3000), /ws → 백엔드 WebSocket(8080)
+# /grafana → 관제 Grafana(3001, infra/observability 의 별도 compose)
 # 443(https/wss)은 certbot 관리. 워커는 wss(443)로 붙으므로 /ws 는 443 블록에 있음.
+
+# WebSocket 업그레이드 판별. Upgrade 헤더가 있을 때만 Connection: upgrade 를 보낸다.
+# /ws 처럼 전부 WebSocket 인 경로는 "upgrade" 를 그냥 박아도 되지만, /grafana 는 평범한
+# HTTP 요청이 대부분이라 그렇게 하면 일반 요청까지 업그레이드로 표시돼 어긋난다.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 
 server {
     listen 80 default_server;
@@ -51,6 +60,27 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_read_timeout 3600s;
+    }
+
+    # 관제 Grafana — 로그 조회 화면. infra/observability 의 별도 compose 가 띄운다.
+    # 그쪽은 127.0.0.1:3001 에만 묶여 있어서, 인터넷에서 들어오는 길은 여기 하나뿐이다.
+    #
+    # proxy_pass 뒤에 슬래시를 붙이지 않는다. 붙이면 nginx 가 /grafana 를 떼고 넘기는데,
+    # Grafana 는 GF_SERVER_SERVE_FROM_SUB_PATH=true 로 자기가 /grafana 접두어를 붙여
+    # 응답하므로 경로를 그대로 넘겨야 정적 자원과 redirect 가 맞는다.
+    location /grafana {
+        proxy_pass http://127.0.0.1:3001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # TLS 가 nginx 에서 끊기므로 원래 스킴을 알려 준다. 없으면 로그인 뒤 리다이렉트가
+        # http 로 떨어져 브라우저가 막는다.
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Grafana Live(화면 실시간 갱신)가 WebSocket 을 쓴다.
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
     }
 
     location / {

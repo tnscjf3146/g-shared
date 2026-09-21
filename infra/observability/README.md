@@ -33,7 +33,7 @@ Alloy  ──모은다──▶  Loki  ──쌓는다──▶  Grafana  ──
 | --- | --- | --- |
 | **Alloy** | 도커 소켓과 로그 파일을 읽어 Loki 로 보낸다 | 공개하지 않음 |
 | **Loki** | 라벨을 붙여 저장한다. 보존 30일 | 공개하지 않음 |
-| **Grafana** | 질의하고 보여 준다 | `127.0.0.1:3001` 만 |
+| **Grafana** | 질의하고 보여 준다 | `127.0.0.1:3001` 만. 밖에서는 nginx `/grafana` 경유 |
 
 수집기로 **Promtail 이 아니라 Alloy** 를 쓴다. Grafana 가 Promtail 을 유지보수 모드로 돌리고
 Alloy 를 후계로 지정했으며 Promtail 은 수명이 끝났다. 튜토리얼과 블로그 글은 대부분 Promtail 로
@@ -128,15 +128,42 @@ docker compose -p observability up -d
 
 ### 접근
 
-nginx 를 거치지 않고 SSH 터널로 붙는다.
+브라우저에서 아래 주소로 들어간다. 계정은 `admin` 이고 암호는 `.env` 의
+`GRAFANA_ADMIN_PASSWORD` 다.
+
+```
+https://j15e204.p.ssafy.io/grafana
+```
+
+nginx 가 `/grafana` 를 `127.0.0.1:3001` 로 넘긴다. **Grafana 자체는 여전히 루프백에만 묶여
+있어서**, 인터넷에서 들어오는 길은 이 경로 하나뿐이다. 포트를 직접 두드려서는 닿지 않는다.
+
+`infra/nginx/default` 는 서버 설정의 기록본이라 저장소를 고쳐도 자동으로 반영되지 않는다.
+서버에서 한 번 복사하고 `nginx -t` 로 검사한 뒤 `systemctl reload nginx` 를 해야 한다.
+절차는 `infra/nginx/README.md` 에 있다.
+
+nginx 를 손대지 않고 확인하고 싶을 때는 SSH 터널도 그대로 쓸 수 있다.
 
 ```bash
 ssh -i ~/.ssh/J15E204T.pem -L 3001:127.0.0.1:3001 ubuntu@j15e204.p.ssafy.io
 # 브라우저에서 http://localhost:3001
 ```
 
-nginx 에 `/grafana` 경로를 두는 방법도 있지만 **이 단계에서는 하지 않는다.** nginx 설정은 서버에
-직접 반영해야 하고 인프라 담당의 판단이 필요하다. 혼자 검증을 끝낸 뒤에 요청하는 편이 낫다.
+#### 무엇이 공개되는지
+
+`/grafana` 를 열면 **인터넷 누구나 로그인 화면까지는 닿는다.** 로그에는 접속자 IP, 요청 경로,
+작업 식별자, 지갑 주소가 들어 있으므로 **관리자 암호 하나가 유일한 장벽**이 된다.
+
+그래서 세 가지를 지킨다.
+
+| | |
+| --- | --- |
+| 암호 | 짐작할 수 없는 것으로 길게 둔다. 시험용으로 쓰던 것을 그대로 쓰지 않는다 |
+| 가입 | `GF_USERS_ALLOW_SIGN_UP=false` 로 막혀 있다 |
+| 익명 열람 | 켜지 않는다. Grafana 는 기본이 꺼짐이다 |
+
+더 조이려면 nginx 에서 basic auth 를 한 겹 더 두거나 접속 대역을 제한할 수 있다. 지금은
+필요가 확인되지 않아 두지 않았다.
 
 ## 검증
 

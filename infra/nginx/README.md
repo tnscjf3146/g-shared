@@ -11,10 +11,17 @@ G-shared 배포 서버(EC2)의 nginx 리버스 프록시 설정 기록본입니�
 ## 라우팅 구조
 
 ```
-브라우저 → nginx(:80)
-   ├─ /api → localhost:8080 (백엔드 컨테이너)
-   └─ /    → localhost:3000 (프론트 컨테이너)
+브라우저 → nginx(:80/:443)
+   ├─ /api     → localhost:8080 (백엔드 컨테이너)
+   ├─ /ws      → localhost:8080 (워커 WebSocket, 443 블록에만 있음)
+   ├─ /grafana → 127.0.0.1:3001 (관제 Grafana, 443 블록에만 있음)
+   └─ /        → localhost:3000 (프론트 컨테이너)
 ```
+
+`/grafana` 는 `infra/observability` 의 별도 compose 가 띄우는 Grafana 다. 그쪽은 루프백에만
+묶여 있어서 이 경로가 인터넷에서 들어오는 유일한 길이다. Grafana 를 `/grafana` 하위 경로로
+서비스하려면 Grafana 쪽에도 `GF_SERVER_ROOT_URL` 과 `GF_SERVER_SERVE_FROM_SUB_PATH` 가
+있어야 한다. 둘은 `infra/observability/docker-compose.yml` 에 들어 있다.
 
 워커 실행파일 `/downloads/G-shared.exe` 는 nginx 에 별도 location 이 없다. `/` 를 타고 프론트 컨테이너가 이미지 안의 `public/downloads/G-shared.exe` 를 내려준다(원본은 저장소 `system/G-shared/G-shared.exe`, `docker-compose.yml` 의 `additional_contexts` 로 빌드 때 복사).
 
@@ -42,4 +49,5 @@ sudo systemctl reload nginx
 - 방화벽(UFW): 22·80·443 개방됨.
 - 프론트 컨테이너는 `docker-compose.yml`에서 `127.0.0.1:3000:3000`으로 매핑 (루프백만, 외부는 nginx 443 경유). MySQL 3306 도 `127.0.0.1` 바인딩.
 - DB 를 GUI 툴로 직접 볼 때는 SSH 터널: `ssh -i ~/.ssh/J15E204T.pem -L 3306:127.0.0.1:3306 ubuntu@j15e204.p.ssafy.io`
+- `/grafana` 를 열면 인터넷 누구나 로그인 화면까지 닿는다. 관리자 암호가 유일한 장벽이므로 짐작할 수 없는 값으로 두고, 시험용 암호를 그대로 쓰지 않는다.
 - HTTPS(443)는 Let's Encrypt 로 적용됨.
