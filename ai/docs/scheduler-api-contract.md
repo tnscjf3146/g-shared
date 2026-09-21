@@ -124,6 +124,7 @@ Job마다 답이 달라지는 판단입니다. 두 곳에 두면 규칙이 정�
 {
   "schedulerModelVersion": "runtime-xgb-v1",
   "recommendedWorkerId": "worker-4090",
+  "requiredVramMb": 8192,
   "rankings": [
     { "rank": 1, "workerId": "worker-4090", "predictedRuntimeSec": 985.8823852539062 },
     { "rank": 2, "workerId": "worker-3060", "predictedRuntimeSec": 4329.7177734375 }
@@ -134,14 +135,16 @@ Job마다 답이 달라지는 판단입니다. 두 곳에 두면 규칙이 정�
 - `rankings`는 `predictedRuntimeSec` **오름차순**, `rank`는 **1부터 연속**.
 - **`rankings`에는 실행 가능한 GPU만 들어갑니다.** 탈락한 후보는 응답 어디에도 나오지 않습니다.
 - `predictedRuntimeSec`는 예측값 **그대로**입니다. 반올림하지 않습니다 — 표시 형식은 화면이 정할 일이고, 여기서 정밀도를 버리면 되돌릴 방법이 없습니다.
-- 응답에 **없는 것**: 가격·비용·`modelId` 되돌림·`requirements`·탈락 목록·Worker 상태. **비용 계산은 Backend 책임입니다.**
+- `requiredVramMb`(MiB)는 후보를 걸러낸 **실제 요구량**입니다. 실측한 모델·`batchSize`·`min(maxLength, maxSeqLength)` 조합이면 측정에서 정한 값이고(`app/scheduler/vram_requirement.py`), 아니면 `requirements.minVramMb` 그대로입니다. 측정 값은 `minVramMb`보다 **우선**합니다 — 지금 `minVramMb`(8192)는 모델 하한이 아니라 일괄 값이라, 둘 중 큰 쪽을 쓰면 실측이 의미를 잃습니다. 화면의 "VRAM 부족" 표시도 이 값으로 해야 판정과 갈리지 않습니다. 새로 생긴 필드이며, 아직 읽지 않는 Backend는 모르는 필드로 무시합니다.
+- 응답에 **없는 것**: 가격·비용·`modelId` 되돌림·`requirements` 원본·탈락 목록·Worker 상태. **비용 계산은 Backend 책임입니다.**
 
 ### 처리 순서
 
 ```
 Request
   → Pydantic 검증 (타입·범위·중복 workerId)
-  → Feasibility Filter    nominal(vramMb) >= minVramMb   (보고값이 GiB 경계보다 32 MiB 이하로 모자랄 때만 경계로 읽음)
+  → VRAM Requirement      측정 칸(modelId·batchSize·min(maxLength, maxSeqLength))이 있으면 그 값, 없으면 minVramMb
+  → Feasibility Filter    nominal(vramMb) >= requiredVramMb   (보고값이 GiB 경계보다 32 MiB 이하로 모자랄 때만 경계로 읽음)
   → Runtime Prediction    통과한 GPU만, 한 번에
   → Ranking               (predictedRuntimeSec, workerId) 오름차순
   → Recommendation        rank 1

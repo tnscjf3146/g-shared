@@ -117,11 +117,12 @@ class TestTheResponseShape:
         for entry in answer["rankings"]:
             assert set(entry) == {"rank", "workerId", "predictedRuntimeSec"}
 
-    def test_the_top_level_has_exactly_the_three_agreed_fields(self, client):
+    def test_the_top_level_has_exactly_the_four_agreed_fields(self, client):
         answer = client.post(PATH, json=body()).json()
 
+        # requiredVramMb: 걸러내기에 실제로 쓴 VRAM 요구량 (동적 VRAM)
         assert set(answer) == {
-            "schedulerModelVersion", "recommendedWorkerId", "rankings"}
+            "schedulerModelVersion", "recommendedWorkerId", "requiredVramMb", "rankings"}
 
     def test_nothing_about_money(self, client):
         # 비용은 Backend가 계산한다.

@@ -191,11 +191,12 @@ class TestTheRuntimeFeatureSetIsFrozen:
 class TestTheResponseFieldSets:
     """응답에 들어 있는 것이 전부다. 하나 늘면 Backend가 그것을 쓰기 시작한다."""
 
-    def test_recommend_answers_exactly_three_fields(self, client):
+    def test_recommend_answers_exactly_four_fields(self, client):
         answer = client.post(RECOMMEND, json=recommend_body()).json()
 
+        # requiredVramMb: 걸러내기에 실제로 쓴 VRAM 요구량 (동적 VRAM)
         assert set(answer) == {
-            "schedulerModelVersion", "recommendedWorkerId", "rankings"}
+            "schedulerModelVersion", "recommendedWorkerId", "requiredVramMb", "rankings"}
 
     def test_each_ranking_entry_answers_exactly_three_fields(self, client):
         answer = client.post(RECOMMEND, json=recommend_body()).json()
