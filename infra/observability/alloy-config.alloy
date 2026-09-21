@@ -84,42 +84,21 @@ loki.source.file "nginx_error" {
 	forward_to = [loki.process.add_level.receiver]
 }
 
-// 회전본. logrotate 가 `access.log.1`, `access.log.2.gz` 처럼 말아 둔다. 백엔드와 같은
-// 이유로 모은다 — 회전된 것에만 남아 있는 과거가 있다. 접근 592KB, 오류 36KB 로 작다.
+// 회전본(`access.log.1`, `access.log.2.gz`)은 **모으지 않는다.** 붙였다가 뺐고, 이유가 셋이다.
 //
-// 압축 해제 설정이 컴포넌트 단위라 `.gz` 만 따로 둔다. 숫자만 붙은 첫 회전본(`.1`)은
-// 압축되지 않았으므로 해제 없이 읽는다.
-local.file_match "nginx_rotated_plain" {
-	path_targets = [{
-		__path__ = "/var/log/nginx/*.log.[0-9]",
-		service  = "nginx",
-		source   = "file",
-	}]
-}
-
-loki.source.file "nginx_rotated_plain" {
-	targets    = local.file_match.nginx_rotated_plain.targets
-	forward_to = [loki.write.default.receiver]
-}
-
-local.file_match "nginx_rotated_gz" {
-	path_targets = [{
-		__path__ = "/var/log/nginx/*.log.*.gz",
-		service  = "nginx",
-		source   = "file",
-	}]
-}
-
-loki.source.file "nginx_rotated_gz" {
-	targets    = local.file_match.nginx_rotated_gz.targets
-	forward_to = [loki.write.default.receiver]
-
-	decompression {
-		enabled       = true
-		format        = "gz"
-		initial_delay = "10s"
-	}
-}
+// 1. 이 nginx 블록에는 시각 스테이지가 없다. 실시간 tail 은 읽은 시각이 곧 기록된 시각이라
+//    문제가 없지만, 회전본은 9월 7일 기록이 "지금"으로 들어간다. 날짜로 못 찾으니 모으는
+//    의미가 사라진다. 실제로 14일치 67,738건이 한 시각에 뭉쳐 들어갔다.
+// 2. 이 서버의 logrotate 는 `dateext` 없이 숫자를 민다(`2.gz`→`3.gz`). Alloy 는 경로로
+//    위치를 기억하므로 회전할 때마다 같은 경로가 다른 내용이 되어 **매일 전체를 다시
+//    적재한다.** 1번과 겹쳐 시각이 매번 달라지므로 Loki 의 중복 제거도 걸리지 않는다.
+// 3. 회전본은 `add_level` 을 타지 않아 회전된 오류 로그에 level 이 붙지 않는다. 한 경로에
+//    접근과 오류가 섞여 있어서 지금 구조로는 나눌 수도 없다.
+//
+// 과거 nginx 로그가 필요하면 **한 번만 밀어 넣는 백필**로 해야 한다. 상시 수집으로는
+// 위 셋이 전부 따라온다. 자세한 것은 docs/수집-함정.md 의 10번.
+//
+// 실시간 tail 만으로도 이 스택이 뜬 뒤의 기록은 빠짐없이 남는다.
 
 // ── 3. 백엔드 파일 로그 ─────────────────────────────────────────────────────
 // 도커 로그와 내용이 겹치지만 **중복이 아니다.** 도커 로그는 컨테이너를 다시 만들면
