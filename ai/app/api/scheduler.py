@@ -210,6 +210,7 @@ def recommend_gpu(
     return RecommendationResponse(
         scheduler_model_version=loaded.predictor.model_version,
         recommended_worker_id=chosen.recommended_worker_id,
+        required_vram_mb=chosen.required_vram_mb,
         rankings=[
             RankedPrediction(
                 rank=entry.rank,

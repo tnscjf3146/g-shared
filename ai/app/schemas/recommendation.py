@@ -37,6 +37,13 @@ class JobRequirements(SchedulerSchema):
     Scheduler가 Backend 스키마에 묶여 그쪽 마이그레이션마다 같이 깨진다. 그렇다고
     Scheduler 안에 "1번 모델은 8GB" 같은 표를 두면 카탈로그가 두 곳에 살게 되고,
     모델이 하나 늘어난 날 한쪽만 고쳐진다. 카탈로그를 가진 쪽이 읽어서 보낸다.
+
+    **예외가 하나 있다.** 실측한 모델·batch·길이 조합은 Scheduler가 요구량을 직접
+    정한다(:mod:`app.scheduler.vram_requirement`). 요구량이 모델 하나에 상수 하나로
+    정해지지 않고 학습 설정과 데이터에 따라 달라지기 때문이다. 그런 칸이 있으면
+    ``minVramMb`` 보다 그 칸이 우선하고, 없을 때만 ``minVramMb`` 가 요구량이다.
+    지금 Backend가 보내는 값(8192)은 모델 하한이 아니라 일괄 값이라, 둘 중 큰 쪽을
+    쓰면 실측이 의미를 잃는다. 실제로 쓴 값은 응답의 ``requiredVramMb`` 에 있다.
     """
 
     min_vram_mb: PositiveInt = Field(
@@ -109,6 +116,14 @@ class RecommendationResponse(SchedulerSchema):
         description=(
             "1위 Worker. 후보가 하나뿐이어도 그 하나가 추천이다. 추천할 것이 "
             "없는 응답은 만들어지지 않는다 -- 그런 요청은 애초에 거절된다."
+        ),
+    )
+    required_vram_mb: PositiveInt = Field(
+        description=(
+            "후보를 걸러낸 VRAM 요구량(MiB). gpuCandidates[].vramMb와 같은 단위다. "
+            "실측한 모델·batchSize·min(maxLength, maxSeqLength) 조합이면 그 측정에서 "
+            "정한 값이고, 아니면 요청의 requirements.minVramMb 그대로다. 화면의 "
+            "'VRAM 부족' 표시도 이 값으로 해야 실제 판정과 갈리지 않는다."
         ),
     )
     rankings: list[RankedPrediction] = Field(
