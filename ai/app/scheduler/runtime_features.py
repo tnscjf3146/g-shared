@@ -30,8 +30,10 @@ Feature로 넣지 않은 것
 지금 넣어 두면 "쓰이지 않는 열"이 하나 늘 뿐 예측이 나아지지 않는다.
 """
 
+import math
+import statistics
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from app.schemas.runtime import GpuCandidate, RuntimeDatasetMetadata
 from app.schemas.training import TrainingConfig
@@ -77,6 +79,11 @@ class UnknownCategoryError(ValueError):
     임의의 숫자를 넣어 넘기지 않는다. 본 적 없는 GPU나 본 적 없는 기반 모델에
     대한 예측은 근거가 없고, 그럴듯한 숫자를 내놓으면 Backend는 그것이 근거
     없는 값인지 알 방법이 없다.
+
+    GPU는 예외가 하나 있다. 이름은 처음 봐도 그 Worker가 잰 benchmark가 있으면
+    benchmark가 가장 가까운 학습 카테고리로 예측한다
+    (:meth:`app.scheduler.runtime_predictor.RuntimePredictor.resolve_gpu_category`).
+    그 근거도 없을 때만 이 예외가 난다.
     """
 
     def __init__(self, feature: str, value: str, known: tuple[str, ...]) -> None:
@@ -180,6 +187,29 @@ class CategoryMapping:
     def as_payload(self) -> dict[str, dict[str, int]]:
         """metadata에 저장할 모양."""
         return {feature: dict(table) for feature, table in self._tables.items()}
+
+
+def is_usable_benchmark(value: object) -> bool:
+    """proxy 선택에 쓸 수 있는 benchmark인가. 유한한 양수만. bool은 숫자가 아니다."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value) and value > 0)
+
+
+def gpu_benchmark_profiles(rows: Sequence[Mapping[str, object]]) -> dict[str, float]:
+    """``gpu_model`` 카테고리마다 학습 행의 ``benchmark_tokens_per_sec`` 중앙값.
+
+    학습 때 모델이 본 "이 이름의 GPU는 대략 이만큼 빠르다"를 숫자 하나로 남긴다.
+    본 적 없는 GPU를 예측할 때 그 GPU의 실측 benchmark와 가장 가까운 카테고리를
+    고르는 기준이다(:mod:`app.scheduler.runtime_predictor`). 평균이 아니라 중앙값인
+    것은, 실측 이력이 쌓이면 한 번 튄 측정이 대표값을 끌고 가지 않게 하기 위해서다.
+    쓸 수 없는 benchmark(0 이하, NaN, 무한대)는 세지 않는다.
+    """
+    values: dict[str, list[float]] = {}
+    for row in rows:
+        benchmark = row.get("benchmark_tokens_per_sec")
+        if is_usable_benchmark(benchmark):
+            values.setdefault(str(row["gpu_model"]), []).append(float(benchmark))
+    return {name: float(statistics.median(found)) for name, found in sorted(values.items())}
 
 
 def build_runtime_features(

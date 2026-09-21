@@ -15,15 +15,39 @@
 :mod:`app.training.runtime_trainer`) 여기서 다시 지수를 취한다. 그 변환이
 metadata에 적혀 있는지 확인하고 시작하는 이유는, log로 학습된 모델의 답을 그대로
 초로 읽으면 하루짜리 작업이 11초로 나오기 때문이다 -- 예외 하나 없이.
+
+**본 적 없는 GPU.** ``gpu_model`` 은 카테고리 열이라, 학습 때 없던 이름(예: 새로
+붙은 RTX 4050 Laptop)은 코드가 없다. 이름 하나 때문에 추천 전체를 거절하지 않되,
+근거 없는 숫자도 넣지 않는다. 대신 그 Worker가 **실제로 잰**
+``benchmarkTokensPerSec`` 과 가장 가까운 학습 카테고리를 그 행의 예측에만 대신
+쓴다(:meth:`RuntimePredictor.resolve_gpu_category`). 나머지 열 -- benchmark 값
+자체, vramMb -- 는 그 Worker의 실제 값 그대로다. 요청·응답의 ``gpuModel`` 은 바뀌지
+않는다. 이름으로 고르지 않는다: "4050이니 4060" 같은 규칙은 다음 GPU에서 틀린다.
+
+* 아는 이름은 benchmark가 무엇이든 그 이름 그대로 쓴다(DIRECT).
+* 모르는 이름은 benchmark가 유한한 양수이고 모델에 benchmark 대표값이 있을 때만
+  대신 쓴다(BENCHMARK_PROXY). 아니면 예전처럼 :class:`UnknownCategoryError` 다.
+* 가까움은 비율로 잰다: ``|log(benchmark) - log(대표값)|``. 처리량은 곱으로 차이 나는
+  값이라 17,000과 21,000의 차이는 68,000과 72,000의 차이와 같지 않다. 거리가 같으면
+  대표값이 **작은** 카테고리를 고른다(더 느리게, 즉 보수적으로 예측한다). 그래도
+  같으면 이름순.
+
+대표값은 모델 metadata의 ``gpuBenchmarkProfiles`` (학습 행의 카테고리별 중앙값,
+:func:`~app.scheduler.runtime_features.gpu_benchmark_profiles`)에서 읽는다. 그 키가
+생기기 전에 만든 합성 부트스트랩 모델은 같은 값을 생성기에서 복원한다
+(:func:`~app.training.runtime_dataset.synthetic_benchmark_profiles`). 둘 다 없으면
+대신 쓸 근거가 없으므로 예전처럼 거절한다.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -35,12 +59,35 @@ from app.scheduler.runtime_features import (
     RUNTIME_FEATURE_NAMES,
     CategoryMapping,
     RuntimeFeatures,
+    is_usable_benchmark,
+)
+from app.training.runtime_dataset import (
+    TRAINING_DATA_TYPE as SYNTHETIC_BOOTSTRAP,
+    synthetic_benchmark_profiles,
 )
 from app.training.runtime_trainer import (
     METADATA_FILE_NAME,
     MODEL_FILE_NAME,
     TARGET_TRANSFORM,
 )
+
+
+logger = logging.getLogger(__name__)
+
+GPU_FEATURE = "gpu_model"
+
+
+class GpuCategorySource(str, Enum):
+    """예측에 쓴 gpu_model 카테고리가 어디서 왔는가. 응답에 싣지 않는다."""
+
+    DIRECT = "DIRECT"
+    BENCHMARK_PROXY = "BENCHMARK_PROXY"
+
+
+@dataclass(frozen=True)
+class GpuCategory:
+    category: str
+    source: GpuCategorySource
 
 
 class ModelUnavailableError(RuntimeError):
@@ -71,6 +118,29 @@ class RuntimePredictor:
     model_version: str
     feature_schema_version: str
     training_data_type: str
+    #: 학습 카테고리 → benchmark 대표값. 모르는 GPU의 proxy를 고르는 기준.
+    gpu_benchmark_profiles: Mapping[str, float] = field(default_factory=dict)
+
+    def resolve_gpu_category(self, gpu_model: str, benchmark_tokens_per_sec: object) -> GpuCategory:
+        """이 행의 예측에 쓸 gpu_model 카테고리. 모듈 설명의 규칙 그대로."""
+        known = self.categories.known_values(GPU_FEATURE)
+        if gpu_model in known:
+            return GpuCategory(gpu_model, GpuCategorySource.DIRECT)
+        candidates = {
+            name: value for name, value in self.gpu_benchmark_profiles.items()
+            if name in known and is_usable_benchmark(value)
+        }
+        if not candidates or not is_usable_benchmark(benchmark_tokens_per_sec):
+            # 근거가 없다. 대신 쓰지 않고 code_of가 예전처럼 거절하게 둔다.
+            return GpuCategory(gpu_model, GpuCategorySource.DIRECT)
+        measured = math.log(float(benchmark_tokens_per_sec))
+        proxy = min(
+            candidates,
+            # 로그 차이를 반올림해 부동소수점 잡음이 동점을 가르지 않게 한다.
+            key=lambda name: (round(abs(measured - math.log(candidates[name])), 9),
+                              candidates[name], name),
+        )
+        return GpuCategory(proxy, GpuCategorySource.BENCHMARK_PROXY)
 
     def predict(self, rows: Sequence[RuntimeFeatures]) -> tuple[float, ...]:
         """후보들의 예측 시간. 순서는 넣은 순서 그대로다.
@@ -81,8 +151,19 @@ class RuntimePredictor:
         if not rows:
             raise PredictionError("there are no GPU candidates to predict for")
 
-        frame = pd.DataFrame(
-            [row.as_mapping() for row in rows], columns=list(RUNTIME_FEATURE_NAMES))
+        mappings = []
+        for row in rows:
+            values = row.as_mapping()
+            resolved = self.resolve_gpu_category(
+                row.gpu_model, row.benchmark_tokens_per_sec)
+            if resolved.source is GpuCategorySource.BENCHMARK_PROXY:
+                logger.info(
+                    "runtime prediction gpu fallback actualModel=%r proxyCategory=%r "
+                    "benchmarkTokensPerSec=%s", row.gpu_model, resolved.category,
+                    row.benchmark_tokens_per_sec)
+            values[GPU_FEATURE] = resolved.category
+            mappings.append(values)
+        frame = pd.DataFrame(mappings, columns=list(RUNTIME_FEATURE_NAMES))
         for name in CATEGORICAL_FEATURE_NAMES:
             codes = frame[name].map(lambda value: self.categories.code_of(name, value))
             known = len(self.categories.known_values(name))
@@ -173,4 +254,21 @@ def load_runtime_predictor(models_directory: Path) -> RuntimePredictor:
         model_version=str(metadata.get("modelVersion", "unknown")),
         feature_schema_version=str(schema_version),
         training_data_type=str(metadata.get("trainingDataType", "unknown")),
+        gpu_benchmark_profiles=_benchmark_profiles(metadata),
     )
+
+
+def _benchmark_profiles(metadata: Mapping[str, object]) -> dict[str, float]:
+    """metadata의 대표값. 없으면 합성 부트스트랩 모델에 한해 생성기에서 복원한다.
+
+    값이 이상한 항목(숫자가 아니거나 0 이하)은 버린다. 대표값이 없는 것은 모르는
+    GPU를 예전처럼 거절한다는 뜻일 뿐, 모델을 못 쓴다는 뜻이 아니므로 로드는 실패시키지
+    않는다.
+    """
+    stored = metadata.get("gpuBenchmarkProfiles")
+    if isinstance(stored, dict):
+        return {str(name): float(value) for name, value in stored.items()
+                if is_usable_benchmark(value)}
+    if metadata.get("trainingDataType") == SYNTHETIC_BOOTSTRAP:
+        return synthetic_benchmark_profiles()
+    return {}

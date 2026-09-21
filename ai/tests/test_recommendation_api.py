@@ -170,13 +170,15 @@ class TestRequestsThatAreRefused:
             PATH, json=body(gpuCandidates=[MIDDLE, SLOW, duplicated])
         ).status_code == 422
 
-    def test_an_unknown_gpu_model(self, client):
+    def test_an_unknown_gpu_model_is_not_a_reason_to_refuse(self, client):
+        # 예외: 이름만 처음 보는 GPU는 benchmark가 가장 가까운 학습 카테고리로
+        # 예측된다(test_runtime_unknown_gpu.py). 모르는 기반 모델은 여전히 거절이다.
         unknown = dict(MIDDLE, gpuModel="A GPU From The Future")
 
         response = client.post(PATH, json=body(gpuCandidates=[unknown]))
 
-        assert response.status_code == 422
-        assert response.json()["detail"][0]["type"] == "unknown_category"
+        assert response.status_code == 200
+        assert response.json()["recommendedWorkerId"] == MIDDLE["workerId"]
 
     @pytest.mark.parametrize("field", ["modelId", "dockerImageId"])
     @pytest.mark.parametrize("bad", [0, -1])
