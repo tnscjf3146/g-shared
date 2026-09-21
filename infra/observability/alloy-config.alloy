@@ -84,6 +84,43 @@ loki.source.file "nginx_error" {
 	forward_to = [loki.process.add_level.receiver]
 }
 
+// 회전본. logrotate 가 `access.log.1`, `access.log.2.gz` 처럼 말아 둔다. 백엔드와 같은
+// 이유로 모은다 — 회전된 것에만 남아 있는 과거가 있다. 접근 592KB, 오류 36KB 로 작다.
+//
+// 압축 해제 설정이 컴포넌트 단위라 `.gz` 만 따로 둔다. 숫자만 붙은 첫 회전본(`.1`)은
+// 압축되지 않았으므로 해제 없이 읽는다.
+local.file_match "nginx_rotated_plain" {
+	path_targets = [{
+		__path__ = "/var/log/nginx/*.log.[0-9]",
+		service  = "nginx",
+		source   = "file",
+	}]
+}
+
+loki.source.file "nginx_rotated_plain" {
+	targets    = local.file_match.nginx_rotated_plain.targets
+	forward_to = [loki.write.default.receiver]
+}
+
+local.file_match "nginx_rotated_gz" {
+	path_targets = [{
+		__path__ = "/var/log/nginx/*.log.*.gz",
+		service  = "nginx",
+		source   = "file",
+	}]
+}
+
+loki.source.file "nginx_rotated_gz" {
+	targets    = local.file_match.nginx_rotated_gz.targets
+	forward_to = [loki.write.default.receiver]
+
+	decompression {
+		enabled       = true
+		format        = "gz"
+		initial_delay = "10s"
+	}
+}
+
 // ── 3. 백엔드 파일 로그 ─────────────────────────────────────────────────────
 // 도커 로그와 내용이 겹치지만 **중복이 아니다.** 도커 로그는 컨테이너를 다시 만들면
 // 사라지고, 이 파일은 50MB 씩 14일을 버틴다. 재배포 이전의 과거는 여기에만 남는다.
@@ -190,8 +227,8 @@ loki.process "backend_timestamp" {
 // 워커 식별자를 라벨로 만들지 않는 이유는 위 라벨 정책과 같다. 공급자가 늘수록
 // 값이 늘어난다. 파일 이름은 본문과 함께 보이므로 검색으로 찾는다.
 //
-// 오래된 파일을 넣을 때는 Loki 의 reject_old_samples_max_age(7일)에 걸려 조용히
-// 버려질 수 있다. 그때는 loki-config.yaml 의 그 값을 늘렸다가 되돌린다.
+// 오래된 파일을 넣을 때는 Loki 의 reject_old_samples_max_age 에 걸려 조용히 버려질 수
+// 있다. 지금은 보존 기간과 같은 30일이므로 그보다 오래된 로그를 넣을 때만 해당한다.
 local.file_match "workers" {
 	path_targets = [{
 		__path__ = "/var/log/gshared-workers/*.log",
