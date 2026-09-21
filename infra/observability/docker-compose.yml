@@ -58,7 +58,10 @@ services:
       - "127.0.0.1:3001:3000"
     environment:
       # 비워 두면 기동을 거부한다. admin/admin 으로 뜨는 것을 막기 위해서다.
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 를 .env 에 설정하라}
+      #
+      # `:?` 뒤는 셸 파라미터 확장의 오류 메시지 자리다. 한글을 넣으면 Compose 버전이나
+      # 로케일에 따라 깨질 여지가 있어 영문으로 둔다. 자세한 안내는 .env.example 에 있다.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     volumes:
