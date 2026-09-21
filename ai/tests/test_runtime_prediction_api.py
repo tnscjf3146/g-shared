@@ -179,13 +179,15 @@ class TestRequestsThatAreRefused:
 
         assert response.status_code == 422
 
-    def test_an_unknown_gpu_model_is_refused_rather_than_guessed(self, client):
+    def test_an_unknown_gpu_model_is_predicted_by_its_benchmark(self, client):
+        # 이름 하나 때문에 요청 전체를 거절하지 않는다. benchmark가 가장 가까운
+        # 학습 카테고리로 예측한다 -- 이름으로 짐작하지 않는다.
         unknown = dict(FAST, gpuModel="A GPU From The Future")
 
         response = client.post(PATH, json=body(gpuCandidates=[unknown]))
 
-        assert response.status_code == 422
-        assert response.json()["detail"][0]["type"] == "unknown_category"
+        assert response.status_code == 200
+        assert response.json()["predictions"][0]["predictedRuntimeSec"] > 0
 
     def test_an_unknown_base_model_is_refused(self, client):
         response = client.post(PATH, json=body(modelId=9999))

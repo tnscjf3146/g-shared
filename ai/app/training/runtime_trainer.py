@@ -33,6 +33,7 @@ from app.scheduler.runtime_features import (
     RUNTIME_FEATURE_NAMES,
     TARGET_NAME,
     CategoryMapping,
+    gpu_benchmark_profiles,
 )
 from app.training.baselines import compare
 from app.training.provenance import (
@@ -258,6 +259,9 @@ def train_runtime_model(
         "featureNames": list(RUNTIME_FEATURE_NAMES),
         "categoricalFeatureNames": list(CATEGORICAL_FEATURE_NAMES),
         "categoryMappings": categories.as_payload(),
+        # 본 적 없는 GPU를 benchmark가 가장 가까운 카테고리로 예측하는 기준.
+        # 예측기가 이것을 읽는다 -- runtime_predictor.resolve_gpu_category.
+        "gpuBenchmarkProfiles": gpu_benchmark_profiles(trainable),
         "target": TARGET_NAME,
         "targetTransform": TARGET_TRANSFORM,
         "trainedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

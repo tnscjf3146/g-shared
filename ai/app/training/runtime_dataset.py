@@ -79,6 +79,16 @@ _GPUS: tuple[_Gpu, ...] = (
 )
 
 
+def synthetic_benchmark_profiles() -> dict[str, float]:
+    """합성 생성기가 GPU마다 benchmark를 뽑은 분포의 중앙값.
+
+    각 GPU의 benchmark는 ``uniform(low, high)`` 에서 뽑으므로 중앙값은 두 끝의 가운데다.
+    ``gpuBenchmarkProfiles`` 를 metadata에 남기기 전에 이 생성기로 학습된 모델이 무엇을
+    봤는지는 이것으로 정확히 복원된다 -- 행을 다시 만들 필요가 없다.
+    """
+    return {gpu.name: (gpu.benchmark_low + gpu.benchmark_high) / 2 for gpu in _GPUS}
+
+
 @dataclass(frozen=True)
 class _Model:
     """SYNTHETIC. 파라미터 수는 모델의 사실이고, 여기서는 토큰당 비용을 정한다.

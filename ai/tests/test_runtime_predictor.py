@@ -101,14 +101,27 @@ class TestWhatIsRefused:
         with pytest.raises(PredictionError, match="no GPU candidates"):
             predictor.predict([])
 
-    def test_a_gpu_nobody_trained_on(self, predictor):
-        # 임의의 코드를 넣어 답을 만들지 않는다. 근거가 없기 때문이다.
+    def test_a_gpu_nobody_trained_on_is_predicted_by_its_benchmark(self, predictor):
+        # 이름은 처음 보지만 benchmark는 실측값이다. 그 값과 가장 가까운 학습
+        # 카테고리로만 예측한다(test_runtime_unknown_gpu.py). 임의의 코드는 넣지 않는다.
+        unknown = GpuCandidate(
+            worker_id="worker-x", gpu_model="A GPU From The Future",
+            vram_mb=99999, benchmark_tokens_per_sec=500000.0)
+
+        (seconds,) = predictor.predict(rows(unknown))
+
+        assert seconds > 0
+
+    def test_a_gpu_nobody_trained_on_without_profiles_is_refused(self, predictor):
+        # 대신 쓸 근거(카테고리별 benchmark 대표값)가 없으면 예전처럼 거절한다.
+        from dataclasses import replace
+        bare = replace(predictor, gpu_benchmark_profiles={})
         unknown = GpuCandidate(
             worker_id="worker-x", gpu_model="A GPU From The Future",
             vram_mb=99999, benchmark_tokens_per_sec=500000.0)
 
         with pytest.raises(UnknownCategoryError) as raised:
-            predictor.predict(rows(unknown))
+            bare.predict(rows(unknown))
 
         assert raised.value.feature == "gpu_model"
 
