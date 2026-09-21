@@ -67,8 +67,9 @@ local.file_match "nginx_access" {
 }
 
 loki.source.file "nginx_access" {
-	targets    = local.file_match.nginx_access.targets
-	forward_to = [loki.write.default.receiver]
+	targets = local.file_match.nginx_access.targets
+	// 레벨 추출은 건너뛴다(3번 함정). 다만 가림 단계는 반드시 거친다.
+	forward_to = [loki.process.redact.receiver]
 }
 
 local.file_match "nginx_error" {
@@ -297,5 +298,28 @@ loki.process "add_level" {
 		values = {level = "level"}
 	}
 
+	forward_to = [loki.process.redact.receiver]
+}
+
+// ── 쓰기 직전 가림 ───────────────────────────────────────────────────────────
+// **모든 경로가 여기를 지나 Loki 로 간다.** 한 곳에 두어야 새 수집원을 붙일 때 빠뜨리지 않는다.
+//
+// nginx 기본 접근 로그는 요청 줄을 통째로 남기는데, `/api/storage/**` 의 서명 URL 에는
+// `sig=` 가 들어 있다. 유효 시간이 다운로드 2시간, 업로드 1시간이다.
+//
+// 그래서 **로그를 볼 수 있는 사람이 그 줄을 복사해 그대로 쓰면** 데이터셋과 결과물을
+// 가져갈 수 있고, complete 이전 작업이라면 result.tar 를 덮어쓰는 PUT 까지 된다.
+// 백엔드가 서명과 봉인으로 막아 둔 것을 로그가 우회시켜 주는 셈이다.
+//
+// Grafana 를 /grafana 로 공개하면서 이것이 실제 문제가 됐다. nginx 쪽에서도 log_format
+// 으로 지우지만(infra/nginx/default), 한 겹으로 두지 않는다. 백엔드가 서명 URL 을
+// 로그에 남기는 경우도 여기서 함께 걸린다.
+loki.process "redact" {
 	forward_to = [loki.write.default.receiver]
+
+	// 캡처한 그룹만 바뀐다. 그래서 `sig=` 라는 이름은 남고 값만 사라진다.
+	stage.replace {
+		expression = "(?i)(?:sig|signature|token|access_token|x-amz-signature)=([^&\\s]+)"
+		replace    = "REDACTED"
+	}
 }
