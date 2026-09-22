@@ -296,12 +296,17 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                       @Param("failReason") String failReason, @Param("abortTxHash") String abortTxHash,
                       @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
-    /** 실패 보고를 환불 순찰에 남긴다. 이미 취소 중이어도 실패 원인을 기록한다. */
+    /** 실패 보고를 환불 순찰에 남긴다. 이미 취소 중이어도 실패 원인을 기록한다.
+     *  cancelReason 을 TRAINING_FAILED 로 선기록하는 이유(-219): 이 Job 은 나중에 키퍼/대조기가
+     *  CANCELLED 로 닫는데, 그때 COALESCE 가 비어 있으면 PROVIDER_TIMEOUT 등으로 오귀속된다 —
+     *  실제 원인(학습 실패)을 지금 박아 두면 마무리 주체와 무관하게 원인이 보존된다.
+     *  사용자가 먼저 취소한 경우(USER_REQUEST)는 COALESCE 가 지킨다. */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
                    j.failReason = COALESCE(j.failReason, :failReason),
+                   j.cancelReason = COALESCE(j.cancelReason, 'TRAINING_FAILED'),
                    j.actualRuntimeSec = COALESCE(j.actualRuntimeSec, :actualRuntimeSec),
                    j.reconciliationReason = :reconciliationReason
              WHERE j.id = :jobId
@@ -424,11 +429,18 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findRefundRecoveryCandidates();
 
-    /** 예치 정보와 미정산 상태를 확인한 종료 작업만 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다. */
+    /** 예치 정보와 미정산 상태를 확인한 종료 작업만 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다.
+     *  FAILED 에서 되돌아온 건은 cancelReason 에 TRAINING_FAILED 를 선기록한다(-219, holdFailureForRefund 와 같은 이유) —
+     *  키퍼가 나중에 닫아도 "실패해서 환불된 작업"이라는 원인이 남는다. CANCELLED 에서 온 건은 기존 사유 유지.
+     *  cancelReason 대입이 status 보다 먼저인 이유: MySQL 은 SET 을 왼쪽부터 차례로 적용해
+     *  뒤의 대입이 앞에서 바뀐 값을 본다 — status 를 먼저 바꾸면 CASE 의 FAILED 조건이 영원히 거짓. */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
-               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+               SET j.cancelReason = CASE WHEN j.status = com.gshared.back.job.domain.JobStatus.FAILED
+                                         THEN COALESCE(j.cancelReason, 'TRAINING_FAILED')
+                                         ELSE j.cancelReason END,
+                   j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
                    j.finishedAt = NULL,
                    j.reconciliationReason = :reason
              WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
