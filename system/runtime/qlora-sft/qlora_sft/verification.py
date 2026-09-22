@@ -12,7 +12,8 @@ what goes into the metrics.
 from __future__ import annotations
 
 import math
-from typing import Iterable, Mapping
+from dataclasses import dataclass
+from typing import Iterable, Mapping, Sequence
 
 #: The most points ``lossHistory`` carries. A long run logs a loss every
 #: optimizer step; a chart needs a few hundred at most, and the Backend reads
@@ -112,3 +113,94 @@ def snapshot_lora_parameters(model) -> dict:
             snapshot[name] = parameter.detach().to(
                 device="cpu", dtype=torch.float32, copy=True)
     return dict(sorted(snapshot.items()))
+
+
+# -- before against after ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TensorCheck:
+    """What one LoRA matrix looked like after training, against its baseline.
+
+    Counts, flags and one mean. Never the values themselves.
+    """
+
+    name: str
+    nan_count: int
+    inf_count: int
+    non_zero: bool
+    changed: bool
+    #: ``mean(|after - before|)`` -- how far training moved this matrix, not
+    #: how large its values are. ``None`` when the difference is not finite
+    #: (a NaN or Inf in the result makes the mean meaningless).
+    delta_mean_abs: float | None
+
+    @property
+    def finite(self) -> bool:
+        return self.nan_count == 0 and self.inf_count == 0
+
+
+def compare_tensor(name: str, before, after) -> TensorCheck:
+    """Compare one LoRA matrix with its pre-training copy.
+
+    **Changed means different from the baseline, not different from zero.**
+    ``lora_A`` starts random and ``lora_B`` starts at zero, so "non-zero" says
+    nothing about whether anything was learned.
+
+    **Exact comparison, no epsilon.** Both sides are the same parameter widened
+    to float32 the same way, so an untouched matrix compares bit-for-bit equal
+    and there is no rounding noise for a tolerance to absorb. Any optimizer
+    step that reaches a matrix changes some of its bits. A tolerance would only
+    add a way to call a small real update "unchanged".
+    """
+    import torch
+
+    current = after.detach().to(device="cpu", dtype=torch.float32, copy=True)
+    if tuple(current.shape) != tuple(before.shape):
+        raise ValueError(f"{name} changed shape during training")
+    nan_count = int(torch.isnan(current).sum().item())
+    inf_count = int(torch.isinf(current).sum().item())
+    delta = (current - before).abs()
+    if delta.numel() == 0:
+        delta_mean_abs = 0.0
+    elif bool(torch.isfinite(delta).all()):
+        delta_mean_abs = float(delta.mean().item())
+    else:
+        delta_mean_abs = None
+    return TensorCheck(
+        name=name,
+        nan_count=nan_count,
+        inf_count=inf_count,
+        non_zero=bool(torch.count_nonzero(current).item() > 0),
+        changed=not torch.equal(current, before),
+        delta_mean_abs=delta_mean_abs,
+    )
+
+
+def compare_lora_parameters(baseline: Mapping, model) -> list[TensorCheck]:
+    """Every baselined LoRA matrix against the same-named parameter now.
+
+    The set of LoRA parameters must be the one that was snapshotted: a matrix
+    that disappeared or appeared during training is a structural problem, not
+    something to average over, so it raises.
+    """
+    live = {name: parameter for name, parameter in model.named_parameters()
+            if is_lora_parameter(name, parameter)}
+    if set(live) != set(baseline):
+        missing = sorted(set(baseline) - set(live))
+        extra = sorted(set(live) - set(baseline))
+        raise ValueError(f"LoRA parameters differ from the baseline "
+                         f"(missing {len(missing)}, new {len(extra)})")
+    return [compare_tensor(name, baseline[name], live[name]) for name in sorted(baseline)]
+
+
+def aggregate(checks: Sequence[TensorCheck]) -> dict:
+    """Counts over every LoRA matrix. Nothing about the model is assumed:
+    the number of layers and target modules comes from what was compared."""
+    return {
+        "tensorCount": len(checks),
+        "changedTensorCount": sum(1 for c in checks if c.changed),
+        "nonZeroTensorCount": sum(1 for c in checks if c.non_zero),
+        "nanCount": sum(c.nan_count for c in checks),
+        "infCount": sum(c.inf_count for c in checks),
+    }
