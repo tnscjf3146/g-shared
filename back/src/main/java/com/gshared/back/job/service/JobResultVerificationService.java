@@ -14,7 +14,6 @@ import com.gshared.back.job.repository.JobRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -35,10 +34,11 @@ import java.util.Optional;
  * <p>검증 데이터가 없는 결과(legacy·metrics 누락·JSON 손상)는 에러가 아니라
  * {@code available=false + reason} — 화면이 이걸 "작업 실패"로 그리면 안 되기 때문이다(§5·§13).
  */
+// 의도적으로 @Transactional 없음 — DB 조회는 findByIdAndOwnerId 한 번뿐이고,
+// tar 훑기(파일 I/O 최대 수십 회)를 DB 커넥션을 잡은 채 하지 않기 위해서다.
 @Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class JobResultVerificationService {
 
     static final String METRICS_FILE = "training_metrics.json";
@@ -47,8 +47,10 @@ public class JobResultVerificationService {
     static final int MAX_LOSS_POINTS = 200;
     static final int MAX_LAYERS = 256;
     static final int MAX_MODULES_PER_LAYER = 32;
-    /** tar 훑기 상한 — entry 수와 파일 크기 모두. 결과 tar 는 파일 서너 개다. */
-    static final int MAX_TAR_ENTRIES = 10_000;
+    /** tar 훑기 상한 = readRange(파일 open) 횟수 상한. 결과 tar 는 파일 서너 개라 64 면 넉넉하다. */
+    static final int MAX_TAR_ENTRIES = 64;
+    /** GNU longname('L') 본문 상한 — 경로 하나 크기면 충분하다. */
+    static final int MAX_LONGNAME_BYTES = 4096;
 
     private static final int TAR_BLOCK = 512;
 
@@ -65,6 +67,11 @@ public class JobResultVerificationService {
         }
         if (job.getResultObjectKey() == null) {
             return JobResultVerificationResponse.unavailable("LEGACY_RESULT");
+        }
+        if (objectStorage.size(job.getResultObjectKey()).isEmpty()) {
+            // metrics 를 안 넣은 legacy(정상)와 결과 파일 자체가 사라진 운영 이상은 다른 사건이다
+            log.warn("[VERIFY] 결과 오브젝트가 스토리지에 없음 jobId={} key={}", jobId, job.getResultObjectKey());
+            return JobResultVerificationResponse.unavailable("RESULT_OBJECT_MISSING");
         }
         byte[] metrics;
         try {
@@ -132,15 +139,22 @@ public class JobResultVerificationService {
         List<LossPoint> out = new ArrayList<>(Math.min(n, MAX_LOSS_POINTS));
         if (n <= MAX_LOSS_POINTS) {
             for (JsonNode p : array) {
-                out.add(new LossPoint(p.path("step").asInt(), p.path("loss").asDouble()));
+                addLossPoint(out, p);
             }
             return out;
         }
         for (int i = 0; i < MAX_LOSS_POINTS; i++) {
-            JsonNode p = array.get(Math.round((float) i * (n - 1) / (MAX_LOSS_POINTS - 1)));
-            out.add(new LossPoint(p.path("step").asInt(), p.path("loss").asDouble()));
+            // double 산술 — float 는 n 이 수만이면 ULP 오차로 인덱스가 n 을 넘을 수 있다
+            addLossPoint(out, array.get((int) Math.round((double) i * (n - 1) / (MAX_LOSS_POINTS - 1))));
         }
         return out;
+    }
+
+    /** 숫자가 아닌 step/loss 는 조용히 0 으로 바꾸지 않고 그 점만 버린다 — 차트에 (0, 0.0) 이 섞이지 않게. */
+    private static void addLossPoint(List<LossPoint> out, JsonNode p) {
+        if (p != null && p.path("step").isNumber() && p.path("loss").isNumber()) {
+            out.add(new LossPoint(p.path("step").asInt(), p.path("loss").asDouble()));
+        }
     }
 
     private static Map<String, Map<String, Double>> readHeatmap(JsonNode node) {
@@ -208,6 +222,7 @@ public class JobResultVerificationService {
      */
     static Optional<byte[]> findTarEntry(RangeReader reader, String fileName, int maxBytes) {
         long offset = 0;
+        String pendingLongName = null;   // GNU 'L' entry 가 예고한 "다음 entry 의 진짜 이름"
         for (int entry = 0; entry < MAX_TAR_ENTRIES; entry++) {
             byte[] header = reader.read(offset, TAR_BLOCK).orElse(null);
             if (header == null || header.length < TAR_BLOCK || allZero(header)) {
@@ -218,9 +233,33 @@ public class JobResultVerificationService {
             if (!prefix.isEmpty()) {
                 name = prefix + "/" + name;
             }
+            if (pendingLongName != null) {
+                name = pendingLongName;   // 100자 초과 경로 — 헤더 name 은 잘려 있다
+                pendingLongName = null;
+            }
             long size = parseOctal(header, 124, 12);
+            if (size < 0) {
+                // 부호 있는 8진수로 length 를 음수로 만들면 readRange 가 예외로 터진다 — 조작된 archive
+                throw new MalformedArchiveException("negative entry size");
+            }
             char typeflag = (char) header[156];
             long dataBlocks = (size + TAR_BLOCK - 1) / TAR_BLOCK;
+
+            if (typeflag == 'L') {
+                // GNU longname: 본문이 다음 entry 의 실제 이름이다. 안 읽으면 정상 tar 를 legacy 로 오판한다
+                if (size > MAX_LONGNAME_BYTES) {
+                    throw new MalformedArchiveException("longname too large: " + size);
+                }
+                byte[] data = reader.read(offset + TAR_BLOCK, (int) size)
+                        .orElseThrow(() -> new MalformedArchiveException("truncated longname"));
+                pendingLongName = new String(data, StandardCharsets.UTF_8).trim().replace(" ", "");
+                int nul = pendingLongName.indexOf(' ');
+                if (nul >= 0) {
+                    pendingLongName = pendingLongName.substring(0, nul);
+                }
+                offset += TAR_BLOCK + dataBlocks * TAR_BLOCK;
+                continue;
+            }
 
             if ((typeflag == '0' || typeflag == 0) && isWantedEntry(name, fileName)) {
                 if (size > maxBytes) {
