@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ApiError } from '@/lib/fetcher'
 import { getJobResultVerification } from '../api'
 import { formatDuration } from '../format'
@@ -12,7 +12,9 @@ import { LoraWeightHeatmap } from './loraWeightHeatmap'
 // 섹션(요약·Loss·Adapter·Heatmap·무결성)은 각자 빈 상태를 가진다: 한 조각이 없어도 패널 전체가 죽지 않는다.
 // 검증 API 실패는 "정보를 못 불러온 것"이지 작업 실패가 아니다 — 문구도 그렇게 쓴다
 
-type State = { s: 'loading' } | { s: 'error' } | { s: 'ready'; v: ResultVerification }
+// forJob: 이 상태가 어느 작업의 응답인지 — jobId 가 바뀌면 렌더에서 로딩으로 취급해
+// 이전 작업의 검증 hash 를 새 작업의 resultHash 와 비교하는 거짓 "불일치"를 막는다
+type State = { s: 'loading' } | { s: 'error'; forJob: number } | { s: 'ready'; v: ResultVerification; forJob: number }
 
 /** 상단 요약 숫자 한 칸 — 값 크게, 라벨 작게 */
 function Stat({ value, label }: { value: string; label: string }) {
@@ -25,25 +27,35 @@ function Stat({ value, label }: { value: string; label: string }) {
 }
 
 const shortHash = (h: string) => (h.length > 18 ? `${h.slice(0, 8)}…${h.slice(-6)}` : h)
-/** 5.77s 처럼 초 미만이 의미 있는 짧은 실행은 소수 2자리, 그 외는 기존 포맷("1시간 13분") */
-const runtime = (sec: number) => (sec < 60 ? `${sec.toFixed(2)}s` : formatDuration(sec))
+/** 5.77초처럼 초 미만이 의미 있는 짧은 실행은 소수 2자리, 그 외는 기존 포맷("1시간 13분") */
+const runtime = (sec: number) => (sec < 60 ? `${sec.toFixed(2)}초` : formatDuration(sec))
 
 export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   const completed = job.status === 'COMPLETED'
   const [state, setState] = useState<State>({ s: 'loading' })
 
-  const load = useCallback(
-    () =>
-      getJobResultVerification(job.jobId)
-        .then((v) => setState({ s: 'ready', v }))
-        // 404 = 이 작업(또는 아직 API 가 없는 서버)에 검증 데이터가 없다 — 에러가 아니라 legacy 빈 상태.
-        // 백엔드 배포 전 실서버에서 이 탭이 "고장"처럼 보이지 않게 한다
-        .catch((e) => setState(e instanceof ApiError && e.status === 404 ? { s: 'ready', v: { available: false } } : { s: 'error' })),
-    [job.jobId],
-  )
+  const [retry, setRetry] = useState(0) // "다시 시도" 버튼 → effect 재실행
   useEffect(() => {
-    if (completed) void load() // COMPLETED 가 아니면 요청 자체를 보내지 않는다(가이드 §19)
-  }, [completed, load])
+    if (!completed) return // COMPLETED 가 아니면 요청 자체를 보내지 않는다(가이드 §19)
+    // 늦게 도착한 이전 요청의 응답은 버린다(ignore). 동기 setState 는 린트 금지라
+    // "로딩 리셋"은 렌더 쪽에서 forJob ≠ 현재 jobId 를 로딩으로 취급하는 것으로 대신한다
+    let ignore = false
+    const forJob = job.jobId
+    getJobResultVerification(forJob)
+      .then((v) => {
+        if (!ignore) setState({ s: 'ready', v, forJob })
+      })
+      // 404 = 이 작업(또는 아직 API 가 없는 서버)에 검증 데이터가 없다 — 에러가 아니라 legacy 빈 상태.
+      // 백엔드 배포 전 실서버에서 이 탭이 "고장"처럼 보이지 않게 한다
+      .catch((e) => {
+        if (!ignore) setState(e instanceof ApiError && e.status === 404 ? { s: 'ready', v: { available: false }, forJob } : { s: 'error', forJob })
+      })
+    return () => {
+      ignore = true
+    }
+  }, [completed, job.jobId, retry])
+  // 현재 jobId 의 응답이 아니면(방금 다른 작업으로 이동) 아직 로딩 중인 것
+  const view: State = state.s === 'loading' || state.forJob === job.jobId ? state : { s: 'loading' }
 
   if (!completed) {
     return (
@@ -52,7 +64,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
       </section>
     )
   }
-  if (state.s === 'loading') {
+  if (view.s === 'loading') {
     return (
       <section className="card flex flex-col gap-3 px-6 py-5" aria-busy>
         <div className="h-6 w-40 animate-pulse rounded bg-surface-1" />
@@ -60,7 +72,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
       </section>
     )
   }
-  if (state.s === 'error') {
+  if (view.s === 'error') {
     return (
       <section className="card flex flex-col items-start gap-3 px-6 py-5">
         <p className="text-[15px] text-dark">학습 결과 검증 정보를 불러오지 못했습니다.</p>
@@ -68,7 +80,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
           type="button"
           onClick={() => {
             setState({ s: 'loading' })
-            void load()
+            setRetry((n) => n + 1)
           }}
           className="text-[14px] text-primary hover:underline"
         >
@@ -78,7 +90,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
     )
   }
 
-  const { v } = state
+  const { v } = view
   if (!v.available) {
     return (
       <section className="card px-6 py-5">
@@ -169,7 +181,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
               {chainHash ? shortHash(chainHash) : '—'}
             </span>
             {hashMatch == null ? (
-              <span className="text-[13px] text-text-muted">Blockchain 검증 정보를 불러오지 못했습니다.</span>
+              <span className="text-[13px] text-text-muted">Blockchain 기록 hash 가 제공되지 않습니다.</span>
             ) : (
               <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${hashMatch ? 'bg-primary/12 text-primary-dark' : 'bg-danger-tint text-danger'}`}>{hashMatch ? '결과 Hash 일치' : '결과 Hash 불일치'}</span>
             )}

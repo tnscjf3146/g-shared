@@ -37,7 +37,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
         <table className="border-separate" style={{ borderSpacing: 3 }}>
           <thead>
             <tr>
-              <th aria-label="Layer" />
+              <td />
               {MODULES.map(([short, full]) => (
                 <th key={full} title={full} className="min-w-[36px] pb-1 text-center text-[11px] font-medium text-text-muted">
                   {short}
@@ -69,7 +69,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
                         aria-label={`Layer ${layer} ${full} weight delta ${v}`}
                         onClick={() => setSelected({ layer, module: full, value: v })}
                         className={`block h-5 w-9 rounded-[3px] transition-shadow ${on ? 'ring-2 ring-dark' : 'focus-visible:ring-2 focus-visible:ring-primary'}`}
-                        style={{ backgroundColor: `rgba(118, 185, 0, ${(0.08 + 0.88 * t).toFixed(3)})` }}
+                        style={{ backgroundColor: `color-mix(in srgb, var(--color-primary) ${Math.round(8 + 88 * t)}%, transparent)` }}
                       />
                     </td>
                   )

@@ -129,8 +129,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     ...(dataset ? [{ key: 'dataset' as TabKey, label: '데이터셋' }] : []),
     { key: 'cost', label: '비용 · 시간' },
     ...(hasResultTab ? [{ key: 'adapter' as TabKey, label: isTrain ? '어댑터' : '결과' }] : []),
-    // 학습 검증 — 학습(LoRA) 작업만. 완료 전에는 패널이 "완료 후 확인" 안내를 보여 준다
-    ...(isTrain ? [{ key: 'verify' as TabKey, label: '학습 검증' }] : []),
+    // 학습 검증 — 카탈로그로 확정된 학습(LoRA) 워크로드만. isTrain 의 결과물 휴리스틱(카탈로그 실패 대비)을
+    // 여기에 재사용하면 비학습 작업에도 탭이 뜨고 검증 API 를 불필요하게 부른다. 완료 전에는 패널이 "완료 후 확인" 안내
+    ...(workloadKind === 'TRAIN_LORA' ? [{ key: 'verify' as TabKey, label: '학습 검증' }] : []),
   ]
   const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'config'
 

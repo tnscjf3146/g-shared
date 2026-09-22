@@ -22,17 +22,18 @@ export function LossChart({ history }: { history: LossPoint[] }) {
     )
   }
 
-  const xs = history.map((p) => p.step)
-  const ys = history.map((p) => p.loss)
+  // step 오름차순을 보장하지 않는 응답 대비 — 정렬해서 그린다(라벨·캡션의 시작/최종 값도 이 순서 기준)
+  const sorted = [...history].sort((a, b) => a.step - b.step)
+  const xs = sorted.map((p) => p.step)
+  const ys = sorted.map((p) => p.loss)
   const xMin = Math.min(...xs)
   const xMax = Math.max(...xs)
   const yMin = Math.min(...ys)
   const yMax = Math.max(...ys)
-  const xSpan = xMax - xMin || 1 // 점이 1개면 가운데에 찍는다
-  const ySpan = yMax - yMin || 1
-  const px = (step: number) => PAD.left + ((step - xMin) / xSpan) * (W - PAD.left - PAD.right)
-  const py = (loss: number) => PAD.top + (1 - (loss - yMin) / ySpan) * (H - PAD.top - PAD.bottom)
-  const pts = history.map((p) => ({ ...p, x: px(p.step), y: py(p.loss) }))
+  // 점이 1개거나 값이 전부 같으면 축 중앙에 그린다(0 나눗셈 방지 겸)
+  const px = (step: number) => (xMax === xMin ? (PAD.left + W - PAD.right) / 2 : PAD.left + ((step - xMin) / (xMax - xMin)) * (W - PAD.left - PAD.right))
+  const py = (loss: number) => (yMax === yMin ? (PAD.top + H - PAD.bottom) / 2 : PAD.top + (1 - (loss - yMin) / (yMax - yMin)) * (H - PAD.top - PAD.bottom))
+  const pts = sorted.map((p) => ({ ...p, x: px(p.step), y: py(p.loss) }))
   const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
 
   // 포인터 x 좌표에서 가장 가까운 점 — viewBox 좌표로 환산해 찾는다
@@ -56,11 +57,14 @@ export function LossChart({ history }: { history: LossPoint[] }) {
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Loss curve — step ${xMin}에서 ${yMax.toFixed(3)}, step ${xMax}에서 ${history[history.length - 1].loss.toFixed(3)}`}
-        className="w-full touch-none select-none"
+        aria-label={`Loss curve — ${sorted.length}개 step, 시작 loss ${ys[0].toFixed(3)}, 최종 loss ${ys[ys.length - 1].toFixed(3)}`}
+        className="w-full touch-pan-y select-none"
         onPointerMove={(e) => pick(e.clientX)}
         onPointerDown={(e) => pick(e.clientX)}
-        onPointerLeave={() => setActive(null)}
+        onPointerLeave={(e) => {
+          // 터치는 탭 직후 pointerleave 가 따라와 툴팁이 바로 사라진다 — 마우스만 벗어남 처리
+          if (e.pointerType === 'mouse') setActive(null)
+        }}
       >
         {/* 옅은 가로 그리드 3줄 + 축 라벨 */}
         {[0, 0.5, 1].map((t) => {
@@ -100,7 +104,7 @@ export function LossChart({ history }: { history: LossPoint[] }) {
         )}
       </svg>
       <figcaption className="text-[12px] tabular-nums text-text-muted">
-        Step {xMin} → {xMax} · Loss {ys[0]} → {ys[ys.length - 1]}
+        Step {xMin} → {xMax} · Loss {ys[0].toFixed(3)} → {ys[ys.length - 1].toFixed(3)}
       </figcaption>
     </figure>
   )
