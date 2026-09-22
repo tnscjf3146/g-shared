@@ -20,3 +20,8 @@ system/**/worker-wallet.json
 # 운영 백업 산출물 (infra/backup/backup.sh). users 테이블에 이메일·비밀번호 해시·지갑 주소가 들어간다.
 backup-*.sql
 backup-*.tar.gz
+
+# 백엔드 파일 로그 (logback 이 컨테이너 안 /app/logs 에 쓰고 호스트로 마운트된다).
+# 운영 서버에 14일치(50MB 회전)가 쌓여 있는데 무시 규칙이 없어서 `git add .` 한 번에
+# 딸려 들어갈 수 있었다. 내용에도 요청 경로와 식별자가 들어간다.
+/logs/
