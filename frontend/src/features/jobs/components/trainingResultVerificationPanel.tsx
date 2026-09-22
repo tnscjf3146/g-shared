@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { ApiError } from '@/lib/fetcher'
 import { getJobResultVerification } from '../api'
 import { formatDuration } from '../format'
 import type { JobDetail, ResultVerification } from '../types'
@@ -35,7 +36,9 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
     () =>
       getJobResultVerification(job.jobId)
         .then((v) => setState({ s: 'ready', v }))
-        .catch(() => setState({ s: 'error' })),
+        // 404 = 이 작업(또는 아직 API 가 없는 서버)에 검증 데이터가 없다 — 에러가 아니라 legacy 빈 상태.
+        // 백엔드 배포 전 실서버에서 이 탭이 "고장"처럼 보이지 않게 한다
+        .catch((e) => setState(e instanceof ApiError && e.status === 404 ? { s: 'ready', v: { available: false } } : { s: 'error' })),
     [job.jobId],
   )
   useEffect(() => {
