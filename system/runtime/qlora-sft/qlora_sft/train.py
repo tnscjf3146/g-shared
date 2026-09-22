@@ -36,6 +36,7 @@ from .config import check_model_directory
 from .dataset import read_dataset
 from .events import EventWriter
 from .failures import ExitCode, TrainingFailure
+from .verification import loss_history
 
 #: 4-bit NF4 with double quantisation -- the configuration QLoRA describes.
 QUANT_TYPE = "nf4"
@@ -381,7 +382,26 @@ def _train(torch, model, tokenizer, encoded, request, total_steps, events) -> di
         "peakVramMb": int(torch.cuda.max_memory_allocated() // (1024 * 1024)),
         "peakVramReservedMb": int(
             torch.cuda.max_memory_reserved() // (1024 * 1024)),
+        **_loss_curve(trainer),
     }
+
+
+def _loss_curve(trainer) -> dict:
+    """``lossHistory`` and ``finalLoss`` from the Trainer's own log history.
+
+    A chart is not worth a failed job: if the history cannot be read, the run
+    still succeeds and the curve is simply empty. ``trainLoss`` keeps its
+    meaning -- the Trainer's average over the run -- and ``finalLoss`` is the
+    loss at the last logged optimizer step, which is a different number.
+    """
+    try:
+        history = loss_history(getattr(trainer.state, "log_history", None))
+    except Exception:
+        history = []
+    curve = {"lossHistory": history}
+    if history:
+        curve["finalLoss"] = history[-1]["loss"]
+    return curve
 
 
 class ProgressEvents:
