@@ -310,3 +310,51 @@ def verification_report(checks: Sequence[TensorCheck]) -> dict:
         "unmappedTensorCount": heatmap.unmapped_count,
         "layerModuleDeltaMagnitude": heatmap.cells,
     }
+
+
+# -- when the evidence itself cannot be produced ------------------------------
+
+#: The one error code this module writes. Uppercase, like the runtime's exit
+#: code names and the Backend's own ``VERIFICATION_*`` reasons.
+VERIFICATION_METADATA_UNAVAILABLE = "VERIFICATION_METADATA_UNAVAILABLE"
+
+
+def unavailable_report() -> dict:
+    """``verification`` when it could not be worked out.
+
+    ``valid`` is ``null``, not ``false``: the run was not found wanting, it
+    was not measured. A reader must not show this as a failed adapter.
+    """
+    return {
+        "schemaVersion": VERIFICATION_SCHEMA_VERSION,
+        "valid": None,
+        "errorCode": VERIFICATION_METADATA_UNAVAILABLE,
+    }
+
+
+def try_snapshot(model):
+    """:func:`snapshot_lora_parameters`, or ``None`` if it could not be taken.
+
+    The snapshot exists to describe the result. A job that trained correctly
+    is not failed because its description could not be prepared.
+    """
+    try:
+        return snapshot_lora_parameters(model)
+    except Exception:
+        return None
+
+
+def try_verification_report(baseline, model) -> dict:
+    """The full report, or :func:`unavailable_report` if any part of it failed.
+
+    This is only about the *description* of the result. Whether the adapter
+    itself is sound -- the files exist, it loads back onto the base model --
+    is still decided by the runner's output validation, with its own exit
+    code, exactly as before; nothing here can turn that failure into success.
+    """
+    if baseline is None:
+        return unavailable_report()
+    try:
+        return verification_report(compare_lora_parameters(baseline, model))
+    except Exception:
+        return unavailable_report()

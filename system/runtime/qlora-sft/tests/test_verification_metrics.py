@@ -96,10 +96,10 @@ class TestTheRunnerOrder(unittest.TestCase):
     def test_snapshot_then_train_then_compare(self):
         calls = self.calls()
 
-        self.assertLess(calls.index("_attach_adapters"), calls.index("snapshot_lora_parameters"))
-        self.assertLess(calls.index("snapshot_lora_parameters"), calls.index("_train"))
-        self.assertLess(calls.index("_train"), calls.index("compare_lora_parameters"))
-        self.assertLess(calls.index("compare_lora_parameters"), calls.index("_write_metrics"))
+        self.assertLess(calls.index("_attach_adapters"), calls.index("try_snapshot"))
+        self.assertLess(calls.index("try_snapshot"), calls.index("_train"))
+        self.assertLess(calls.index("_train"), calls.index("try_verification_report"))
+        self.assertLess(calls.index("try_verification_report"), calls.index("_write_metrics"))
 
     def test_the_metrics_key_is_verification(self):
         from qlora_sft import train
