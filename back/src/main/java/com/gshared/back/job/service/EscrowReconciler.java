@@ -45,6 +45,7 @@ public class EscrowReconciler {
     private final JobRepository jobRepository;
     private final WorkerRepository workerRepository;
     private final EscrowVerification escrow;
+    private final EscrowChainClient chainClient;
     private final EscrowProperties escrowProperties;
     private final WalletAuthProperties walletAuthProperties;
     private final EscrowSettlementService settlement;
@@ -103,8 +104,12 @@ public class EscrowReconciler {
         JobStatus db = job.getStatus();
 
         switch (chain.state()) {
+            // 원인 귀속(-218): 키퍼가 settleTimeout 을 보냈지만 영수증 확인을 대조기가 대신 마무리하면
+            // 같은 사건이 타이밍에 따라 SYSTEM_RECONCILED 로 오귀속된다. 체인의 deadline 이 지나 있었다면
+            // 이 취소는 시한 만료 정산(= 공급자 무응답)으로 추정한다. deadline 을 모르면 시스템 정리로.
             case CANCELLED -> settlement.cancelFromChain(jobId, null,
-                    "ESCROW_CANCELLED: refunded on-chain (found by reconciliation, db was " + db + ")");
+                    "ESCROW_CANCELLED: refunded on-chain (found by reconciliation, db was " + db + ")",
+                    deadlinePassed(chain) ? "PROVIDER_TIMEOUT" : "SYSTEM_RECONCILED");
 
             case COMPLETED -> {
                 if (db == JobStatus.RUNNING || db == JobStatus.CANCELLING) {
@@ -171,6 +176,14 @@ public class EscrowReconciler {
                 log.error("[RECONCILE] 종료 Job 대조 실패 jobId={}", job.getId(), e);
             }
         }
+    }
+
+    /** 체인 시각 기준으로 이 Job 의 deadline 이 지났는가. 체인 시각을 못 읽으면 모른다(false). */
+    private boolean deadlinePassed(EscrowChainClient.OnChainJob chain) {
+        if (chain.deadline() <= 0) {
+            return false;
+        }
+        return chainClient.latestBlockTimestamp().map(now -> now > chain.deadline()).orElse(false);
     }
 
     private String operatorOf(String workerId) {
