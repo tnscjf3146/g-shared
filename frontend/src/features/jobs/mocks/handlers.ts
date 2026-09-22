@@ -229,6 +229,38 @@ export const jobHandlers = [
     })
   }),
 
+  // 학습 결과 검증(Training_Result_Verification_Panel_Guide) — 백엔드 미구현이라 계약만 고정.
+  // jobId 로 결정적으로 생성(고정 fixture 규칙: 랜덤 금지). 작업 #8 은 legacy 시연용(available=false)
+  http.get(`${URL}/:jobId/result-verification`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (job.status !== 'COMPLETED') return HttpResponse.json({ available: false, reason: 'NOT_COMPLETED' })
+    if (job.jobId === 8) return HttpResponse.json({ available: false, reason: 'LEGACY_JOB' }) // 검증 데이터 이전의 작업
+    const totalSteps = 15
+    // 지수 감쇠 loss — jobId 로 시작값만 달리한다(3.0~3.5). 소수 4자리 고정
+    const startLoss = 3 + (job.jobId % 6) * 0.1
+    const lossHistory = Array.from({ length: totalSteps }, (_, i) => ({
+      step: i + 1,
+      loss: Math.round((1.9 + (startLoss - 1.9) * Math.exp(-i / 5)) * 1e4) / 1e4,
+    }))
+    const modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+    const layerModuleDeltaMagnitude = Object.fromEntries(
+      Array.from({ length: 28 }, (_, layer) => [
+        String(layer),
+        // 중간 층·q/v 가 크게 움직이는 전형적 LoRA 패턴을 결정적으로 흉내
+        Object.fromEntries(modules.map((m, mi) => [m, Math.round((0.00003 + 0.0002 * Math.exp(-((layer - 14) ** 2) / 90) * (1 + ((mi * 7 + layer) % 5) * 0.18)) * 1e7) / 1e7])),
+      ]),
+    )
+    return HttpResponse.json({
+      available: true,
+      training: { sampleCount: 240, totalSteps, finalLoss: lossHistory[totalSteps - 1].loss, actualRuntimeSec: job.actualRuntimeSec ?? 5.772, lossHistory },
+      adapter: { tensorCount: 392, changedTensorCount: 386, nonZeroTensorCount: 392, nanCount: 0, infCount: 0, valid: true, layerModuleDeltaMagnitude },
+      integrity: { resultHash: job.resultHash ?? `0x${String(job.jobId).padStart(64, 'a')}` }, // 상세의 resultHash(체인 제출값)와 일치 → "일치" 시연
+    })
+  }),
+
   http.post(URL, async ({ request }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
