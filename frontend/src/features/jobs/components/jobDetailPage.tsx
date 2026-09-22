@@ -15,10 +15,11 @@ import { FundPanel } from './fundPanel'
 import { shortWorkerId } from './jobDetailInline'
 import { JobProgress } from './jobProgress'
 import { JobDetailSkeleton } from './jobSkeleton'
+import { TrainingResultVerificationPanel } from './trainingResultVerificationPanel'
 
 // /jobs/[id] 본문(job.md §5) — 대시보드와 같은 톤: 배지·모션 없이 제목 줄 + 속성 카드. 진행 중 상태면 10초 폴링, 끝나면 중단. 이름(workload·모델·GPU)은 카탈로그로 id→이름
 const POLL_MS = 10_000
-type TabKey = 'config' | 'dataset' | 'cost' | 'adapter'
+type TabKey = 'config' | 'dataset' | 'cost' | 'adapter' | 'verify'
 
 // 한 건의 속성을 읽기 쉽게 — 표 대신 "라벨(작게·회색) 위, 값(크게·진하게)" 키-값 그리드. 테두리 대신 여백으로 구분
 function DetailGrid({ items }: { items: [string, React.ReactNode][] }) {
@@ -128,6 +129,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     ...(dataset ? [{ key: 'dataset' as TabKey, label: '데이터셋' }] : []),
     { key: 'cost', label: '비용 · 시간' },
     ...(hasResultTab ? [{ key: 'adapter' as TabKey, label: isTrain ? '어댑터' : '결과' }] : []),
+    // 학습 검증 — 학습(LoRA) 작업만. 완료 전에는 패널이 "완료 후 확인" 안내를 보여 준다
+    ...(isTrain ? [{ key: 'verify' as TabKey, label: '학습 검증' }] : []),
   ]
   const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : 'config'
 
@@ -330,6 +333,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                 </div>
               </section>
             ))}
+
+          {activeTab === 'verify' && <TrainingResultVerificationPanel job={job} />}
         </div>
       </div>
 

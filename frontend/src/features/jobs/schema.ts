@@ -218,3 +218,37 @@ export const adapterUploadCompleteSchema = z.object({ verified: z.boolean() })
 
 /** PATCH /jobs/{id}/adapter-name — 결과 어댑터 이름만 바꾼다(파일은 그대로). 입력 어댑터 업로드(/adapter-upload)와 다른 경로다 */
 export const renameAdapterRequestSchema = z.object({ adapterName: adapterNameSchema })
+
+// ── 학습 결과 검증(GET /jobs/{id}/result-verification) — Training_Result_Verification_Panel_Guide 계약.
+//    백엔드 미구현(2026-09-22) → MSW stub 으로 계약 고정. 프론트는 safetensors 를 직접 읽지 않는다 ──
+export const lossPointSchema = z.object({ step: z.number(), loss: z.number() })
+export const resultVerificationSchema = z.object({
+  available: z.boolean(), // false = 검증 데이터가 없는 legacy 작업(패널은 중립 빈 상태)
+  reason: z.optional(z.nullable(z.string())),
+  training: z.optional(
+    z.nullable(
+      z.object({
+        sampleCount: z.number(),
+        totalSteps: z.number(),
+        finalLoss: z.number(),
+        actualRuntimeSec: z.number(),
+        lossHistory: z.array(lossPointSchema), // 비어 있을 수 있다 — 차트 영역만 빈 상태, 패널은 유지
+      }),
+    ),
+  ),
+  adapter: z.optional(
+    z.nullable(
+      z.object({
+        tensorCount: z.number(),
+        changedTensorCount: z.number(),
+        nonZeroTensorCount: z.number(),
+        nanCount: z.number(),
+        infCount: z.number(),
+        valid: z.nullable(z.boolean()),
+        /** layer 번호("0"…"27") → module(q_proj…) → 학습 전후 LoRA weight 변화량 */
+        layerModuleDeltaMagnitude: z.record(z.string(), z.record(z.string(), z.number())),
+      }),
+    ),
+  ),
+  integrity: z.optional(z.nullable(z.object({ resultHash: z.string() }))),
+})

@@ -17,10 +17,11 @@ import {
   fundResponseSchema,
   jobDetailSchema,
   jobPageSchema,
+  resultVerificationSchema,
   renameAdapterRequestSchema,
   workloadSchema,
 } from './schema'
-import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus } from './types'
+import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus, ResultVerification } from './types'
 import * as z from 'zod/mini'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -123,4 +124,10 @@ export async function requestAdapterUpload(jobId: number): Promise<string> {
 export async function completeAdapterUpload(jobId: number, body: { sha256: string; sizeBytes: number }): Promise<boolean> {
   const res = adapterUploadCompleteSchema.parse(await post(`${JOBS_PATH}/${jobId}/adapter-upload/complete`, body))
   return res.verified
+}
+
+/** GET /jobs/{jobId}/result-verification — 학습 결과 검증 데이터(loss·adapter weight·hash).
+ *  COMPLETED 일 때만 부른다(화면이 보장). 검증 데이터가 없는 legacy 작업은 200 + available=false */
+export async function getJobResultVerification(jobId: number): Promise<ResultVerification> {
+  return resultVerificationSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/result-verification`))
 }

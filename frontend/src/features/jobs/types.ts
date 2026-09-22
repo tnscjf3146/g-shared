@@ -19,6 +19,8 @@ import type {
   jobStatusSchema,
   jobSpecSchema,
   jobSummarySchema,
+  lossPointSchema,
+  resultVerificationSchema,
   trainingConfigSchema,
   trainingModeSchema,
   workloadKindSchema,
@@ -51,3 +53,6 @@ export type FundResponse = z.infer<typeof fundResponseSchema>
 export type JobSummary = z.infer<typeof jobSummarySchema>
 export type JobPage = z.infer<typeof jobPageSchema>
 export type JobDetail = z.infer<typeof jobDetailSchema>
+
+export type LossPoint = z.infer<typeof lossPointSchema>
+export type ResultVerification = z.infer<typeof resultVerificationSchema>
