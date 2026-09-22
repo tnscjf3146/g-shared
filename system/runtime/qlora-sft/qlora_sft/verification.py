@@ -12,6 +12,7 @@ what goes into the metrics.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
@@ -204,3 +205,70 @@ def aggregate(checks: Sequence[TensorCheck]) -> dict:
         "nanCount": sum(c.nan_count for c in checks),
         "infCount": sum(c.inf_count for c in checks),
     }
+
+
+# -- layer x module ------------------------------------------------------------
+
+#: ``...layers.<n>.<any.path>.<module>.lora_<A|B>.<adapter>.weight`` -- the
+#: shape of every PEFT LoRA name on a decoder whose blocks live in a
+#: ``layers`` list, which is every model this runtime supports. Nothing about
+#: the number of layers or which modules exist is assumed.
+_LORA_NAME = re.compile(
+    r"(?:^|\.)layers\.(\d+)\.(?:[A-Za-z0-9_]+\.)*?([A-Za-z0-9_]+)\.lora_([AB])\.")
+
+#: Significant digits kept per heatmap cell. The values are small means
+#: (around 1e-4); six digits is far below what a colour scale can show.
+HEATMAP_DIGITS = 6
+
+
+def parse_lora_name(name: str) -> tuple[int, str, str] | None:
+    """``(layer, module, "A"|"B")`` from a LoRA parameter name, or ``None``."""
+    match = _LORA_NAME.search(name)
+    if match is None:
+        return None
+    return int(match.group(1)), match.group(2), match.group(3)
+
+
+@dataclass(frozen=True)
+class Heatmap:
+    #: ``{"0": {"q_proj": 0.000132, ...}, ...}`` -- layer index as a string
+    #: key (it is JSON), module short names. No raw parameter names.
+    cells: dict
+    #: A module in a layer with only one of A and B. LoRA always has both;
+    #: this is a broken adapter, and it is reported rather than averaged.
+    unpaired_count: int
+    #: LoRA matrices whose name does not fit the layer pattern. They are still
+    #: in the tensor counts; they just have no cell to go in.
+    unmapped_count: int
+
+
+def layer_module_delta_magnitude(checks: Sequence[TensorCheck]) -> Heatmap:
+    """One small number per (layer, module): the mean of A's and B's delta.
+
+    A cell is left out when either side's delta is not finite -- there is no
+    honest number to draw. Layers come out in numeric order, modules in name
+    order, so the same run always serialises the same way.
+    """
+    pairs: dict[tuple[int, str], dict[str, TensorCheck]] = {}
+    unmapped = 0
+    for check in checks:
+        parsed = parse_lora_name(check.name)
+        if parsed is None:
+            unmapped += 1
+            continue
+        layer, module, side = parsed
+        pairs.setdefault((layer, module), {})[side] = check
+
+    cells: dict[str, dict[str, float]] = {}
+    unpaired = 0
+    for (layer, module) in sorted(pairs):
+        sides = pairs[(layer, module)]
+        if set(sides) != {"A", "B"}:
+            unpaired += 1
+            continue
+        a, b = sides["A"].delta_mean_abs, sides["B"].delta_mean_abs
+        if a is None or b is None:
+            continue
+        value = float(f"{(a + b) / 2:.{HEATMAP_DIGITS}g}")
+        cells.setdefault(str(layer), {})[module] = value
+    return Heatmap(cells=cells, unpaired_count=unpaired, unmapped_count=unmapped)
