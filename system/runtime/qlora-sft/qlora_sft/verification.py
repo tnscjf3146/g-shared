@@ -69,3 +69,46 @@ def downsample(points: list, limit: int = MAX_LOSS_POINTS) -> list:
     # The same index rule the Backend uses when it trims a long history, so a
     # history that arrives already trimmed is not trimmed differently twice.
     return [points[round(i * (count - 1) / (limit - 1))] for i in range(limit)]
+
+
+# -- the LoRA weights before training -----------------------------------------
+
+#: How a LoRA parameter is named by PEFT, wherever it sits in the model:
+#: ``...q_proj.lora_A.default.weight``. The base model's own weights never
+#: carry these, so a name test is enough to leave all of them out.
+LORA_MARKERS = (".lora_A.", ".lora_B.")
+
+
+def is_lora_parameter(name: str, parameter) -> bool:
+    """A trainable LoRA A or B matrix. Base weights are frozen and unnamed so."""
+    return (bool(getattr(parameter, "requires_grad", False))
+            and any(marker in name for marker in LORA_MARKERS))
+
+
+def snapshot_lora_parameters(model) -> dict:
+    """A CPU copy of every trainable LoRA matrix, keyed by parameter name.
+
+    Taken after the adapters are attached and before the first optimizer step,
+    so a later comparison can tell *changed* from *non-zero*: PEFT initialises
+    ``lora_A`` randomly, so it is non-zero before anything has been learned.
+
+    * Only LoRA parameters. The base model is billions of values and is frozen;
+      copying it would cost gigabytes to learn nothing.
+    * One copy, straight to CPU float32, with ``copy=True`` so the snapshot
+      never aliases the live parameter -- not on the GPU, and not when the
+      parameter already happens to be a CPU float32 tensor (as in tests).
+      No GPU tensor is referenced once this returns.
+    * The key is the name from ``named_parameters()``. The same model object is
+      compared after training, so the names match one to one.
+
+    Nothing here is written anywhere. The snapshot lives in memory only for the
+    comparison.
+    """
+    import torch
+
+    snapshot = {}
+    for name, parameter in model.named_parameters():
+        if is_lora_parameter(name, parameter):
+            snapshot[name] = parameter.detach().to(
+                device="cpu", dtype=torch.float32, copy=True)
+    return dict(sorted(snapshot.items()))
