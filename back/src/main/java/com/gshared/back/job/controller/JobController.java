@@ -19,9 +19,11 @@ import com.gshared.back.job.dto.response.FundJobResponse;
 import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.dto.response.JobDetailResponse;
 import com.gshared.back.job.dto.response.JobPageResponse;
+import com.gshared.back.job.dto.response.JobResultVerificationResponse;
 import com.gshared.back.job.service.JobAdapterService;
 import com.gshared.back.job.service.JobDatasetService;
 import com.gshared.back.job.service.JobEstimateService;
+import com.gshared.back.job.service.JobResultVerificationService;
 import com.gshared.back.job.service.JobService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +43,7 @@ import java.util.List;
 public class JobController {
 
     private final JobService jobService;
+    private final JobResultVerificationService jobResultVerificationService;
     private final JobEstimateService jobEstimateService;
     private final JobDatasetService jobDatasetService;
     private final JobAdapterService jobAdapterService;
@@ -84,6 +87,18 @@ public class JobController {
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
         return ResponseEntity.ok(jobService.getJob(userDetails.getId(), jobId));
+    }
+
+    /**
+     * 학습 결과 검증 데이터(loss curve·LoRA weight 검증·hash) — Job 상세 '학습 검증' 탭 전용.
+     * COMPLETED 가 아니거나 검증 데이터가 없는 legacy 결과는 에러가 아니라 available=false 로 답한다.
+     */
+    @GetMapping("/{jobId}/result-verification")
+    public ResponseEntity<JobResultVerificationResponse> getResultVerification(
+            @PathVariable Long jobId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobResultVerificationService.getVerification(userDetails.getId(), jobId));
     }
 
     @GetMapping
