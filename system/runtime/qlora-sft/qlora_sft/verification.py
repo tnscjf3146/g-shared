@@ -272,3 +272,41 @@ def layer_module_delta_magnitude(checks: Sequence[TensorCheck]) -> Heatmap:
         value = float(f"{(a + b) / 2:.{HEATMAP_DIGITS}g}")
         cells.setdefault(str(layer), {})[module] = value
     return Heatmap(cells=cells, unpaired_count=unpaired, unmapped_count=unmapped)
+
+
+# -- what goes into training_metrics.json ------------------------------------
+
+#: Bumped when a field in ``verification`` changes meaning or is removed.
+#: Adding a field does not bump it; readers ignore what they do not know.
+VERIFICATION_SCHEMA_VERSION = 1
+
+
+def verification_report(checks: Sequence[TensorCheck]) -> dict:
+    """The ``verification`` object for ``training_metrics.json``.
+
+    ``valid`` is deliberately narrow. It is true when, and only when:
+
+    * there is a LoRA structure (``tensorCount > 0``) and every module in it
+      has both its A and its B matrix;
+    * at least one LoRA matrix differs from its pre-training copy;
+    * no LoRA value is NaN or Inf.
+
+    It says the weights were updated and are numbers. It says nothing about
+    whether the model got better, generalises, or learned the data -- nothing
+    here measures that.
+    """
+    summary = aggregate(checks)
+    heatmap = layer_module_delta_magnitude(checks)
+    valid = (summary["tensorCount"] > 0
+             and summary["changedTensorCount"] > 0
+             and summary["nanCount"] == 0
+             and summary["infCount"] == 0
+             and heatmap.unpaired_count == 0)
+    return {
+        "schemaVersion": VERIFICATION_SCHEMA_VERSION,
+        **summary,
+        "valid": valid,
+        "unpairedModuleCount": heatmap.unpaired_count,
+        "unmappedTensorCount": heatmap.unmapped_count,
+        "layerModuleDeltaMagnitude": heatmap.cells,
+    }

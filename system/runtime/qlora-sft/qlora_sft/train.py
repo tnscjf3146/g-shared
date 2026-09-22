@@ -36,7 +36,8 @@ from .config import check_model_directory
 from .dataset import read_dataset
 from .events import EventWriter
 from .failures import ExitCode, TrainingFailure
-from .verification import loss_history
+from .verification import (compare_lora_parameters, loss_history,
+                           snapshot_lora_parameters, verification_report)
 
 #: 4-bit NF4 with double quantisation -- the configuration QLoRA describes.
 QUANT_TYPE = "nf4"
@@ -113,8 +114,14 @@ def run(request, events=None) -> dict:
     started = time.monotonic()
     model = _load_quantized(torch, request.model_path)
     model = _attach_adapters(model, request.config, init_adapter)
+    # The LoRA weights as they are before the first optimizer step, so the
+    # result can be compared with them. CPU copies of the adapters only.
+    baseline = snapshot_lora_parameters(model)
     metrics = _train(torch, model, tokenizer, encoded, request,
                      total_steps, events)
+    metrics["verification"] = verification_report(
+        compare_lora_parameters(baseline, model))
+    del baseline
     _save(model, request.output_dir)
 
     # The model is dropped before the adapter is loaded back, so the check
