@@ -1,0 +1,756 @@
+{
+  "uid": "gshared-logs",
+  "title": "G-shared 로그",
+  "description": "문제별로 나눠 둔 로그 화면. 각 칸의 제목 옆 ⓘ 에 무엇을 보는 칸인지 적어 두었다.",
+  "tags": [
+    "gshared",
+    "logs"
+  ],
+  "timezone": "Asia/Seoul",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "30s",
+      "1m",
+      "5m",
+      "15m",
+      "1h"
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "한눈에 — 먼저 여기를 본다",
+      "id": 1,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "오류 (24시간)",
+      "id": 2,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "전 서비스의 level=error 건수. 평소 한 자리수다. 갑자기 늘면 아래 '오류 전체'로 내려간다.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({level=\"error\"}[24h]))",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "경고 이상 (24시간)",
+      "id": 3,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "warn 은 정상 운영에서도 나온다. 추세가 평소와 다른지만 본다.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "orange"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({level=~\"error|warn\"}[24h]))",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "주문 거절 (24시간)",
+      "id": 4,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "AI 스케줄러가 '돌릴 GPU 가 없다'며 거절한 횟수. 0 이 아니면 아래 칸을 본다.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 10,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "yellow"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"backend\"} |= `no_feasible_gpu` [24h]))",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "nginx 5xx (24시간)",
+      "id": 5,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "서버가 요청을 못 처리한 횟수. 배포 직후에는 잠깐 늘 수 있다.",
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 15,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "graphMode": "area",
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"nginx\"} |~ ` 5\\d\\d ` [24h]))",
+          "queryType": "instant"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "서비스별 유입량",
+      "id": 6,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "어느 서비스가 얼마나 찍는지. 한 서비스가 갑자기 치솟으면 그쪽에 뭔가 생긴 것이다.",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (service) (count_over_time({service=~\".+\"}[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "문제별",
+      "id": 7,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 12
+      },
+      "panels": []
+    },
+    {
+      "type": "logs",
+      "title": "① 오류 전체 — 지금 뭔가 이상할 때",
+      "id": 8,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "모든 서비스의 오류만 모은다. 원인을 모를 때 여기서 시작한다. 줄을 누르면 어느 서비스·파일인지 펼쳐진다.",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{level=\"error\"}",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "② 주문이 거절됐다 — no_feasible_gpu",
+      "id": 9,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "요구 사양을 맞추는 워커가 없어 매칭이 안 된 기록. 2026-09-18 에 6GB 워커들이 min_vram_mb=8192 에 걸려 무더기로 거절됐다. 어떤 사양을 요구했는지가 줄에 들어 있다.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"backend\"} |= `no_feasible_gpu`",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "③ 온체인 — [CHAIN]",
+      "id": 10,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "에스크로 예치·수락·정산·환불 등 체인과 주고받은 기록. 결제가 안 됐다는 신고가 오면 여기를 본다. TRANSACTION_FAILED 가 보이면 그 줄의 사유를 읽는다.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"backend\"} |= `[CHAIN]`",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "④ 워커 연결 — [WS]",
+      "id": 11,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "워커가 붙고 끊긴 기록. '워커가 온라인인데 작업이 안 온다'는 신고는 여기서 갈린다. 연결이 자주 끊기면 워커 쪽 네트워크 문제다.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"backend\"} |= `[WS]` |~ `(?i)(connect|disconnect|close)`",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "⑤ 작업 흐름 — JOB · MATCH · KEEPER · RECONCILE · REFUND",
+      "id": 12,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "작업 하나가 만들어져 매칭되고 정산되기까지의 흐름. 특정 작업만 보려면 이 칸의 질의 뒤에 |= `jobId=12` 를 덧붙인다.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"backend\"} |~ `\\[(JOB|MATCH|KEEPER|RECONCILE|REFUND)\\]`",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "보안",
+      "id": 13,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "외부 스캔과 오류 응답 추이",
+      "id": 14,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "404 는 대부분 외부 스캐너가 /wp-admin 같은 경로를 찍어 보는 것이다. 5xx 가 같이 치솟으면 스캔이 아니라 우리 문제다.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"nginx\"} |= ` 404 ` [$__interval]))",
+          "queryType": "range",
+          "legendFormat": "404 (없는 경로)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"nginx\"} |~ ` 5\\d\\d ` [$__interval]))",
+          "queryType": "range",
+          "legendFormat": "5xx (서버 오류)"
+        }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "인증 실패",
+      "id": 15,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "로그인·토큰 검증이 실패한 기록. 한 IP 에서 되풀이되면 대입 시도를 의심한다.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"backend\"} |~ `(?i)(unauthorized|401|invalid.?(token|password))`",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "배포 · 재배포로 사라지던 로그",
+      "id": 16,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 48
+      },
+      "panels": []
+    },
+    {
+      "type": "logs",
+      "title": "배포 기록 — Jenkins",
+      "id": 17,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "언제 무엇이 배포됐는지. 장애 시각과 맞춰 보면 배포가 원인인지 바로 갈린다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{service=\"jenkins\"}",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "같은 백엔드, 남는 범위가 다르다",
+      "id": 18,
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "description": "이 관제를 만든 이유가 그대로 보이는 칸이다. container 는 마지막 배포 시점부터만 있고 file 은 그 이전까지 거슬러 올라간다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 0,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"backend\", source=\"container\"}[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "container (재배포하면 사라짐)"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({service=\"backend\", source=\"file\"}[$__interval]))",
+          "queryType": "range",
+          "legendFormat": "file (14일 남음)"
+        }
+      ]
+    }
+  ]
+}
