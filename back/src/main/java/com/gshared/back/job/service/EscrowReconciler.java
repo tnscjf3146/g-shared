@@ -45,6 +45,7 @@ public class EscrowReconciler {
     private final JobRepository jobRepository;
     private final WorkerRepository workerRepository;
     private final EscrowVerification escrow;
+    private final EscrowChainClient chainClient;
     private final EscrowProperties escrowProperties;
     private final WalletAuthProperties walletAuthProperties;
     private final EscrowSettlementService settlement;
@@ -83,16 +84,22 @@ public class EscrowReconciler {
     // ── 온체인에 살아 있는 Job ──────────────────────────────────
 
     private void reconcileOpenJobs() {
-        for (Job job : jobRepository.findOpenOnChain()) {
+        List<Job> open = jobRepository.findOpenOnChain();
+        if (open.isEmpty()) {
+            return;
+        }
+        // 체인 시각은 순찰당 1회 — Job 수만큼 RPC 를 부르지 않는다(장애 복구 직후 N 이 커진다)
+        Optional<Long> chainNow = chainClient.latestBlockTimestamp();
+        for (Job job : open) {
             try {
-                reconcileOne(job);
+                reconcileOne(job, chainNow);
             } catch (Exception e) {
                 log.error("[RECONCILE] 대조 실패 jobId={} (다음 Job 계속)", job.getId(), e);
             }
         }
     }
 
-    private void reconcileOne(Job job) {
+    private void reconcileOne(Job job, Optional<Long> chainNow) {
         Optional<EscrowChainClient.OnChainJob> read =
                 escrow.stateOnChain(job.getEscrowContractAddress(), job.getEscrowJobId());
         if (read.isEmpty()) {
@@ -104,7 +111,8 @@ public class EscrowReconciler {
 
         switch (chain.state()) {
             case CANCELLED -> settlement.cancelFromChain(jobId, null,
-                    "ESCROW_CANCELLED: refunded on-chain (found by reconciliation, db was " + db + ")");
+                    "ESCROW_CANCELLED: refunded on-chain (found by reconciliation, db was " + db + ")",
+                    cancelReasonCode(chain, job.getAssignedWorkerId() != null, chainNow));
 
             case COMPLETED -> {
                 if (db == JobStatus.RUNNING || db == JobStatus.CANCELLING) {
@@ -171,6 +179,21 @@ public class EscrowReconciler {
                 log.error("[RECONCILE] 종료 Job 대조 실패 jobId={}", job.getId(), e);
             }
         }
+    }
+
+    /**
+     * 원인 귀속(-218): 키퍼가 settleTimeout 을 보냈지만 영수증 확인을 대조기가 대신 마무리하면
+     * 같은 사건이 타이밍에 따라 SYSTEM_RECONCILED 로 오귀속된다.
+     *
+     * <p>PROVIDER_TIMEOUT 은 <b>워커 손에 있던 작업이 deadline 을 넘긴 경우</b>에만 추정한다 —
+     * 컨트랙트상 사용자 cancelJob 은 FUNDED(배정 전)에서만 가능하므로, 배정 전 취소를
+     * deadline 경과 후 늦게 발견해도 사용자 취소를 "공급자 무응답"으로 바꾸지 않는다.
+     * 워커가 abortJob 직후 죽어 JOB_FAILED 를 못 보낸 잔여 케이스는 여전히 추정 오차다 —
+     * 정확 귀속은 JobCancelled 이벤트 sender 조회(후속)로만 가능. deadline·체인 시각을 모르면 시스템 정리로.
+     */
+    static String cancelReasonCode(EscrowChainClient.OnChainJob chain, boolean workerHeld, Optional<Long> chainNow) {
+        boolean expired = chain.deadline() > 0 && chainNow.map(now -> now > chain.deadline()).orElse(false);
+        return workerHeld && expired ? "PROVIDER_TIMEOUT" : "SYSTEM_RECONCILED";
     }
 
     private String operatorOf(String workerId) {

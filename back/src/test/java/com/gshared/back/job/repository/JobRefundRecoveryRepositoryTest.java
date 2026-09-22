@@ -53,14 +53,14 @@ class JobRefundRecoveryRepositoryTest {
     @Test
     void historicalFailureIsSelectedEvenWithoutReconciliationFlagOrAbortHash() {
         assertThat(jobs.findRefundRecoveryCandidates()).extracting(Job::getId).containsExactly(id);
-        assertThat(jobs.reopenForRefundIfTerminal(id, "refund pending")).isOne();
+        assertThat(jobs.reopenFailedForRefund(id, "refund pending")).isOne();
         Job held = jobs.findById(id).orElseThrow();
         assertThat(held.getStatus()).isEqualTo(JobStatus.CANCELLING);
         assertThat(held.getFinishedAt()).isNull();
         assertThat(held.getFailReason()).contains("RUNTIME_ERROR");
         assertThat(jobs.findOpenOnChain()).extracting(Job::getId).contains(id);
         assertThat(jobs.findFundedWithOwner()).isEmpty();
-        assertThat(jobs.reopenForRefundIfTerminal(id, "again")).isZero();
+        assertThat(jobs.reopenFailedForRefund(id, "again")).isZero();
     }
 
     @Test
@@ -68,7 +68,7 @@ class JobRefundRecoveryRepositoryTest {
         assertThat(jobs.confirmRefundIfTerminal(id, LocalDateTime.now())).isOne();
         assertThat(jobs.findRefundRecoveryCandidates()).isEmpty();
         assertThat(jobs.findById(id).orElseThrow().getStatus()).isEqualTo(JobStatus.FAILED);
-        assertThat(jobs.reopenForRefundIfTerminal(id, "again")).isZero();
+        assertThat(jobs.reopenFailedForRefund(id, "again")).isZero();
     }
 
     @Test
@@ -76,7 +76,7 @@ class JobRefundRecoveryRepositoryTest {
         Job existing = jobs.findById(id).orElseThrow();
         ReflectionTestUtils.setField(existing, "abortTxHash", "0xoriginal");
         jobs.flush();
-        jobs.reopenForRefundIfTerminal(id, "pending");
+        jobs.reopenFailedForRefund(id, "pending");
         assertThat(jobs.cancelByChainIfOpen(id, null, "PROVIDER_TIMEOUT", LocalDateTime.now())).isOne();
         Job closed = jobs.findById(id).orElseThrow();
         assertThat(closed.getStatus()).isEqualTo(JobStatus.CANCELLED);
@@ -160,7 +160,7 @@ class JobRefundRecoveryRepositoryTest {
         ReflectionTestUtils.setField(existing, "status", JobStatus.COMPLETED);
         jobs.flush();
         assertThat(jobs.findRefundRecoveryCandidates()).isEmpty();
-        assertThat(jobs.reopenForRefundIfTerminal(id, "pending")).isZero();
+        assertThat(jobs.reopenFailedForRefund(id, "pending")).isZero();
         assertThat(jobs.confirmRefundIfTerminal(id, LocalDateTime.now())).isZero();
     }
 }

@@ -353,6 +353,67 @@ class JobCancelReconciliationTest {
         assertThat(done.getCancelReason()).isEqualTo("USER_REQUEST");   // 원인 제공자는 사용자
     }
 
+    @Test
+    @DisplayName("학습 실패 후 환불 대기 건은 TRAINING_FAILED — 키퍼가 닫아도 원인이 학습 실패로 남는다 (-219)")
+    void heldFailureRecordsTrainingFailed() {
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+        assertThat(jobService.failJob(worker.getId(), job.getId(),
+                "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
+
+        Job held = reload();
+        assertThat(held.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(held.getCancelReason()).isEqualTo("TRAINING_FAILED");
+
+        // 이후 키퍼가 settleTimeout 으로 마무리해도 COALESCE 가 실제 원인을 지킨다 — PROVIDER_TIMEOUT 오귀속 방지
+        jobRepository.cancelByChainIfOpen(job.getId(), "0xsettle",
+                "PROVIDER_TIMEOUT", java.time.LocalDateTime.now());
+        Job done = reload();
+        assertThat(done.getStatus()).isEqualTo(JobStatus.CANCELLED);
+        assertThat(done.getCancelReason()).isEqualTo("TRAINING_FAILED");
+    }
+
+    @Test
+    @DisplayName("사용자 취소 중 실패가 겹쳐도 원인은 USER_REQUEST — TRAINING_FAILED 로 덮지 않는다")
+    void heldFailureKeepsUserReason() {
+        userCancels();   // CANCELLING + USER_REQUEST
+        when(escrow.cancelledOnChain(any(), any())).thenReturn(Verdict.CONTRADICTED);
+        assertThat(jobService.failJob(worker.getId(), job.getId(),
+                "RUNTIME_ERROR", "학습이 죽었다", null, 12.0)).isTrue();
+
+        assertThat(reload().getCancelReason()).isEqualTo("USER_REQUEST");
+    }
+
+    @Test
+    @DisplayName("환불 복구로 되살린 FAILED 건도 TRAINING_FAILED — 복구 후 키퍼가 닫아도 원인 보존 (-219)")
+    void refundRecoveryFromFailedRecordsTrainingFailed() {
+        jobRepository.failIfRunning(job.getId(), worker.getId(),
+                "CUDA_OOM: out of memory", null, 10.0, java.time.LocalDateTime.now());
+        em.clear();
+
+        int updated = jobRepository.reopenFailedForRefund(job.getId(), "REFUND_RECOVERY: test");
+
+        assertThat(updated).isEqualTo(1);
+        Job reopened = reload();
+        assertThat(reopened.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(reopened.getCancelReason()).isEqualTo("TRAINING_FAILED");
+    }
+
+    @Test
+    @DisplayName("수락 전 거절(rejectIfAssigned) 유래 FAILED 는 복구해도 TRAINING_FAILED 를 적지 않는다 — 학습한 적이 없다")
+    void refundRecoveryFromRejectedJobLeavesReasonNull() {
+        // setUp 은 RUNNING 까지 올린다 — 수락 전 거절을 재현하려면 startedAt 없는 ASSIGNED 가 필요하다
+        Job rejected = fundedOnlyJob();
+        jobRepository.assignIfFunded(rejected.getId(), worker.getId());
+        jobRepository.rejectIfAssigned(rejected.getId(), worker.getId(),
+                "PRICE_MISMATCH: 견적 불일치", java.time.LocalDateTime.now());
+        em.clear();
+
+        assertThat(jobRepository.reopenFailedForRefund(rejected.getId(), "REFUND_RECOVERY: test")).isEqualTo(1);
+        Job reopened = jobRepository.findById(rejected.getId()).orElseThrow();
+        assertThat(reopened.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(reopened.getCancelReason()).isNull();   // 이후 키퍼가 닫으면 PROVIDER_TIMEOUT — 워커 무응답이 맞다
+    }
+
     // ── FUNDED 취소 — 환불 확인 없이는 문을 닫지 않는다 ─────────────
 
     /** 배정 전(FUNDED) 에스크로 Job — 취소 경로 검증용. */

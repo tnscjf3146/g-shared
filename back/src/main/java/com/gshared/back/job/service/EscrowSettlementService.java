@@ -34,8 +34,12 @@ public class EscrowSettlementService {
 
     /** 호출자가 예치의 동일성과 미정산 상태를 체인에서 확인한 뒤 사용한다. */
     public boolean recoverRefund(Long jobId) {
-        int updated = jobRepository.reopenForRefundIfTerminal(jobId,
-                "REFUND_RECOVERY: deposit still locked; awaiting settleTimeout");
+        String reason = "REFUND_RECOVERY: deposit still locked; awaiting settleTimeout";
+        // FAILED/CANCELLED 는 되돌리는 규칙이 달라(FAILED 만 TRAINING_FAILED 선기록) 쿼리를 나눴다 — 상태당 하나만 맞는다
+        int updated = jobRepository.reopenFailedForRefund(jobId, reason);
+        if (updated == 0) {
+            updated = jobRepository.reopenCancelledForRefund(jobId, reason);
+        }
         if (updated > 0) {
             log.warn("[REFUND] 미환불 종료 작업을 CANCELLING으로 복구 jobId={}", jobId);
         }
@@ -70,13 +74,11 @@ public class EscrowSettlementService {
      * 체인이 CANCELLED 다(settleTimeout · cancelJob · abortJob 중 무엇이든 예치금은 돌아갔다).
      * 살아 있는 상태였다면 CANCELLED 로 확정하고, 워커 손에 있었다면 놓아주고 JOB_CANCEL 을 보낸다 --
      * 정산될 돈이 없으니 컨테이너를 더 돌릴 이유가 없다.
+     *
+     * @param cancelReasonCode 원인 제공자 코드 — 키퍼 시한 환불·deadline 경과 추정은 PROVIDER_TIMEOUT,
+     *                         그 외 대조기 발견은 SYSTEM_RECONCILED. 사용자가 먼저 취소했다면(USER_REQUEST)
+     *                         cancelByChainIfOpen 의 COALESCE 가 그것을 지킨다.
      */
-    public boolean cancelFromChain(Long jobId, String txHash, String reason) {
-        // 호출 맥락을 모르면 시스템 정리로 — 사용자가 먼저 취소했다면 COALESCE 가 USER_REQUEST 를 지킨다.
-        return cancelFromChain(jobId, txHash, reason, "SYSTEM_RECONCILED");
-    }
-
-    /** @param cancelReasonCode 원인 제공자 코드 — 키퍼 시한 환불은 PROVIDER_TIMEOUT, 대조기 발견은 SYSTEM_RECONCILED */
     public boolean cancelFromChain(Long jobId, String txHash, String reason, String cancelReasonCode) {
         Job before = jobRepository.findById(jobId).orElse(null);
         if (before == null) {

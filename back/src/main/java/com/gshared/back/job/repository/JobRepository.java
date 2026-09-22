@@ -296,12 +296,17 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                       @Param("failReason") String failReason, @Param("abortTxHash") String abortTxHash,
                       @Param("actualRuntimeSec") Double actualRuntimeSec, @Param("now") LocalDateTime now);
 
-    /** 실패 보고를 환불 순찰에 남긴다. 이미 취소 중이어도 실패 원인을 기록한다. */
+    /** 실패 보고를 환불 순찰에 남긴다. 이미 취소 중이어도 실패 원인을 기록한다.
+     *  cancelReason 을 TRAINING_FAILED 로 선기록하는 이유(-219): 이 Job 은 나중에 키퍼/대조기가
+     *  CANCELLED 로 닫는데, 그때 COALESCE 가 비어 있으면 PROVIDER_TIMEOUT 등으로 오귀속된다 —
+     *  실제 원인(학습 실패)을 지금 박아 두면 마무리 주체와 무관하게 원인이 보존된다.
+     *  사용자가 먼저 취소한 경우(USER_REQUEST)는 COALESCE 가 지킨다. */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
                SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
                    j.failReason = COALESCE(j.failReason, :failReason),
+                   j.cancelReason = COALESCE(j.cancelReason, 'TRAINING_FAILED'),
                    j.actualRuntimeSec = COALESCE(j.actualRuntimeSec, :actualRuntimeSec),
                    j.reconciliationReason = :reconciliationReason
              WHERE j.id = :jobId
@@ -424,7 +429,28 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findRefundRecoveryCandidates();
 
-    /** 예치 정보와 미정산 상태를 확인한 종료 작업만 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다. */
+    /**
+     * 예치 정보와 미정산 상태를 확인한 FAILED 작업을 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다.
+     * <p>cancelReason 선기록(-219): <b>실제로 학습이 시작됐던(startedAt 있음)</b> FAILED 만 TRAINING_FAILED 다 —
+     * 수락 전 거절(rejectIfAssigned)은 컨테이너가 뜬 적 없는 FAILED 라 학습 실패로 적으면 거짓이 된다.
+     * startedAt 은 이 문장이 갱신하지 않는 컬럼이라 CASE 가 SET 평가 순서(MySQL 좌→우)와 무관하게 안전하다.
+     * 사용자 선취소(USER_REQUEST)는 COALESCE 가 지킨다.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.cancelReason = CASE WHEN j.startedAt IS NOT NULL
+                                         THEN COALESCE(j.cancelReason, 'TRAINING_FAILED')
+                                         ELSE j.cancelReason END,
+                   j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.finishedAt = NULL,
+                   j.reconciliationReason = :reason
+             WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
+               AND j.status = com.gshared.back.job.domain.JobStatus.FAILED
+            """)
+    int reopenFailedForRefund(@Param("jobId") Long jobId, @Param("reason") String reason);
+
+    /** CANCELLED 판 — 이미 기록된 취소 사유(USER_REQUEST 등)를 그대로 두고 환불 순찰에만 되돌린다. */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
@@ -432,10 +458,9 @@ public interface JobRepository extends JpaRepository<Job, Long> {
                    j.finishedAt = NULL,
                    j.reconciliationReason = :reason
              WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
-               AND j.status IN (com.gshared.back.job.domain.JobStatus.FAILED,
-                                com.gshared.back.job.domain.JobStatus.CANCELLED)
+               AND j.status = com.gshared.back.job.domain.JobStatus.CANCELLED
             """)
-    int reopenForRefundIfTerminal(@Param("jobId") Long jobId, @Param("reason") String reason);
+    int reopenCancelledForRefund(@Param("jobId") Long jobId, @Param("reason") String reason);
 
     /** 실제 체인 CANCELLED를 확인한 종료 작업은 복구 순찰에서 제외한다. */
     @Modifying(clearAutomatically = true)
