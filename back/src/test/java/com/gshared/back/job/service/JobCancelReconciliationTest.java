@@ -390,12 +390,28 @@ class JobCancelReconciliationTest {
                 "CUDA_OOM: out of memory", null, 10.0, java.time.LocalDateTime.now());
         em.clear();
 
-        int updated = jobRepository.reopenForRefundIfTerminal(job.getId(), "REFUND_RECOVERY: test");
+        int updated = jobRepository.reopenFailedForRefund(job.getId(), "REFUND_RECOVERY: test");
 
         assertThat(updated).isEqualTo(1);
         Job reopened = reload();
         assertThat(reopened.getStatus()).isEqualTo(JobStatus.CANCELLING);
         assertThat(reopened.getCancelReason()).isEqualTo("TRAINING_FAILED");
+    }
+
+    @Test
+    @DisplayName("수락 전 거절(rejectIfAssigned) 유래 FAILED 는 복구해도 TRAINING_FAILED 를 적지 않는다 — 학습한 적이 없다")
+    void refundRecoveryFromRejectedJobLeavesReasonNull() {
+        // setUp 은 RUNNING 까지 올린다 — 수락 전 거절을 재현하려면 startedAt 없는 ASSIGNED 가 필요하다
+        Job rejected = fundedOnlyJob();
+        jobRepository.assignIfFunded(rejected.getId(), worker.getId());
+        jobRepository.rejectIfAssigned(rejected.getId(), worker.getId(),
+                "PRICE_MISMATCH: 견적 불일치", java.time.LocalDateTime.now());
+        em.clear();
+
+        assertThat(jobRepository.reopenFailedForRefund(rejected.getId(), "REFUND_RECOVERY: test")).isEqualTo(1);
+        Job reopened = jobRepository.findById(rejected.getId()).orElseThrow();
+        assertThat(reopened.getStatus()).isEqualTo(JobStatus.CANCELLING);
+        assertThat(reopened.getCancelReason()).isNull();   // 이후 키퍼가 닫으면 PROVIDER_TIMEOUT — 워커 무응답이 맞다
     }
 
     // ── FUNDED 취소 — 환불 확인 없이는 문을 닫지 않는다 ─────────────

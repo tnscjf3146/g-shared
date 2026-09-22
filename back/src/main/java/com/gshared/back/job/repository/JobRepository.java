@@ -429,25 +429,38 @@ public interface JobRepository extends JpaRepository<Job, Long> {
             """)
     java.util.List<Job> findRefundRecoveryCandidates();
 
-    /** 예치 정보와 미정산 상태를 확인한 종료 작업만 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다.
-     *  FAILED 에서 되돌아온 건은 cancelReason 에 TRAINING_FAILED 를 선기록한다(-219, holdFailureForRefund 와 같은 이유) —
-     *  키퍼가 나중에 닫아도 "실패해서 환불된 작업"이라는 원인이 남는다. CANCELLED 에서 온 건은 기존 사유 유지.
-     *  cancelReason 대입이 status 보다 먼저인 이유: MySQL 은 SET 을 왼쪽부터 차례로 적용해
-     *  뒤의 대입이 앞에서 바뀐 값을 본다 — status 를 먼저 바꾸면 CASE 의 FAILED 조건이 영원히 거짓. */
+    /**
+     * 예치 정보와 미정산 상태를 확인한 FAILED 작업을 환불 순찰에 되돌린다. 재실행/재매칭은 하지 않는다.
+     * <p>cancelReason 선기록(-219): <b>실제로 학습이 시작됐던(startedAt 있음)</b> FAILED 만 TRAINING_FAILED 다 —
+     * 수락 전 거절(rejectIfAssigned)은 컨테이너가 뜬 적 없는 FAILED 라 학습 실패로 적으면 거짓이 된다.
+     * startedAt 은 이 문장이 갱신하지 않는 컬럼이라 CASE 가 SET 평가 순서(MySQL 좌→우)와 무관하게 안전하다.
+     * 사용자 선취소(USER_REQUEST)는 COALESCE 가 지킨다.
+     */
     @Modifying(clearAutomatically = true)
     @Query("""
             UPDATE Job j
-               SET j.cancelReason = CASE WHEN j.status = com.gshared.back.job.domain.JobStatus.FAILED
+               SET j.cancelReason = CASE WHEN j.startedAt IS NOT NULL
                                          THEN COALESCE(j.cancelReason, 'TRAINING_FAILED')
                                          ELSE j.cancelReason END,
                    j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
                    j.finishedAt = NULL,
                    j.reconciliationReason = :reason
              WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
-               AND j.status IN (com.gshared.back.job.domain.JobStatus.FAILED,
-                                com.gshared.back.job.domain.JobStatus.CANCELLED)
+               AND j.status = com.gshared.back.job.domain.JobStatus.FAILED
             """)
-    int reopenForRefundIfTerminal(@Param("jobId") Long jobId, @Param("reason") String reason);
+    int reopenFailedForRefund(@Param("jobId") Long jobId, @Param("reason") String reason);
+
+    /** CANCELLED 판 — 이미 기록된 취소 사유(USER_REQUEST 등)를 그대로 두고 환불 순찰에만 되돌린다. */
+    @Modifying(clearAutomatically = true)
+    @Query("""
+            UPDATE Job j
+               SET j.status = com.gshared.back.job.domain.JobStatus.CANCELLING,
+                   j.finishedAt = NULL,
+                   j.reconciliationReason = :reason
+             WHERE j.id = :jobId AND j.refundConfirmedAt IS NULL
+               AND j.status = com.gshared.back.job.domain.JobStatus.CANCELLED
+            """)
+    int reopenCancelledForRefund(@Param("jobId") Long jobId, @Param("reason") String reason);
 
     /** 실제 체인 CANCELLED를 확인한 종료 작업은 복구 순찰에서 제외한다. */
     @Modifying(clearAutomatically = true)

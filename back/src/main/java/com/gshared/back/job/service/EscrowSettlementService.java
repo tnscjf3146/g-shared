@@ -34,8 +34,12 @@ public class EscrowSettlementService {
 
     /** 호출자가 예치의 동일성과 미정산 상태를 체인에서 확인한 뒤 사용한다. */
     public boolean recoverRefund(Long jobId) {
-        int updated = jobRepository.reopenForRefundIfTerminal(jobId,
-                "REFUND_RECOVERY: deposit still locked; awaiting settleTimeout");
+        String reason = "REFUND_RECOVERY: deposit still locked; awaiting settleTimeout";
+        // FAILED/CANCELLED 는 되돌리는 규칙이 달라(FAILED 만 TRAINING_FAILED 선기록) 쿼리를 나눴다 — 상태당 하나만 맞는다
+        int updated = jobRepository.reopenFailedForRefund(jobId, reason);
+        if (updated == 0) {
+            updated = jobRepository.reopenCancelledForRefund(jobId, reason);
+        }
         if (updated > 0) {
             log.warn("[REFUND] 미환불 종료 작업을 CANCELLING으로 복구 jobId={}", jobId);
         }
