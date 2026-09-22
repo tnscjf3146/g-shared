@@ -225,13 +225,15 @@ export const lossPointSchema = z.object({ step: z.number(), loss: z.number() })
 export const resultVerificationSchema = z.object({
   available: z.boolean(), // false = 검증 데이터가 없는 legacy 작업(패널은 중립 빈 상태)
   reason: z.optional(z.nullable(z.string())),
+  // 요약 숫자들은 nullable — 백엔드는 Runtime 이 준 키만 채우고 없는 값은 null 로 보낸다.
+  // 필수로 두면 키 하나 빠진 정상 응답이 zod 에서 통째로 죽어 화면이 ERROR 가 된다(제3자 리뷰 차단 #1)
   training: z.optional(
     z.nullable(
       z.object({
-        sampleCount: z.number(),
-        totalSteps: z.number(),
-        finalLoss: z.number(),
-        actualRuntimeSec: z.number(),
+        sampleCount: z.nullable(z.number()),
+        totalSteps: z.nullable(z.number()),
+        finalLoss: z.nullable(z.number()),
+        actualRuntimeSec: z.nullable(z.number()),
         lossHistory: z.array(lossPointSchema), // 비어 있을 수 있다 — 차트 영역만 빈 상태, 패널은 유지
       }),
     ),
@@ -239,11 +241,11 @@ export const resultVerificationSchema = z.object({
   adapter: z.optional(
     z.nullable(
       z.object({
-        tensorCount: z.number(),
-        changedTensorCount: z.number(),
-        nonZeroTensorCount: z.number(),
-        nanCount: z.number(),
-        infCount: z.number(),
+        tensorCount: z.nullable(z.number()),
+        changedTensorCount: z.nullable(z.number()),
+        nonZeroTensorCount: z.nullable(z.number()),
+        nanCount: z.nullable(z.number()),
+        infCount: z.nullable(z.number()),
         valid: z.nullable(z.boolean()),
         /** layer 번호("0"…"27") → module(q_proj…) → 학습 전후 LoRA weight 변화량 */
         layerModuleDeltaMagnitude: z.record(z.string(), z.record(z.string(), z.number())),

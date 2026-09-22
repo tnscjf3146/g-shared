@@ -121,10 +121,11 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
       {/* 상단 요약 4칸 */}
       {t ? (
         <div className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-4">
-          <Stat value={t.sampleCount.toLocaleString('ko-KR')} label="Samples" />
-          <Stat value={String(t.totalSteps)} label="Training Steps" />
-          <Stat value={runtime(t.actualRuntimeSec)} label="Runtime" />
-          <Stat value={t.finalLoss.toFixed(3)} label="Final Loss" />
+          {/* 백엔드는 Runtime 이 안 준 값을 null 로 보낸다 — 빠진 칸만 —, 패널은 유지 */}
+          <Stat value={t.sampleCount != null ? t.sampleCount.toLocaleString('ko-KR') : '—'} label="Samples" />
+          <Stat value={t.totalSteps != null ? String(t.totalSteps) : '—'} label="Training Steps" />
+          <Stat value={t.actualRuntimeSec != null ? runtime(t.actualRuntimeSec) : '—'} label="Runtime" />
+          <Stat value={t.finalLoss != null ? t.finalLoss.toFixed(3) : '—'} label="Final Loss" />
         </div>
       ) : (
         <p className="text-[14px] text-text-muted">학습 요약 데이터가 제공되지 않습니다.</p>
@@ -141,16 +142,18 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
           {a ? (
             <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                <Stat value={a.tensorCount.toLocaleString('ko-KR')} label="LoRA Tensors" />
-                <Stat value={a.changedTensorCount.toLocaleString('ko-KR')} label="Changed" />
+                <Stat value={a.tensorCount != null ? a.tensorCount.toLocaleString('ko-KR') : '—'} label="LoRA Tensors" />
+                <Stat value={a.changedTensorCount != null ? a.changedTensorCount.toLocaleString('ko-KR') : '—'} label="Changed" />
                 {/* NaN·Inf 는 0 이 정상 — 0 이 아니면 숫자 자체를 빨갛게(색+텍스트 병행) */}
-                <Stat value={String(a.nanCount)} label={a.nanCount > 0 ? 'NaN (비정상)' : 'NaN'} />
-                <Stat value={String(a.infCount)} label={a.infCount > 0 ? 'Inf (비정상)' : 'Inf'} />
+                <Stat value={a.nanCount != null ? String(a.nanCount) : '—'} label={(a.nanCount ?? 0) > 0 ? 'NaN (비정상)' : 'NaN'} />
+                <Stat value={a.infCount != null ? String(a.infCount) : '—'} label={(a.infCount ?? 0) > 0 ? 'Inf (비정상)' : 'Inf'} />
               </div>
-              <p className={`text-[13px] ${a.valid === false || a.nanCount > 0 || a.infCount > 0 ? 'text-danger' : 'text-text-muted'}`}>
+              <p className={`text-[13px] ${a.valid === false || (a.nanCount ?? 0) > 0 || (a.infCount ?? 0) > 0 ? 'text-danger' : 'text-text-muted'}`}>
                 {a.valid === false
                   ? '검증 이상 발견 — tensor 수치에 비정상 값이 있습니다.'
-                  : `${a.changedTensorCount.toLocaleString('ko-KR')}/${a.tensorCount.toLocaleString('ko-KR')} tensor 가 학습으로 변경됐고, 비정상 수치(NaN·Inf)는 없습니다.`}
+                  : a.changedTensorCount != null && a.tensorCount != null
+                    ? `${a.changedTensorCount.toLocaleString('ko-KR')}/${a.tensorCount.toLocaleString('ko-KR')} tensor 가 학습으로 변경됐고, 비정상 수치(NaN·Inf)는 없습니다.`
+                    : '구조 검증에서 비정상 수치(NaN·Inf)는 발견되지 않았습니다.'}
               </p>
             </>
           ) : (
