@@ -18,6 +18,7 @@ import type {
   jobDetailSchema,
   jobOnchainSchema,
   jobPageSchema,
+  jobRealtimeEventSchema,
   jobStatusSchema,
   jobSpecSchema,
   jobSummarySchema,
@@ -61,3 +62,4 @@ export type ResultVerification = z.infer<typeof resultVerificationSchema>
 
 export type JobOnchain = z.infer<typeof jobOnchainSchema>
 export type EscrowState = z.infer<typeof escrowStateSchema>
+export type JobRealtimeEvent = z.infer<typeof jobRealtimeEventSchema>

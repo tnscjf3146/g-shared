@@ -255,6 +255,21 @@ export const resultVerificationSchema = z.object({
   integrity: z.optional(z.nullable(z.object({ resultHash: z.string() }))),
 })
 
+/** SSE `GET /jobs/{id}/events` 가 흘려보내는 이벤트 (back `JobRealtimeEvent`).
+ *  프레임은 `event: <type>` + `data: <json>` 인데, type 은 payload 안에도 있어 payload 만 읽는다.
+ *  네트워크 경계이므로 여기서도 검증한다 — 모르는 형태면 그 프레임만 버리고 스트림은 유지한다. */
+export const jobRealtimeEventSchema = z.object({
+  type: z.enum(['JOB_PROGRESS', 'JOB_COMPLETED', 'JOB_FAILED', 'JOB_CANCELLED']),
+  jobId: z.number(),
+  status: z.optional(z.nullable(jobStatusSchema)),
+  progress: z.optional(z.nullable(z.number())),
+  currentStep: z.optional(z.nullable(z.number())),
+  totalSteps: z.optional(z.nullable(z.number())),
+  resultAvailable: z.optional(z.nullable(z.boolean())),
+  reason: z.optional(z.nullable(z.string())),
+  updatedAt: z.optional(z.nullable(z.string())),
+})
+
 /** 에스크로 컨트랙트가 말하는 Job 상태 5단계 (back `EscrowJobState`). NONE = 그 슬롯이 비어 있음 */
 export const escrowStateSchema = z.enum(['NONE', 'FUNDED', 'ASSIGNED', 'COMPLETED', 'CANCELLED'])
 /** 온체인 거래 종류 — 예치 / 워커 수락 / 결과 제출 / 취소 */
