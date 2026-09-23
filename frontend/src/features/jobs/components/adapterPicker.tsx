@@ -31,11 +31,11 @@ export function AdapterPicker({ catalog, value, onChange, describedBy }: Props) 
   if (rows === 'loading') return <div aria-busy aria-label="완료된 학습 작업 불러오는 중" className="h-10 animate-pulse rounded-md bg-neutral-tint" />
   if (rows === 'error')
     return (
-      <p role="alert" className="text-[13px] text-danger">
+      <p role="alert" className="text-caption text-danger">
         완료된 학습 작업을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.
       </p>
     )
-  if (rows.length === 0) return <p className="text-[13px] text-text-muted">완료된 학습 작업이 아직 없습니다. 처음부터 학습하면 v1 어댑터가 만들어집니다.</p>
+  if (rows.length === 0) return <p className="text-caption text-text-muted">완료된 학습 작업이 아직 없습니다. 처음부터 학습하면 v1 어댑터가 만들어집니다.</p>
 
   return (
     <Select

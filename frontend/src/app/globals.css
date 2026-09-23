@@ -105,6 +105,13 @@
   --text-label-sm--line-height: 1.4;
   --text-caption: 0.875rem; /* 14 */
   --text-caption--line-height: 1.4;
+  /* 램프 아래쪽 2단 — 없어서 화면마다 11~13px 임의값이 생겼다. 용도를 좁혀 정식화한다.
+     hint: 입력 보조 설명·배지 / micro: 표 축 라벨·아이콘 옆 글자처럼 더 줄일 수밖에 없는 자리.
+     본문에는 쓰지 않는다(가독성 하한). */
+  --text-hint: 0.75rem; /* 12 */
+  --text-hint--line-height: 1.45;
+  --text-micro: 0.6875rem; /* 11 */
+  --text-micro--line-height: 1.35;
 
   /* 등장 모션 키프레임 → animate-enter 등으로 생성 */
   --animate-enter: enter-float var(--duration-l2) var(--ease-out-expo) both;

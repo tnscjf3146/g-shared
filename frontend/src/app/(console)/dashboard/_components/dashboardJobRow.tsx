@@ -52,17 +52,17 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
           ) : (
             <span aria-hidden className="size-7 flex-none" /> // 펼침 불가여도 제목 시작 위치는 같게
           )}
-          <h3 className={`truncate text-[17px] font-bold tracking-heading ${cancelled ? strike : 'text-dark'}`}>
+          <h3 className={`truncate text-body font-bold tracking-heading ${cancelled ? strike : 'text-dark'}`}>
             <span className="tabular-nums">{index}.</span> {workloadName}
           </h3>
         </div>
         {/* 다른 상태와 같은 17px 글자. 완료는 검정(배경 회색으로 구분), 실패는 빨강, 취소됨은 회색+취소선 */}
         <div className="hidden md:block">
-          <span className={`text-[17px] font-medium ${failed ? 'text-danger' : cancelled ? strike : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason, job.cancelReason).label}</span>
+          <span className={`text-body font-medium ${failed ? 'text-danger' : cancelled ? strike : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason, job.cancelReason).label}</span>
         </div>
         <div className={`hidden md:block ${strike}`}>
-          <div className="text-[14px] text-text-muted">생성</div>
-          <div className={`text-[17px] font-medium tabular-nums ${cancelled ? '' : 'text-dark'}`}>{formatDateTime(job.createdAt)}</div>
+          <div className="text-caption text-text-muted">생성</div>
+          <div className={`text-body font-medium tabular-nums ${cancelled ? '' : 'text-dark'}`}>{formatDateTime(job.createdAt)}</div>
         </div>
         {/* 상세는 항상 왼쪽 칸, 취소는 오른쪽 칸(없으면 빈 칸) — 줄마다 상세 위치가 같도록 */}
         <div onClick={(e) => e.stopPropagation()} className="grid grid-cols-2 gap-2">

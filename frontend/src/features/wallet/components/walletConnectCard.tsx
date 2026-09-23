@@ -45,13 +45,13 @@ export function WalletConnectCard({ onLinked }: { onLinked: (address: string) =>
     <section className="card animate-enter flex w-[520px] max-w-full flex-col gap-6 p-10">
       <div className="flex flex-col gap-2">
         <h2 className="text-h2 font-bold tracking-heading text-dark">지갑 연결</h2>
-        <p className="text-[15px] text-text-muted">
+        <p className="text-label-sm text-text-muted">
           MetaMask 지갑을 계정에 연결하면 GPU 작업 예치와 정산에 쓸 수 있습니다. 서명만 하며, 가스비는 들지 않습니다.
         </p>
       </div>
 
       {error && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {error}
         </p>
       )}
@@ -63,7 +63,7 @@ export function WalletConnectCard({ onLinked }: { onLinked: (address: string) =>
         </Button>
       ) : (
         <div className="flex flex-col gap-3">
-          <p className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
+          <p className="rounded-md bg-neutral-tint px-4 py-3 text-caption text-dark">
             MetaMask 가 설치되어 있지 않습니다. 설치 후 MetaMask 안에서 지갑을 만들고 이 페이지로 돌아와 연결해 주세요.
           </p>
           <a href="https://metamask.io/download" target="_blank" rel="noreferrer" className="btn btn-lg btn-primary w-full">
@@ -72,7 +72,7 @@ export function WalletConnectCard({ onLinked }: { onLinked: (address: string) =>
         </div>
       )}
 
-      <p className="text-[12px] text-text-muted">
+      <p className="text-hint text-text-muted">
         네트워크: {SSAFY_CHAIN.name} (Chain ID {SSAFY_CHAIN.id}). 다른 네트워크에 있으면 연결 중 자동으로 전환을 요청합니다. 모바일은 MetaMask 앱
         브라우저에서 이용해 주세요.
       </p>

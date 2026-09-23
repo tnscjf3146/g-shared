@@ -93,7 +93,7 @@ export function DashboardSidebar() {
     }
     window.dispatchEvent(new Event('storage')) // 같은 탭은 storage 이벤트가 안 나므로 직접 알림
   }
-  const label = (text: string) => <span className={`whitespace-nowrap text-[16px] transition-opacity ${open ? 'opacity-100 delay-100' : 'pointer-events-none opacity-0'}`}>{text}</span>
+  const label = (text: string) => <span className={`whitespace-nowrap text-label-sm transition-opacity ${open ? 'opacity-100 delay-100' : 'pointer-events-none opacity-0'}`}>{text}</span>
   const item = 'flex h-10 items-center gap-3 rounded-md px-[9px] text-dark transition-colors hover:bg-black/5'
 
   return (

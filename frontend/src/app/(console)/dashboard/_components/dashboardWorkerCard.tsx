@@ -27,7 +27,7 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_auto] md:items-center md:gap-6">
         {/* 이름 + 등록해제 — 좁을 땐 한 줄, 넓을 땐 이름만(버튼은 grid 마지막 칸으로) */}
         <div className="flex items-center justify-between gap-4 md:contents">
-          <h3 className="truncate text-[17px] font-bold tracking-heading text-dark" title={worker.workerId}>
+          <h3 className="truncate text-body font-bold tracking-heading text-dark" title={worker.workerId}>
             <span className="tabular-nums">{index}.</span> {worker.deviceName}
           </h3>
           <Button variant="ghost" size="sm" className="flex-none md:order-last" disabled={worker.status === 'RUNNING'} title={worker.status === 'RUNNING' ? '작업이 끝난 뒤 해제할 수 있습니다' : undefined} onClick={() => onUnlink(worker)}>
@@ -38,8 +38,8 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
           <OperatorApproval worker={worker} onWork={onWork} />
         </div>
         <div className="min-w-0">
-          <div className="text-[14px] text-text-muted">OS</div>
-          <div className="truncate text-[17px] font-medium text-dark" title={worker.osVersion ?? undefined}>{worker.osVersion ?? '—'}</div>
+          <div className="text-caption text-text-muted">OS</div>
+          <div className="truncate text-body font-medium text-dark" title={worker.osVersion ?? undefined}>{worker.osVersion ?? '—'}</div>
         </div>
       </div>
 

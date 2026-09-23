@@ -9,7 +9,7 @@ export function JobProgress({ job, compact = false }: { job: Pick<JobDetail, 'st
   return (
     <div className={`flex items-center gap-3 ${compact ? 'w-40' : 'w-full'}`}>
       <ProgressBar value={pct} />
-      <span className="shrink-0 text-[13px] font-medium tabular-nums text-text-muted">
+      <span className="shrink-0 text-caption font-medium tabular-nums text-text-muted">
         {compact ? '' : epoch}
         {pct}%
       </span>

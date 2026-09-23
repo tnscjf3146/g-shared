@@ -42,7 +42,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
     <>
       <header className="flex flex-col gap-1">
         <h2 className="text-h2 font-bold tracking-heading text-dark">3. {copy.title}</h2>
-        <p className="text-[15px] text-text-muted">{copy.desc}</p>
+        <p className="text-label-sm text-text-muted">{copy.desc}</p>
       </header>
 
       <FileDrop
@@ -55,17 +55,17 @@ export function StepDataset({ catalog, state, onChange }: Props) {
 
       {/* 분석 상태 — 진행 중 / 결과 / 실패 */}
       {state.analyzing && (
-        <p role="status" className="text-[13px] tabular-nums text-text-muted">
+        <p role="status" className="text-caption tabular-nums text-text-muted">
           분석 중… {state.datasetFile ? `${Math.min(100, Math.round((progress / Math.max(1, state.datasetFile.size)) * 100))}%` : ''}
         </p>
       )}
       {failure && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {failure}
         </p>
       )}
       {meta && !state.analyzing && (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-hairline bg-surface-1 p-4 text-[13px] tabular-nums md:grid-cols-5">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-hairline bg-surface-1 p-4 text-caption tabular-nums md:grid-cols-5">
           {(
             [
               ['크기', formatBytes(meta.sizeBytes)],
@@ -80,7 +80,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
               <dd className="font-semibold text-dark">{v}</dd>
             </div>
           ))}
-          <p className="col-span-full text-[12px] text-text-muted">토큰 수는 문자 비율로 근사한 값입니다. 이 5개 값만 서버로 보내 GPU 추천과 견적에 씁니다.</p>
+          <p className="col-span-full text-hint text-text-muted">토큰 수는 문자 비율로 근사한 값입니다. 이 5개 값만 서버로 보내 GPU 추천과 견적에 씁니다.</p>
         </dl>
       )}
 

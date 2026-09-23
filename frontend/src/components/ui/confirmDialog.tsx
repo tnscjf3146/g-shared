@@ -22,7 +22,7 @@ export function ConfirmDialog({ open, message, confirmLabel = '확인', danger =
       onClick={(e) => e.target === e.currentTarget && onCancel()} // 배경(backdrop) 클릭 = 취소
       className="animate-enter-spring-l4 m-auto w-[min(92vw,380px)] layer-4 rounded-lg border border-hairline p-6 text-dark backdrop:bg-black/40 open:flex open:flex-col open:gap-5"
     >
-      <p className="text-[17px] font-semibold">{message}</p>
+      <p className="text-body font-semibold">{message}</p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onCancel} disabled={pending}>
           취소

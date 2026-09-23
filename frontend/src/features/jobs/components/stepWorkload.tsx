@@ -16,11 +16,11 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
     <>
       <header className="flex flex-col gap-1">
         <h2 className="text-h2 font-bold tracking-heading text-dark">1. 워크로드</h2>
-        <p className="text-[15px] text-text-muted">무엇을 할지 고르면 그 작업을 지원하는 모델이 나타납니다.</p>
+        <p className="text-label-sm text-text-muted">무엇을 할지 고르면 그 작업을 지원하는 모델이 나타납니다.</p>
       </header>
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-text-muted">워크로드 유형</legend>
+        <legend className="text-caption font-medium text-text-muted">워크로드 유형</legend>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {catalog.workloads.map((w) => {
             const on = state.workloadId === w.id
@@ -31,9 +31,9 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
                   <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={on ? 'text-primary' : 'text-text-muted'}>
                     <path d={KIND_ICON[w.kind]} />
                   </svg>
-                  <span className="text-[15px] font-semibold text-dark">{w.name}</span>
+                  <span className="text-label-sm font-semibold text-dark">{w.name}</span>
                 </span>
-                <span className="text-[13px] text-text-muted">{w.description}</span>
+                <span className="text-caption text-text-muted">{w.description}</span>
               </label>
             )
           })}
@@ -42,9 +42,9 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
 
       {workload && (
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-[13px] font-medium text-text-muted">모델 (G-shared 제공)</legend>
+          <legend className="text-caption font-medium text-text-muted">모델 (G-shared 제공)</legend>
           {models.length === 0 ? (
-            <p className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">이 워크로드를 지원하는 모델이 아직 없습니다.</p>
+            <p className="rounded-md bg-neutral-tint px-4 py-3 text-caption text-dark">이 워크로드를 지원하는 모델이 아직 없습니다.</p>
           ) : (
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {models.map((m) => {
@@ -52,8 +52,8 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
                 return (
                   <label key={m.id} className={`card-quiet flex cursor-pointer items-center justify-between gap-3 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
                     <input type="radio" name="baseModelId" value={m.id} checked={on} onChange={() => onChange({ baseModelId: m.id })} className="sr-only" />
-                    <span className="text-[15px] font-semibold text-dark">{m.name}</span>
-                    <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-[12px] tabular-nums text-text-muted">{m.params}</span>
+                    <span className="text-label-sm font-semibold text-dark">{m.name}</span>
+                    <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-hint tabular-nums text-text-muted">{m.params}</span>
                   </label>
                 )
               })}

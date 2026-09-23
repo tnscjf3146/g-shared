@@ -14,17 +14,17 @@ export function WorkerRegisterCard({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <div className="flex flex-col gap-2">
           <h2 className="text-h2 font-bold tracking-heading text-dark">아직 등록된 워커가 없습니다</h2>
-          <p className="text-[15px] text-text-muted">PC 에 G-shared 를 받아 실행하고 로그인하면 그 PC 가 이 계정의 워커로 등록됩니다.</p>
+          <p className="text-label-sm text-text-muted">PC 에 G-shared 를 받아 실행하고 로그인하면 그 PC 가 이 계정의 워커로 등록됩니다.</p>
         </div>
       )}
 
       <ol className="flex flex-col gap-4">
         {STEPS.map((s, i) => (
           <li key={s.title} className="flex gap-4">
-            <span className="w-5 shrink-0 text-[15px] font-semibold tabular-nums text-dark">{i + 1}.</span>
+            <span className="w-5 shrink-0 text-label-sm font-semibold tabular-nums text-dark">{i + 1}.</span>
             <div className="flex flex-col gap-0.5">
-              <span className="text-[15px] font-semibold text-dark">{s.title}</span>
-              <span className="text-[14px] text-text-muted">{s.body}</span>
+              <span className="text-label-sm font-semibold text-dark">{s.title}</span>
+              <span className="text-caption text-text-muted">{s.body}</span>
             </div>
           </li>
         ))}
@@ -35,7 +35,7 @@ export function WorkerRegisterCard({ compact = false }: { compact?: boolean }) {
         G-shared 다운로드 (Windows)
       </a>
 
-      <p className="text-[12px] text-text-muted">요구사항: Windows 10/11 · NVIDIA GPU(드라이버 설치됨) · 인터넷 연결. 등록이 끝나면 새로고침 없이 15초 안에 여기 나타납니다.</p>
+      <p className="text-hint text-text-muted">요구사항: Windows 10/11 · NVIDIA GPU(드라이버 설치됨) · 인터넷 연결. 등록이 끝나면 새로고침 없이 15초 안에 여기 나타납니다.</p>
     </section>
   )
 }

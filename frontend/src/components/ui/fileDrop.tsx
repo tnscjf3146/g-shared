@@ -33,13 +33,13 @@ export function FileDrop({ file, onFile, accept, label, hint, disabled = false }
             </svg>
           </span>
           <div className="flex min-w-0 flex-col">
-            <span className="truncate text-[14px] font-semibold text-dark" title={file.name}>
+            <span className="truncate text-caption font-semibold text-dark" title={file.name}>
               {file.name}
             </span>
-            <span className="text-[12px] tabular-nums text-text-muted">{formatSize(file.size)}</span>
+            <span className="text-hint tabular-nums text-text-muted">{formatSize(file.size)}</span>
           </div>
         </div>
-        <button type="button" onClick={() => onFile(null)} disabled={disabled} className="shrink-0 text-[13px] text-text-muted hover:text-danger disabled:opacity-60">
+        <button type="button" onClick={() => onFile(null)} disabled={disabled} className="shrink-0 text-caption text-text-muted hover:text-danger disabled:opacity-60">
           제거
         </button>
       </div>
@@ -67,8 +67,8 @@ export function FileDrop({ file, onFile, accept, label, hint, disabled = false }
         <path d="M12 16V4m0 0-4 4m4-4 4 4" />
         <path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3" />
       </svg>
-      <span className="text-[14px] font-semibold text-dark">{label}</span>
-      {hint && <span className="text-[12px] text-text-muted">{hint}</span>}
+      <span className="text-caption font-semibold text-dark">{label}</span>
+      {hint && <span className="text-hint text-text-muted">{hint}</span>}
       <input id={id} ref={input} type="file" accept={accept} disabled={disabled} className="sr-only" onChange={(e) => pick(e.target.files)} />
     </label>
   )

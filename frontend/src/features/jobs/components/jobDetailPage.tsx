@@ -27,8 +27,8 @@ function DetailGrid({ items }: { items: [string, React.ReactNode][] }) {
     <dl className="grid grid-cols-2 gap-x-8 gap-y-5 sm:grid-cols-3 lg:grid-cols-4">
       {items.map(([k, v]) => (
         <div key={k} className="flex min-w-0 flex-col gap-1">
-          <dt className="text-[12px] font-medium tracking-eyebrow text-text-muted">{k}</dt>
-          <dd className="text-[17px] font-semibold break-words tabular-nums text-dark">{v}</dd>
+          <dt className="text-hint font-medium tracking-eyebrow text-text-muted">{k}</dt>
+          <dd className="text-body font-semibold break-words tabular-nums text-dark">{v}</dd>
         </div>
       ))}
     </dl>
@@ -84,8 +84,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   if (state.status === 'notfound') {
     return (
       <section className="card flex w-full max-w-[640px] flex-col items-start gap-3 p-10">
-        <p className="text-[15px] text-dark">작업을 찾을 수 없습니다.</p>
-        <Link href="/dashboard/jobs" className="text-[14px] text-primary hover:underline">
+        <p className="text-label-sm text-dark">작업을 찾을 수 없습니다.</p>
+        <Link href="/dashboard/jobs" className="text-caption text-primary hover:underline">
           ← 돌아가기
         </Link>
       </section>
@@ -94,14 +94,14 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   if (state.status === 'error') {
     return (
       <section className="card flex w-full max-w-[640px] flex-col items-start gap-3 p-10">
-        <p className="text-[15px] text-dark">작업 정보를 불러오지 못했습니다.</p>
+        <p className="text-label-sm text-dark">작업 정보를 불러오지 못했습니다.</p>
         <button
           type="button"
           onClick={() => {
             setState({ status: 'loading' })
             void load()
           }}
-          className="text-[14px] text-primary hover:underline"
+          className="text-caption text-primary hover:underline"
         >
           다시 시도 →
         </button>
@@ -176,13 +176,13 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     <div className="flex w-full flex-col gap-6">
       {/* 헤더: [← 돌아가기] 한 줄, 그 아래 워크로드 이름 · 상태(글자) | 작업 취소 */}
       <header className="flex flex-col gap-3">
-        <Link href="/dashboard/jobs" className="self-start text-[15px] text-text-muted hover:text-dark">
+        <Link href="/dashboard/jobs" className="self-start text-label-sm text-text-muted hover:text-dark">
           ← 돌아가기
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 flex-wrap items-center gap-4">
             <h1 className={`min-w-0 break-words text-h1 font-bold tracking-heading ${job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-2' : 'text-dark'}`}>{name.workload}</h1>
-            <span className={`text-[17px] font-medium ${meta.tone === 'danger' ? 'text-danger' : job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>{meta.label}</span>
+            <span className={`text-body font-medium ${meta.tone === 'danger' ? 'text-danger' : job.status === 'CANCELLED' ? 'text-text-muted line-through decoration-1' : 'text-dark'}`}>{meta.label}</span>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" href={`/jobs/${job.jobId}/chain`}>
@@ -197,19 +197,19 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
         </div>
       </header>
       {error && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[15px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-label-sm text-danger">
           {error}
         </p>
       )}
 
       <section className="card flex flex-col gap-3 px-6 py-5">
-        <h2 className="text-[17px] font-bold tracking-heading text-dark">진행</h2>
-        <p className={`text-[16px] ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason, job.cancelReason)}</p>
-        {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-[14px] break-all text-danger">{job.failReason}</p>}
+        <h2 className="text-body font-bold tracking-heading text-dark">진행</h2>
+        <p className={`text-label-sm ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason, job.cancelReason)}</p>
+        {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-caption break-all text-danger">{job.failReason}</p>}
         {job.status === 'CREATED' &&
           (missingUpload ? (
             // 등록 도중 업로드가 끊긴 작업 — 서버는 /fund 를 409 DATASET_NOT_UPLOADED / ADAPTER_NOT_UPLOADED 로 거절하고, 상세에는 재업로드가 없다(파일은 브라우저 메모리에만 있었다)
-            <p role="alert" className="rounded-md bg-warning-tint px-4 py-3 text-[14px] text-warning">
+            <p role="alert" className="rounded-md bg-warning-tint px-4 py-3 text-caption text-warning">
               {missingUpload} 파일 업로드가 끝나지 않아 예치할 수 없습니다. 위의 [작업 취소]로 이 작업을 닫고 워크로드 등록을 다시 진행해 주세요.
             </p>
           ) : (
@@ -217,7 +217,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
           ))}
         {job.status === 'RUNNING' && <JobProgress job={job} />}
         {job.assignedWorkerId && (
-          <p className="text-[14px] text-text-muted" title={job.assignedWorkerId}>
+          <p className="text-caption text-text-muted" title={job.assignedWorkerId}>
             배정 워커 <span className="font-medium tabular-nums text-dark">{shortWorkerId(job.assignedWorkerId)}</span>
           </p>
         )}
@@ -244,7 +244,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                 setTab(nextKey)
                 document.getElementById(`jobtab-${nextKey}`)?.focus()
               }}
-              className={`flex-none rounded-md px-4 py-2 text-[15px] font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
+              className={`flex-none rounded-md px-4 py-2 text-label-sm font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
             >
               {t.label}
             </button>
@@ -266,7 +266,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                 ]}
               />
               {/* 입력 어댑터(이어서 학습·업로드) — 예치 전 업로드 여부까지 한 줄로 */}
-              <p className="text-[14px] text-text-muted">
+              <p className="text-caption text-text-muted">
                 입력 어댑터{' '}
                 <span className="font-medium text-dark">
                   {/* adapterUploaded 는 끝난 작업의 파일을 cleanup 이 지우면 다시 false 가 된다 — "업로드 필요"는 예치 전(CREATED)에만 맞는 말 */}
@@ -307,7 +307,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                 ]}
               />
               {job.finishedAt == null && (
-                <p className="text-[13px] text-text-muted">
+                <p className="text-caption text-text-muted">
                   예상 소요는 순수 학습 시간입니다. 매칭 대기와 워커의 실행 환경 준비(이미지·데이터 다운로드)는 포함되지 않아, 특히 첫 실행은 10분 이상 더 걸릴 수 있어요.
                 </p>
               )}

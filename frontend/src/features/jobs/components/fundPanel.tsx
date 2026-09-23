@@ -125,8 +125,8 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
     <div className="flex flex-col gap-3 rounded-md border border-primary/45 bg-primary/5 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[14px] font-semibold text-dark">예치하고 학습 시작하기</span>
-          <span className="text-[13px] text-text-muted">
+          <span className="text-caption font-semibold text-dark">예치하고 학습 시작하기</span>
+          <span className="text-caption text-text-muted">
             {job.estimatedCost.toLocaleString('ko-KR')} GSC를 에스크로 금고에 맡기면 워커 배정이 시작됩니다. MetaMask 서명이 두 번(승인·예치) 필요합니다.
           </span>
         </div>
@@ -138,11 +138,11 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
       </div>
 
       {(phase.s === 'error' || phase.s === 'rejected') && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">{phase.message}</p>
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">{phase.message}</p>
       )}
       {phase.s === 'pendingConfirm' && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-warning-tint px-4 py-3">
-          <p className="text-[14px] text-warning">{phase.message}</p>
+          <p className="text-caption text-warning">{phase.message}</p>
           <Button variant="secondary" size="sm" onClick={() => report(phase.txHash)}>서버 확인 재시도</Button>
         </div>
       )}
@@ -151,7 +151,7 @@ export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => v
           type="button"
           title={txHash}
           onClick={() => navigator.clipboard?.writeText(txHash).catch(() => {})}
-          className="self-start text-[13px] text-text-muted tabular-nums hover:text-dark hover:underline"
+          className="self-start text-caption text-text-muted tabular-nums hover:text-dark hover:underline"
         >
           트랜잭션 {txHash.slice(0, 10)}… 복사
         </button>

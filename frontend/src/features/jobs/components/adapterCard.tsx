@@ -44,9 +44,9 @@ export function AdapterCard({ job, onRenamed }: Props) {
   return (
     <section className="card flex flex-col gap-3 px-6 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-[17px] font-bold tracking-heading text-dark">어댑터</h2>
+        <h2 className="text-body font-bold tracking-heading text-dark">어댑터</h2>
         {job.parentJobId != null && (
-          <Link href={`/jobs/${job.parentJobId}`} className="text-[13px] text-primary hover:underline">
+          <Link href={`/jobs/${job.parentJobId}`} className="text-caption text-primary hover:underline">
             작업 #{job.parentJobId} 에서 이어서 학습 →
           </Link>
         )}
@@ -55,10 +55,10 @@ export function AdapterCard({ job, onRenamed }: Props) {
       {editing === null ? (
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-[12px] font-medium tracking-eyebrow text-text-muted">어댑터 이름</span>
-            <span className="text-[17px] font-semibold break-words text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
+            <span className="text-hint font-medium tracking-eyebrow text-text-muted">어댑터 이름</span>
+            <span className="text-body font-semibold break-words text-dark">{adapterLabel(job.jobId, job.adapterName, job.adapterVersion)}</span>
           </div>
-          <button type="button" onClick={() => setEditing(job.adapterName ?? '')} className="text-[13px] text-primary hover:underline">
+          <button type="button" onClick={() => setEditing(job.adapterName ?? '')} className="text-caption text-primary hover:underline">
             이름 변경
           </button>
         </div>
@@ -88,14 +88,14 @@ export function AdapterCard({ job, onRenamed }: Props) {
             </Button>
           </div>
           {invalid && (
-            <p id="adapter-rename-error" role="alert" className="text-[13px] text-danger">
+            <p id="adapter-rename-error" role="alert" className="text-caption text-danger">
               {invalid}
             </p>
           )}
         </div>
       )}
       {error && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {error}
         </p>
       )}
@@ -114,7 +114,7 @@ export function AdapterCard({ job, onRenamed }: Props) {
           )}
         </div>
       ) : (
-        <p className="text-[13px] text-text-muted">
+        <p className="text-caption text-text-muted">
           {ENDED.has(job.status) ? '이 작업은 어댑터를 만들지 못하고 끝났습니다.' : '학습이 끝나면 여기에서 어댑터를 내려받을 수 있습니다. 받는 파일 이름은 위 어댑터 이름을 따릅니다.'}
         </p>
       )}

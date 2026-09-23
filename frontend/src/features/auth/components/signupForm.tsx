@@ -36,12 +36,12 @@ export function SignupForm() {
   return (
     <form onSubmit={submit} noValidate className="card flex w-[440px] max-w-full flex-col gap-[18px] p-10">
       <div className="flex flex-col gap-2 text-center">
-        <span className="font-logo text-[32px] font-semibold text-dark">G-shared</span>
-        <p className="text-[15px] text-text-muted">계정을 만들고 GPU를 쓰거나, 공유해 보세요</p>
+        <span className="font-logo text-h1 font-semibold text-dark">G-shared</span>
+        <p className="text-label-sm text-text-muted">계정을 만들고 GPU를 쓰거나, 공유해 보세요</p>
       </div>
 
       {f.formError && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {f.formError}
         </p>
       )}
@@ -76,7 +76,7 @@ export function SignupForm() {
         label="비밀번호"
         error={f.errors.password}
         hint={
-          <button type="button" onClick={() => setShowPw((s) => !s)} className="text-[13px] text-text-muted hover:text-dark">
+          <button type="button" onClick={() => setShowPw((s) => !s)} className="text-caption text-text-muted hover:text-dark">
             {showPw ? '숨기기' : '보기'}
           </button>
         }
@@ -111,10 +111,10 @@ export function SignupForm() {
         {f.pending ? '만드는 중…' : '계정 만들기'}
       </Button>
 
-      <Link href="/login" className="text-[14px] text-primary hover:underline">
+      <Link href="/login" className="text-caption text-primary hover:underline">
         이미 계정이 있으신가요? 로그인 →
       </Link>
-      <p className="text-[12px] text-text-muted">가입 후 지갑을 연결하면 예치·정산 기능이 활성화됩니다.</p>
+      <p className="text-hint text-text-muted">가입 후 지갑을 연결하면 예치·정산 기능이 활성화됩니다.</p>
     </form>
   )
 }

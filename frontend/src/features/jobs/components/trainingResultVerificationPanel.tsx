@@ -20,8 +20,8 @@ type State = { s: 'loading' } | { s: 'error'; forJob: number } | { s: 'ready'; v
 function Stat({ value, label }: { value: string; label: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-[22px] font-bold tabular-nums text-dark">{value}</span>
-      <span className="text-[12px] font-medium tracking-eyebrow text-text-muted">{label}</span>
+      <span className="text-h2 font-bold tabular-nums text-dark">{value}</span>
+      <span className="text-hint font-medium tracking-eyebrow text-text-muted">{label}</span>
     </div>
   )
 }
@@ -60,7 +60,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   if (!completed) {
     return (
       <section className="card px-6 py-5">
-        <p className="text-[15px] text-text-muted">학습 결과는 작업 완료 후 확인할 수 있습니다.</p>
+        <p className="text-label-sm text-text-muted">학습 결과는 작업 완료 후 확인할 수 있습니다.</p>
       </section>
     )
   }
@@ -75,14 +75,14 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   if (view.s === 'error') {
     return (
       <section className="card flex flex-col items-start gap-3 px-6 py-5">
-        <p className="text-[15px] text-dark">학습 결과 검증 정보를 불러오지 못했습니다.</p>
+        <p className="text-label-sm text-dark">학습 결과 검증 정보를 불러오지 못했습니다.</p>
         <button
           type="button"
           onClick={() => {
             setState({ s: 'loading' })
             setRetry((n) => n + 1)
           }}
-          className="text-[14px] text-primary hover:underline"
+          className="text-caption text-primary hover:underline"
         >
           다시 시도 →
         </button>
@@ -94,7 +94,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   if (!v.available) {
     return (
       <section className="card px-6 py-5">
-        <p className="text-[15px] text-text-muted">이 작업은 상세 학습 검증 데이터를 제공하지 않습니다.</p>
+        <p className="text-label-sm text-text-muted">이 작업은 상세 학습 검증 데이터를 제공하지 않습니다.</p>
       </section>
     )
   }
@@ -112,10 +112,10 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
     <section className="card flex flex-col gap-6 px-6 py-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <h2 className="text-[17px] font-bold tracking-heading text-dark">학습 결과 검증</h2>
-          <p className="text-[13px] text-text-muted">LoRA Adapter 구조 및 Weight Update 확인</p>
+          <h2 className="text-body font-bold tracking-heading text-dark">학습 결과 검증</h2>
+          <p className="text-caption text-text-muted">LoRA Adapter 구조 및 Weight Update 확인</p>
         </div>
-        {badge && <span className={`rounded-full px-3 py-1 text-[13px] font-semibold ${badge.cls}`}>{badge.label}</span>}
+        {badge && <span className={`rounded-full px-3 py-1 text-caption font-semibold ${badge.cls}`}>{badge.label}</span>}
       </header>
 
       {/* 상단 요약 4칸 */}
@@ -128,17 +128,17 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
           <Stat value={t.finalLoss != null ? t.finalLoss.toFixed(3) : '—'} label="Final Loss" />
         </div>
       ) : (
-        <p className="text-[14px] text-text-muted">학습 요약 데이터가 제공되지 않습니다.</p>
+        <p className="text-caption text-text-muted">학습 요약 데이터가 제공되지 않습니다.</p>
       )}
 
       {/* Loss Curve | Adapter 검증 — 데스크톱 2열, 모바일 세로 */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="card-quiet flex flex-col gap-2 p-4">
-          <h3 className="text-[14px] font-semibold text-dark">Loss Curve</h3>
+          <h3 className="text-caption font-semibold text-dark">Loss Curve</h3>
           <LossChart history={t?.lossHistory ?? []} />
         </div>
         <div className="card-quiet flex flex-col gap-3 p-4">
-          <h3 className="text-[14px] font-semibold text-dark">LoRA Adapter 검증</h3>
+          <h3 className="text-caption font-semibold text-dark">LoRA Adapter 검증</h3>
           {a ? (
             <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -148,7 +148,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
                 <Stat value={a.nanCount != null ? String(a.nanCount) : '—'} label={(a.nanCount ?? 0) > 0 ? 'NaN (비정상)' : 'NaN'} />
                 <Stat value={a.infCount != null ? String(a.infCount) : '—'} label={(a.infCount ?? 0) > 0 ? 'Inf (비정상)' : 'Inf'} />
               </div>
-              <p className={`text-[13px] ${a.valid === false || (a.nanCount ?? 0) > 0 || (a.infCount ?? 0) > 0 ? 'text-danger' : 'text-text-muted'}`}>
+              <p className={`text-caption ${a.valid === false || (a.nanCount ?? 0) > 0 || (a.infCount ?? 0) > 0 ? 'text-danger' : 'text-text-muted'}`}>
                 {a.valid === false
                   ? '검증 이상 발견 — tensor 수치에 비정상 값이 있습니다.'
                   : a.changedTensorCount != null && a.tensorCount != null
@@ -157,36 +157,36 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
               </p>
             </>
           ) : (
-            <p className="text-[14px] text-text-muted">Adapter 검증 데이터가 제공되지 않습니다.</p>
+            <p className="text-caption text-text-muted">Adapter 검증 데이터가 제공되지 않습니다.</p>
           )}
         </div>
       </div>
 
       {/* Layer × Module heatmap */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-[14px] font-semibold text-dark">Layer별 LoRA Weight 변화</h3>
+        <h3 className="text-caption font-semibold text-dark">Layer별 LoRA Weight 변화</h3>
         <LoraWeightHeatmap data={a?.layerModuleDeltaMagnitude ?? {}} />
       </div>
 
       {/* 결과 무결성 — 검증 hash ↔ 체인 제출 hash. 이 조각만 실패해도 위 섹션은 그대로 */}
       <div className="flex flex-col gap-2 border-t border-hairline pt-4">
-        <h3 className="text-[14px] font-semibold text-dark">결과 무결성</h3>
+        <h3 className="text-caption font-semibold text-dark">결과 무결성</h3>
         {backendHash == null ? (
-          <p className="text-[14px] text-text-muted">결과 Hash 정보가 제공되지 않습니다.</p>
+          <p className="text-caption text-text-muted">결과 Hash 정보가 제공되지 않습니다.</p>
         ) : (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <span className="text-[14px] tabular-nums text-dark" title={backendHash}>
+            <span className="text-caption tabular-nums text-dark" title={backendHash}>
               <span className="text-text-muted">Backend </span>
               {shortHash(backendHash)}
             </span>
-            <span className="text-[14px] tabular-nums text-dark" title={chainHash ?? undefined}>
+            <span className="text-caption tabular-nums text-dark" title={chainHash ?? undefined}>
               <span className="text-text-muted">Chain </span>
               {chainHash ? shortHash(chainHash) : '—'}
             </span>
             {hashMatch == null ? (
-              <span className="text-[13px] text-text-muted">Blockchain 기록 hash 가 제공되지 않습니다.</span>
+              <span className="text-caption text-text-muted">Blockchain 기록 hash 가 제공되지 않습니다.</span>
             ) : (
-              <span className={`rounded-full px-2.5 py-0.5 text-[13px] font-semibold ${hashMatch ? 'bg-primary/12 text-primary-dark' : 'bg-danger-tint text-danger'}`}>{hashMatch ? '결과 Hash 일치' : '결과 Hash 불일치'}</span>
+              <span className={`rounded-full px-2.5 py-0.5 text-caption font-semibold ${hashMatch ? 'bg-primary/12 text-primary-dark' : 'bg-danger-tint text-danger'}`}>{hashMatch ? '결과 Hash 일치' : '결과 Hash 불일치'}</span>
             )}
           </div>
         )}

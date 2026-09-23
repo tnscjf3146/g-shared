@@ -4,15 +4,15 @@ import { Fragment, type ReactNode } from 'react'
 // 대시보드 작업·워커 카드와 작업 상세가 같이 쓴다.
 // 좁은 화면(md 미만)에선 가로 스크롤로 칸이 잘리지 않게 "라벨 : 값" 세로 목록으로 바꾼다
 const CELL = 'truncate border border-hairline-strong px-4 py-2 text-left align-middle'
-export const TH = `${CELL} bg-surface-1 text-[14px] font-semibold text-dark`
-export const TD = `${CELL} bg-surface-2 text-[16px] tabular-nums text-dark`
+export const TH = `${CELL} bg-surface-1 text-caption font-semibold text-dark`
+export const TD = `${CELL} bg-surface-2 text-label-sm tabular-nums text-dark`
 
 export function PlainTable({ cols, widths, minWidth = 640 }: { cols: [string, ReactNode][]; widths?: string[]; minWidth?: number }) {
   const w = widths ?? cols.map(() => `${100 / cols.length}%`)
   return (
     <>
       {/* 좁은 화면: 세로로 쌓기 — 아무것도 안 잘림 */}
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-[15px] md:hidden">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-label-sm md:hidden">
         {cols.map(([k, v]) => (
           <Fragment key={k}>
             <dt className="text-text-muted">{k}</dt>

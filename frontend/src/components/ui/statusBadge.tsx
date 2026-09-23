@@ -14,7 +14,7 @@ const TONE: Record<Tone, string> = {
 
 export function StatusBadge({ tone, children, className = '' }: { tone: Tone; children: ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-pill px-3 py-1 text-[12px] font-semibold ${TONE[tone]} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-pill px-3 py-1 text-hint font-semibold ${TONE[tone]} ${className}`}>
       <span aria-hidden className="size-1.5 rounded-pill bg-current" />
       {children}
     </span>

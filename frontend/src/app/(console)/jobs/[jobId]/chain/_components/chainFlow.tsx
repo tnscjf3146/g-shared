@@ -133,30 +133,30 @@ export function ChainFlow({ jobId }: { jobId: number }) {
         {/* [← 돌아가기] ─ 가운데 제목 ─ (우측 여백으로 균형). 제목·설명은 살짝 아래로 */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-start">
           <Link href={`/jobs/${jobId}`} className="flex items-center gap-2 justify-self-start text-text-muted transition-colors hover:text-dark">
-            <span className="text-[26px] leading-none">←</span>
-            <span className="text-[15px]">돌아가기</span>
+            <span className="text-h2 leading-none">←</span>
+            <span className="text-label-sm">돌아가기</span>
           </Link>
           <h1 className="mt-6 text-h1 font-bold tracking-heading text-dark">작업 #{jobId} 흐름</h1>
           <span aria-hidden />
         </div>
-        <p className="mt-2 text-center text-[14px] text-text-muted">
+        <p className="mt-2 text-center text-caption text-text-muted">
           이 작업이 예치→수락→실행→정산까지 흐르는 관계. 현재 상태는 {POLL_MS / 1000}초마다 갱신돼 빛납니다.
         </p>
       </header>
 
-      {state.s === 'loading' && <p className="text-[14px] text-text-muted">불러오는 중…</p>}
+      {state.s === 'loading' && <p className="text-caption text-text-muted">불러오는 중…</p>}
       {state.s === 'notfound' && (
         <section className="card flex flex-col items-start gap-3">
-          <p className="text-[15px] text-dark">작업을 찾을 수 없습니다.</p>
-          <Link href="/jobs" className="text-[14px] text-primary hover:underline">
+          <p className="text-label-sm text-dark">작업을 찾을 수 없습니다.</p>
+          <Link href="/jobs" className="text-caption text-primary hover:underline">
             목록으로 →
           </Link>
         </section>
       )}
       {state.s === 'error' && (
         <section className="card flex flex-col items-start gap-3">
-          <p className="text-[15px] text-dark">작업 정보를 불러오지 못했습니다.</p>
-          <button type="button" onClick={() => { setState({ s: 'loading' }); void load() }} className="text-[14px] text-primary hover:underline">
+          <p className="text-label-sm text-dark">작업 정보를 불러오지 못했습니다.</p>
+          <button type="button" onClick={() => { setState({ s: 'loading' }); void load() }} className="text-caption text-primary hover:underline">
             다시 시도 →
           </button>
         </section>
@@ -164,9 +164,9 @@ export function ChainFlow({ jobId }: { jobId: number }) {
       {state.s === 'ready' && (
         <section className="flex flex-col gap-2">
           {/* 상태 — 그래프 바로 위, 오른쪽 끝을 그래프와 정렬. 실패·취소는 빨강, 그 외 메인 그린 */}
-          <span className="self-end text-[15px] text-text-muted">
+          <span className="self-end text-label-sm text-text-muted">
             상태{' '}
-            <span className={`text-[19px] font-bold ${state.job.status === 'FAILED' || state.job.status === 'CANCELLED' ? 'text-danger' : 'text-primary'}`}>
+            <span className={`text-body-lg font-bold ${state.job.status === 'FAILED' || state.job.status === 'CANCELLED' ? 'text-danger' : 'text-primary'}`}>
               {STATUS_META[state.job.status].label}
             </span>
           </span>
