@@ -16,12 +16,13 @@ import {
   gpuSchema,
   fundResponseSchema,
   jobDetailSchema,
+  jobOnchainSchema,
   jobPageSchema,
   resultVerificationSchema,
   renameAdapterRequestSchema,
   workloadSchema,
 } from './schema'
-import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobPage, JobSpec, JobStatus, ResultVerification } from './types'
+import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobOnchain, JobPage, JobSpec, JobStatus, ResultVerification } from './types'
 import * as z from 'zod/mini'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
@@ -130,4 +131,11 @@ export async function completeAdapterUpload(jobId: number, body: { sha256: strin
  *  COMPLETED 일 때만 부른다(화면이 보장). 검증 데이터가 없는 legacy 작업은 200 + available=false */
 export async function getJobResultVerification(jobId: number): Promise<ResultVerification> {
   return resultVerificationSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/result-verification`))
+}
+
+/** GET /jobs/{jobId}/onchain — 백엔드가 **RPC 로 체인을 다시 읽은** 값.
+ *  DB 스냅샷(job.status·job.resultHash)과 달리 "지금 체인에 뭐라고 적혀 있나"를 답한다.
+ *  아직 예치 전이거나 노드가 죽어 있으면 200 + available=false + reason 으로 온다(에러 아님). */
+export async function getJobOnchain(jobId: number): Promise<JobOnchain> {
+  return jobOnchainSchema.parse(await authFetch<unknown>(`${JOBS_PATH}/${jobId}/onchain`))
 }

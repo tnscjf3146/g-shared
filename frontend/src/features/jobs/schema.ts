@@ -254,3 +254,74 @@ export const resultVerificationSchema = z.object({
   ),
   integrity: z.optional(z.nullable(z.object({ resultHash: z.string() }))),
 })
+
+/** SSE `GET /jobs/{id}/events` 가 흘려보내는 이벤트 (back `JobRealtimeEvent`).
+ *  프레임은 `event: <type>` + `data: <json>` 인데, type 은 payload 안에도 있어 payload 만 읽는다.
+ *  네트워크 경계이므로 여기서도 검증한다 — 모르는 형태면 그 프레임만 버리고 스트림은 유지한다. */
+export const jobRealtimeEventSchema = z.object({
+  type: z.enum(['JOB_PROGRESS', 'JOB_COMPLETED', 'JOB_FAILED', 'JOB_CANCELLED']),
+  jobId: z.number(),
+  status: z.optional(z.nullable(jobStatusSchema)),
+  progress: z.optional(z.nullable(z.number())),
+  currentStep: z.optional(z.nullable(z.number())),
+  totalSteps: z.optional(z.nullable(z.number())),
+  resultAvailable: z.optional(z.nullable(z.boolean())),
+  reason: z.optional(z.nullable(z.string())),
+  updatedAt: z.optional(z.nullable(z.string())),
+})
+
+/** 에스크로 컨트랙트가 말하는 Job 상태 5단계 (back `EscrowJobState`). NONE = 그 슬롯이 비어 있음 */
+export const escrowStateSchema = z.enum(['NONE', 'FUNDED', 'ASSIGNED', 'COMPLETED', 'CANCELLED'])
+/** 온체인 거래 종류 — 예치 / 워커 수락 / 결과 제출 / 취소 */
+export const onchainTxTypeSchema = z.enum(['FUND', 'ACCEPT', 'SUBMIT', 'ABORT'])
+
+/** GET /jobs/{jobId}/onchain — **DB 가 아니라 백엔드가 RPC 로 체인을 다시 읽은 값**.
+ *  DB 는 온체인 위치(escrowJobId·컨트랙트 주소)만 주고, 상태·resultHash·영수증은 노드에서 재조회한다.
+ *
+ *  resultVerification 과 같은 교훈을 적용한다 — 키 하나 빠진 정상 응답에 zod 가 통째로 죽으면
+ *  패널이 아니라 화면 전체가 ERROR 가 된다. 백엔드가 채울 때만 오는 값은 전부 optional·nullable. */
+export const jobOnchainSchema = z.object({
+  available: z.boolean(), // false = 아직 예치 전이거나 체인을 못 읽음 → reason 으로 구분
+  reason: z.optional(z.nullable(z.string())),
+  jobId: z.optional(z.nullable(z.number())),
+  escrowJobId: z.optional(z.nullable(z.string())), // 문자열이다 — uint256 이라 number 로 좁히지 않는다
+  chain: z.optional(
+    z.nullable(z.object({ chainId: z.nullable(z.number()), contractAddress: z.nullable(z.string()) })),
+  ),
+  onchain: z.optional(
+    z.nullable(
+      z.object({
+        state: z.nullable(escrowStateSchema),
+        client: z.optional(z.nullable(z.string())),
+        provider: z.optional(z.nullable(z.string())),
+        operator: z.optional(z.nullable(z.string())),
+        price: z.optional(z.nullable(z.string())), // wei 단위 문자열
+        resultHash: z.optional(z.nullable(z.string())),
+        deadline: z.optional(z.nullable(z.number())), // epoch seconds
+      }),
+    ),
+  ),
+  /** "우리 DB 가 아니라 체인에서 읽었다"를 화면이 스스로 말하게 하는 근거 */
+  evidence: z.optional(
+    z.nullable(
+      z.object({
+        latestBlockNumber: z.optional(z.nullable(z.number())),
+        verifiedAt: z.optional(z.nullable(z.string())),
+        source: z.optional(z.nullable(z.string())), // "BLOCKCHAIN_RPC"
+      }),
+    ),
+  ),
+  /** 영수증이 아직 없으면 status 가 비어 올 수 있다 */
+  transactions: z.optional(
+    z.nullable(
+      z.array(
+        z.object({
+          type: z.nullable(z.string()),
+          txHash: z.string(),
+          blockNumber: z.optional(z.nullable(z.number())),
+          status: z.optional(z.nullable(z.string())), // SUCCESS | REVERTED | null
+        }),
+      ),
+    ),
+  ),
+})

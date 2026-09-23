@@ -261,6 +261,80 @@ export const jobHandlers = [
     })
   }),
 
+  // 실시간 이벤트(SSE) — 백엔드와 같은 와이어 형식(`event: <type>` + `data: <json>` + 빈 줄)으로 흘린다.
+  // 이 핸들러가 없으면 목업 모드에서 SSE 경로가 **한 번도 실행되지 않아** 그쪽 버그가 그대로 배포된다.
+  // RUNNING 인 작업만 진행률을 올리고, 100% 에서 JOB_COMPLETED 를 보내고 닫는다.
+  http.get(`${URL}/:jobId/events`, ({ request, params }) => {
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const jobId = job.jobId
+    const encoder = new TextEncoder()
+    let percent = job.progressPercent ?? 0
+    let timer: ReturnType<typeof setInterval> | undefined
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (type: string, payload: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify({ type, jobId, ...payload, updatedAt: new Date().toISOString() })}\n\n`))
+        if (job.status !== 'RUNNING') return // 진행 중이 아니면 연결만 유지(백엔드도 전이 이벤트는 안 준다)
+        timer = setInterval(() => {
+          percent = Math.min(100, percent + 4)
+          // REST 스냅샷도 같이 움직인다 — 안 그러면 이벤트와 상세 응답이 어긋나 종료 경로를 검증할 수 없다
+          job.progressPercent = percent
+          if (percent < 100) send('JOB_PROGRESS', { status: 'RUNNING', progress: percent, currentStep: Math.round((percent / 100) * 15), totalSteps: 15 })
+          else {
+            job.status = 'COMPLETED'
+            send('JOB_COMPLETED', { status: 'COMPLETED', progress: 100, resultAvailable: true })
+            clearInterval(timer)
+            controller.close()
+          }
+        }, 1_500)
+      },
+      cancel() {
+        if (timer) clearInterval(timer)
+      },
+    })
+    return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } })
+  }),
+
+  // 온체인 검증 — 백엔드가 RPC 로 다시 읽은 값. 실제 응답 형태(JobOnchainResponse)를 그대로 흉내낸다.
+  // 예치 전(CREATED)은 available=false + ESCROW_JOB_ID_MISSING, 그 외는 상태에 따라 거래가 쌓인다.
+  http.get(`${URL}/:jobId/onchain`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const escrowJobId = String(job.jobId + 6) // DB job 과 에스크로 슬롯 번호는 다르다 — 화면이 둘을 혼동하지 않는지 보려고 일부러 어긋냄
+    if (job.status === 'CREATED') return HttpResponse.json({ available: false, reason: 'ESCROW_JOB_ID_MISSING', jobId: job.jobId, escrowJobId: null })
+    // 상태별로 체인에 쌓인 거래 — FUND 부터 시작해 진행될수록 늘어난다
+    const base = 11_338_610
+    const hash = (n: number) => `0x${String(n).padStart(8, '0')}${'d'.repeat(48)}${String(job.jobId).padStart(8, '0')}`
+    const txs = [{ type: 'FUND', txHash: hash(1), blockNumber: base, status: 'SUCCESS' }]
+    if (job.status !== 'FUNDED') txs.push({ type: 'ACCEPT', txHash: hash(2), blockNumber: base + 3, status: 'SUCCESS' })
+    if (job.status === 'COMPLETED') txs.push({ type: 'SUBMIT', txHash: hash(3), blockNumber: base + 11, status: 'SUCCESS' })
+    if (job.status === 'CANCELLED' || job.status === 'FAILED') txs.push({ type: 'ABORT', txHash: hash(4), blockNumber: base + 9, status: 'SUCCESS' })
+    const state =
+      job.status === 'COMPLETED' ? 'COMPLETED' : job.status === 'CANCELLED' || job.status === 'FAILED' ? 'CANCELLED' : job.status === 'FUNDED' ? 'FUNDED' : 'ASSIGNED'
+    return HttpResponse.json({
+      available: true,
+      reason: null,
+      jobId: job.jobId,
+      escrowJobId,
+      chain: { chainId: 31221, contractAddress: '0x6617a1b2c3d4e5f60718293a4b5c6d7e8f903c56' },
+      onchain: {
+        state,
+        client: '0xc11e07a11e700000000000000000000000000001',
+        provider: '0x9009d1de7000000000000000000000000000d002',
+        operator: null,
+        price: '1200000000000000000000',
+        resultHash: job.status === 'COMPLETED' ? (job.resultHash ?? `0x${String(job.jobId).padStart(64, 'a')}`) : null,
+        deadline: 1_790_000_000,
+      },
+      evidence: { latestBlockNumber: base + 42, verifiedAt: new Date().toISOString(), source: 'BLOCKCHAIN_RPC' },
+      transactions: txs,
+    })
+  }),
+
   http.post(URL, async ({ request }) => {
     await delay()
     if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ApiError } from '@/lib/fetcher'
-import { getJobResultVerification } from '../api'
+import { getJobOnchain, getJobResultVerification } from '../api'
 import { formatDuration } from '../format'
 import type { JobDetail, ResultVerification } from '../types'
 import { LossChart } from './lossChart'
@@ -54,6 +54,27 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
       ignore = true
     }
   }, [completed, job.jobId, retry])
+  // 체인이 말하는 resultHash — DB 스냅샷(job.resultHash)이 아니라 백엔드가 RPC 로 다시 읽은 값.
+  // 이 조회가 실패해도 검증 패널은 그대로 떠야 하므로 따로 간다(스펙 §13). 실패·미가용이면 null.
+  // ⚠️ 위 검증 조회와 같은 forJob 방어가 필요하다 — 안 하면 작업을 전환할 때 이전 작업의 체인 hash 와
+  //    현재 작업의 backend hash 를 비교해 거짓 "불일치"가 뜬다(이전 리뷰 차단 사항과 같은 레이스)
+  const [chain, setChain] = useState<{ hash: string | null; forJob: number } | null>(null)
+  useEffect(() => {
+    if (!completed) return
+    let ignore = false
+    const forJob = job.jobId
+    getJobOnchain(forJob)
+      .then((o) => {
+        if (!ignore) setChain({ hash: (o.available && o.onchain?.resultHash) || null, forJob })
+      })
+      .catch(() => {
+        if (!ignore) setChain({ hash: null, forJob })
+      })
+    return () => {
+      ignore = true
+    }
+  }, [completed, job.jobId, retry])
+
   // 현재 jobId 의 응답이 아니면(방금 다른 작업으로 이동) 아직 로딩 중인 것
   const view: State = state.s === 'loading' || state.forJob === job.jobId ? state : { s: 'loading' }
 
@@ -103,9 +124,13 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   const a = v.adapter
   // 배지는 adapter.valid 기준 — null(판단 불가)이면 배지를 달지 않는다. "품질 검증"이 아니라 구조·수치 확인이다
   const badge = a?.valid === true ? { label: '정상 완료', cls: 'bg-primary/12 text-primary-dark' } : a?.valid === false ? { label: '검증 이상 발견', cls: 'bg-danger-tint text-danger' } : null
-  // 무결성: 검증 API 의 결과 파일 hash ↔ 상세 응답의 resultHash(워커가 체인에 제출한 값)
+  // 무결성: 결과 파일 hash ↔ 체인에 적힌 hash.
+  // 비교 상대는 **체인에서 읽은 값**이어야 "체인과 대조했다"고 말할 수 있다. 체인을 못 읽었을 때만
+  // DB 에 남은 값(워커가 제출한 값)으로 물러서고, 그때는 라벨로 출처를 정직하게 밝힌다.
   const backendHash = v.integrity?.resultHash ?? null
-  const chainHash = job.resultHash
+  const fromChain = chain?.forJob === job.jobId ? chain.hash : null
+  const chainHash = fromChain ?? job.resultHash
+  const chainHashLabel = fromChain ? 'Chain' : '워커가 제출한 Hash'
   const hashMatch = backendHash != null && chainHash != null ? backendHash.toLowerCase() === chainHash.toLowerCase() : null
 
   return (
@@ -180,7 +205,7 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
               {shortHash(backendHash)}
             </span>
             <span className="text-caption tabular-nums text-dark" title={chainHash ?? undefined}>
-              <span className="text-text-muted">Chain </span>
+              <span className="text-text-muted">{chainHashLabel} </span>
               {chainHash ? shortHash(chainHash) : '—'}
             </span>
             {hashMatch == null ? (

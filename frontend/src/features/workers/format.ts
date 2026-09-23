@@ -28,3 +28,17 @@ export function formatVram(mb: number): string {
 export function formatTokensPerSec(v: number): string {
   return `${Math.round(v).toLocaleString('ko-KR')} tok/s`
 }
+
+/** 작업 이력 — 성공률만 띄우면 "몇 건 중에요?"가 바로 나온다. **분모를 항상 같이 보여 준다.**
+ *  실행 0건은 `신규`(성공률 없음) — 신규 공급자를 "성공률 0%"로 낙인찍지 않는다(스펙 §6).
+ *  백엔드가 아직 이력 필드를 안 주는 서버면 null 을 돌려 화면이 칸을 비운다. */
+export function formatReliability(w: { completedCount?: number; totalExecutionCount?: number; successRate?: number | null }):
+  | { short: string; detail: string }
+  | null {
+  const total = w.totalExecutionCount
+  if (total == null) return null // 이 서버는 이력을 주지 않는다
+  if (total === 0) return { short: '신규', detail: '아직 수행한 작업이 없습니다.' }
+  const done = w.completedCount ?? 0
+  const rate = w.successRate != null ? `${Math.round(w.successRate * 100)}%` : '—'
+  return { short: `${done} / ${total}`, detail: `완료 ${done}건 · 실행 ${total}건 · 성공률 ${rate}` }
+}
