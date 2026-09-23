@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ApiError } from '@/lib/fetcher'
-import { getJob } from '@/features/jobs/api'
+import { getJob, getJobOnchain } from '@/features/jobs/api'
 import { ACTIVE_STATUSES, STATUS_META } from '@/features/jobs/format'
-import type { JobDetail, JobStatus } from '@/features/jobs/types'
+import { OnchainPanel } from './onchainPanel'
+import type { JobDetail, JobOnchain, JobStatus } from '@/features/jobs/types'
 
 // 블록체인 시각화 가이드 기반 Job Flow — 고정 2D 배치(다 펴놓기) + 별배경.
 // 실제 Job 상태를 폴링해 현재 온체인 노드가 빛난다.
@@ -112,17 +113,32 @@ export function ChainFlow({ jobId }: { jobId: number }) {
     [jobId],
   )
 
+  // 온체인 조회는 **따로** 간다 — 이게 실패해도 그래프·상태는 그대로 보여야 한다(스펙 §13 Error Isolation).
+  // 실패는 null 로 흘려 패널만 사라지고, available=false 는 패널이 사유를 설명한다.
+  const [onchain, setOnchain] = useState<JobOnchain | null>(null)
+  const loadOnchain = useCallback(
+    () =>
+      getJobOnchain(jobId)
+        .then(setOnchain)
+        .catch(() => setOnchain(null)),
+    [jobId],
+  )
+
   const active = state.s === 'ready' && ACTIVE_STATUSES.has(state.job.status)
   useEffect(() => {
     void load()
-  }, [load])
+    void loadOnchain()
+  }, [load, loadOnchain])
   useEffect(() => {
     if (!active) return
     const t = setInterval(() => {
-      if (document.visibilityState === 'visible') void load(true)
+      if (document.visibilityState === 'visible') {
+        void load(true)
+        void loadOnchain() // 체인 기록도 같이 — 예치·수락이 진행되면 거래가 늘어난다
+      }
     }, POLL_MS)
     return () => clearInterval(t)
-  }, [active, load])
+  }, [active, load, loadOnchain])
 
   const status = state.s === 'ready' ? state.job.status : null
 
@@ -171,6 +187,7 @@ export function ChainFlow({ jobId }: { jobId: number }) {
             </span>
           </span>
           <Graph status={status} />
+          <OnchainPanel data={onchain} dbStatus={state.job.status} />
         </section>
       )}
     </>

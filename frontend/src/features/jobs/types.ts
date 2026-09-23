@@ -9,12 +9,14 @@ import type {
   datasetMetadataSchema,
   datasetSchema,
   fundResponseSchema,
+  escrowStateSchema,
   estimateRequestSchema,
   estimateSchema,
   gpuFitSchema,
   gpuOptionSchema,
   gpuSchema,
   jobDetailSchema,
+  jobOnchainSchema,
   jobPageSchema,
   jobStatusSchema,
   jobSpecSchema,
@@ -56,3 +58,6 @@ export type JobDetail = z.infer<typeof jobDetailSchema>
 
 export type LossPoint = z.infer<typeof lossPointSchema>
 export type ResultVerification = z.infer<typeof resultVerificationSchema>
+
+export type JobOnchain = z.infer<typeof jobOnchainSchema>
+export type EscrowState = z.infer<typeof escrowStateSchema>
