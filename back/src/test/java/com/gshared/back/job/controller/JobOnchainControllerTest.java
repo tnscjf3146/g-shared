@@ -2,6 +2,7 @@ package com.gshared.back.job.controller;
 
 import com.gshared.back.global.security.userdetails.CustomUserDetails;
 import com.gshared.back.job.dto.response.JobOnchainResponse;
+import com.gshared.back.job.realtime.JobRealtimeSubscriptionService;
 import com.gshared.back.job.service.JobAdapterService;
 import com.gshared.back.job.service.JobDatasetService;
 import com.gshared.back.job.service.JobEstimateService;
@@ -26,11 +27,12 @@ class JobOnchainControllerTest {
     @Mock JobEstimateService estimates;
     @Mock JobDatasetService datasets;
     @Mock JobAdapterService adapters;
+    @Mock JobRealtimeSubscriptionService realtimeSubscriptions;
 
     @Test
     void authenticatedOwnerIdentityIsForwardedToTheOnchainLookup() {
         JobController controller = new JobController(jobs, resultVerification, onchainVerification,
-                estimates, datasets, adapters);
+                estimates, datasets, adapters, realtimeSubscriptions);
         CustomUserDetails user = CustomUserDetails.of(7L, Role.USER);
         JobOnchainResponse expected = JobOnchainResponse.unavailable(13L, null, "ESCROW_JOB_ID_MISSING");
         when(onchainVerification.get(7L, 13L)).thenReturn(expected);

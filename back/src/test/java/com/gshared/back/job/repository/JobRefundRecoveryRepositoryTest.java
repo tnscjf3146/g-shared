@@ -122,7 +122,8 @@ class JobRefundRecoveryRepositoryTest {
         EscrowVerification escrow = mock(EscrowVerification.class);
         EscrowKeeperSigner signer = mock(EscrowKeeperSigner.class);
         EscrowSettlementService settlement = new EscrowSettlementService(
-                jobs, mock(WorkerRepository.class), mock(JobService.class));
+                jobs, mock(WorkerRepository.class), mock(JobService.class),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         EscrowRefundRecovery recovery = new EscrowRefundRecovery(jobs, chain, settlement);
         EscrowTimeoutKeeper keeper = new EscrowTimeoutKeeper(jobs, escrow, chain, signer, settlement);
         var locked = new EscrowChainClient.OnChainJob("0x" + "a".repeat(40), EscrowJobState.ASSIGNED,
