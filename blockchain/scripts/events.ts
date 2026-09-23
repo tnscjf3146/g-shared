@@ -7,6 +7,8 @@
  *
  *   npm run events                    배포 이후 전체
  *   npm run events -- --job 13        작업 하나만 (escrow jobId)
+ *   npm run events:follow             새 블록을 계속 따라간다 (발표 시연 옆 화면용)
+ *   npm run events:stats              체인 기준 집계 (발표 대본의 [N] 값)
  *
  * 키가 필요 없다. 읽기만 한다. RPC 는 SSAFY_RPC_URL 이 있으면 그것을 쓴다.
  */
@@ -180,6 +182,66 @@ async function list(job: bigint | null): Promise<void> {
   console.log(`\n${events.length}건`);
 }
 
+async function follow(job: bigint | null, tail: number, intervalSec: number): Promise<void> {
+  let latest = await client.getBlockNumber();
+  header(latest);
+  const past = forJob(await readEvents(DEPLOY_BLOCK, latest), job);
+  for (const e of past.slice(-tail)) await print(e);
+  console.log(`\n── 여기부터 새 블록 (${intervalSec}초마다 확인, 끝내려면 Ctrl+C) ──\n`);
+
+  const tty = process.stdout.isTTY;
+  let next = latest + 1n;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+    try {
+      latest = await client.getBlockNumber();
+      if (latest < next) continue;
+      const fresh = forJob(await readEvents(next, latest), job);
+      if (tty) process.stdout.write("\r\x1b[2K");
+      for (const e of fresh) await print(e);
+      next = latest + 1n;
+      if (tty) process.stdout.write(`블록 ${num(latest)} 까지 확인 · 대기 중`);
+    } catch (err) {
+      // 노드가 잠깐 안 받는 일은 흔하다. 멈추지 않고 다음 주기에 같은 구간부터 다시 읽는다.
+      if (tty) process.stdout.write("\r\x1b[2K");
+      console.log(`RPC 응답 없음 — ${intervalSec}초 뒤 다시 시도 (${(err as Error).message.split("\n")[0]})`);
+    }
+  }
+}
+
+async function stats(): Promise<void> {
+  const latest = await client.getBlockNumber();
+  header(latest);
+
+  const nextJobId = (await client.readContract({
+    address: ESCROW, abi: ABI, functionName: "nextJobId",
+  })) as bigint;
+
+  const byState = new Map<string, number>();
+  for (let id = 1n; id < nextJobId; id++) {
+    const job = (await client.readContract({
+      address: ESCROW, abi: ABI, functionName: "jobs", args: [id],
+    })) as readonly unknown[];
+    const state = STATE_NAME[Number(job[1])] ?? String(job[1]);
+    byState.set(state, (byState.get(state) ?? 0) + 1);
+  }
+
+  const events = await readEvents(DEPLOY_BLOCK, latest);
+  const count = (name: string) => events.filter((e) => e.name === name).length;
+  const total = Number(nextJobId - 1n);
+  const open = (byState.get("FUNDED") ?? 0) + (byState.get("ASSIGNED") ?? 0);
+
+  console.log(`체인에 기록된 작업     ${total}건`);
+  console.log(`  완료 (COMPLETED)     ${byState.get("COMPLETED") ?? 0}`);
+  console.log(`  환불 (CANCELLED)     ${byState.get("CANCELLED") ?? 0}    그중 settleTimeout ${count("JobTimedOut")} · 반납 ${count("JobAborted")}`);
+  console.log(`  진행 중              ${open}`);
+  console.log(`\n이벤트 ${events.length}건`);
+  for (const name of Object.keys(LABEL)) {
+    const n = count(name);
+    if (n > 0) console.log(`  ${pad(LABEL[name], 12)} ${String(n).padStart(3)}   ${name}`);
+  }
+}
+
 // ── 진입점 ───────────────────────────────────────────────────────────
 
 function option(name: string): string | undefined {
@@ -190,6 +252,11 @@ function option(name: string): string | undefined {
 async function main(): Promise<void> {
   const jobArg = option("--job");
   const job = jobArg === undefined ? null : BigInt(jobArg);
+
+  if (process.argv.includes("stats")) return stats();
+  if (process.argv.includes("--follow")) {
+    return follow(job, Number(option("--tail") ?? 5), Number(option("--interval") ?? 3));
+  }
   return list(job);
 }
 
