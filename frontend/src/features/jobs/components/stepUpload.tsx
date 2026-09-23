@@ -35,11 +35,11 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">5. 업로드</h2>
-        <p className="text-[15px] text-text-muted">아래 내용으로 워크로드를 등록합니다. 지갑에 예상 비용만큼 GSC 가 있어야 등록할 수 있습니다. GPU 배정과 최종 견적은 서버가 다시 계산합니다.</p>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">업로드</h2>
+        <p className="text-label-sm text-text-muted">등록 내용을 확인하세요. GPU 배정과 최종 견적은 서버가 확정합니다.</p>
       </header>
 
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-hairline bg-surface-1 p-5 text-[14px]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-hairline bg-surface-1 p-5 text-caption">
         {(
           [
             ['워크로드', workload?.name],
@@ -62,16 +62,16 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
       {/* 지갑 잔액 vs 예상 비용 */}
       <section className="flex flex-col gap-3 rounded-lg border border-hairline bg-surface-1 p-5" aria-live="polite">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-[15px] font-semibold text-dark">지갑 잔액</h3>
+          <h3 className="text-label-sm font-semibold text-dark">지갑 잔액</h3>
           {funds.status === 'ready' && (
-            <button type="button" onClick={onRecheck} className="text-[13px] text-primary hover:underline">
+            <button type="button" onClick={onRecheck} className="text-caption text-primary hover:underline">
               잔액 다시 확인
             </button>
           )}
         </div>
         {funds.status === 'loading' && <div aria-busy aria-label="잔액 확인 중" className="h-6 w-48 animate-pulse rounded-xs bg-neutral-tint" />}
         {funds.status === 'error' && (
-          <p role="alert" className="text-[14px] text-danger">
+          <p role="alert" className="text-caption text-danger">
             잔액을 확인하지 못했습니다.{' '}
             <button type="button" onClick={onRecheck} className="underline">
               다시 시도
@@ -80,7 +80,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
         )}
         {funds.status === 'nowallet' && (
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[14px] text-dark">연결된 지갑이 없습니다. 비용은 지갑의 GSC 로 예치됩니다.</p>
+            <p className="text-caption text-dark">연결된 지갑이 없습니다. 비용은 지갑의 GSC 로 예치됩니다.</p>
             <div className="flex gap-2">
               {/* 새 탭에서 연결하고 돌아오면 [지갑 연결 확인]으로 이 화면만 다시 확인 */}
               <button type="button" onClick={onRecheck} className="btn btn-md btn-secondary">
@@ -94,19 +94,19 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
         )}
         {funds.status === 'ready' && (
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <dl className="flex gap-8 text-[14px]">
+            <dl className="flex gap-8 text-caption">
               <div className="flex flex-col">
                 <dt className="text-text-muted">보유</dt>
-                <dd className={`text-[18px] font-bold tabular-nums ${enough ? 'text-dark' : 'text-danger'}`}>{formatUnits(funds.balance)} GSC</dd>
+                <dd className={`text-body font-bold tabular-nums ${enough ? 'text-dark' : 'text-danger'}`}>{formatUnits(funds.balance)} GSC</dd>
               </div>
               <div className="flex flex-col">
                 <dt className="text-text-muted">예상 비용</dt>
-                <dd className="text-[18px] font-bold tabular-nums text-dark">{formatCost(cost)}</dd>
+                <dd className="text-body font-bold tabular-nums text-dark">{formatCost(cost)}</dd>
               </div>
               {shortage !== null && (
                 <div className="flex flex-col">
                   <dt className="text-text-muted">부족</dt>
-                  <dd className="text-[18px] font-bold tabular-nums text-danger">{formatUnits(shortage)} GSC</dd>
+                  <dd className="text-body font-bold tabular-nums text-danger">{formatUnits(shortage)} GSC</dd>
                 </div>
               )}
             </dl>
@@ -117,11 +117,11 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
             )}
           </div>
         )}
-        {funds.status === 'ready' && !enough && <p className="text-[12px] text-text-muted">지갑에 GSC 를 채운 뒤 [잔액 다시 확인]을 누르면 아래 업로드 버튼이 켜집니다. 이 화면의 선택은 유지됩니다.</p>}
+        {funds.status === 'ready' && !enough && <p className="text-hint text-text-muted">GSC 충전 후 [잔액 다시 확인] · 선택한 내용은 유지됩니다</p>}
       </section>
 
       {state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}
-      <p className="text-[13px] text-text-muted">
+      <p className="text-caption text-text-muted">
         데이터셋{adapterFile ? '과 어댑터 파일은' : '은'} 등록 직후 서버에 올라가 해시를 검증한 뒤 작업에 사용됩니다.
         {isTrain ? ' 어댑터 이름은 등록 뒤에도 작업 상세에서 바꿀 수 있고, 다운로드 파일 이름이 됩니다.' : ''}
       </p>

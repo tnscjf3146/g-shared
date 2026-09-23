@@ -125,8 +125,8 @@ export function WorkloadWizard() {
   if (catalog === 'error') {
     return (
       <section className="card flex w-full flex-col items-start gap-3 p-10">
-        <p className="text-[15px] text-dark">선택 항목을 불러오지 못했습니다.</p>
-        <button type="button" onClick={() => location.reload()} className="text-[14px] text-primary hover:underline">
+        <p className="text-label-sm text-dark">선택 항목을 불러오지 못했습니다.</p>
+        <button type="button" onClick={() => location.reload()} className="text-caption text-primary hover:underline">
           다시 시도 →
         </button>
       </section>
@@ -241,7 +241,7 @@ export function WorkloadWizard() {
     <div className="flex w-full flex-col gap-6">
       <Stepper steps={STEPS} current={step} maxReached={maxReached} onSelect={goTo} />
       {restored === 'draft' && (
-        <p role="status" className="flex items-center justify-between gap-3 rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
+        <p role="status" className="flex items-center justify-between gap-3 rounded-md bg-neutral-tint px-4 py-3 text-caption text-dark">
           이전에 작성하던 내용을 이어서 보여 드립니다.
           <button type="button" onClick={reset} disabled={submitting !== null} className="shrink-0 text-primary hover:underline">
             처음부터
@@ -257,7 +257,7 @@ export function WorkloadWizard() {
         {step === 4 && spec && <StepUpload catalog={catalog} spec={spec} state={state} funds={funds} onRecheck={recheck} />}
 
         {(error || submitting) && (
-          <p role={error ? 'alert' : 'status'} className={`rounded-md px-4 py-3 text-[14px] ${error ? 'bg-danger-tint text-danger' : 'bg-neutral-tint text-dark'}`}>
+          <p role={error ? 'alert' : 'status'} className={`rounded-md px-4 py-3 text-caption ${error ? 'bg-danger-tint text-danger' : 'bg-neutral-tint text-dark'}`}>
             {error ?? submitting}
           </p>
         )}
@@ -267,7 +267,7 @@ export function WorkloadWizard() {
           <Button variant="secondary" className={step === 0 ? 'invisible' : undefined} disabled={step === 0 || submitting !== null} onClick={() => goTo(step - 1)}>
             이전
           </Button>
-          <span className="text-[13px] tabular-nums text-text-muted">
+          <span className="text-caption tabular-nums text-text-muted">
             {step + 1} / {STEPS.length}
           </span>
           {last ? (

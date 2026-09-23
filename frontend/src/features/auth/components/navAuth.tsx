@@ -10,7 +10,7 @@ import { useAuth } from '../store'
 // 테두리·배경 없는 텍스트/아이콘 버튼 — currentColor 라 다크·라이트 테마 자동 대응, hover 로 불투명도만
 // 터치 타깃 최소 44px 확보(size-11) — 아이콘은 가운데. hover 로 불투명도만
 const ICON_BTN = 'inline-flex size-11 items-center justify-center rounded-md opacity-70 transition-opacity hover:opacity-100 disabled:opacity-40'
-const TEXT_BTN = 'text-[15px] font-medium opacity-75 transition-opacity hover:opacity-100'
+const TEXT_BTN = 'text-label-sm font-medium opacity-75 transition-opacity hover:opacity-100'
 function UserIcon() {
   return (
     <svg aria-hidden width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

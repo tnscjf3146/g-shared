@@ -19,10 +19,12 @@ import com.gshared.back.job.dto.response.FundJobResponse;
 import com.gshared.back.job.dto.response.GpuOptionResponse;
 import com.gshared.back.job.dto.response.JobDetailResponse;
 import com.gshared.back.job.dto.response.JobPageResponse;
+import com.gshared.back.job.dto.response.JobOnchainResponse;
 import com.gshared.back.job.dto.response.JobResultVerificationResponse;
 import com.gshared.back.job.service.JobAdapterService;
 import com.gshared.back.job.service.JobDatasetService;
 import com.gshared.back.job.service.JobEstimateService;
+import com.gshared.back.job.service.JobOnchainVerificationService;
 import com.gshared.back.job.service.JobResultVerificationService;
 import com.gshared.back.job.service.JobService;
 import jakarta.validation.Valid;
@@ -44,6 +46,7 @@ public class JobController {
 
     private final JobService jobService;
     private final JobResultVerificationService jobResultVerificationService;
+    private final JobOnchainVerificationService jobOnchainVerificationService;
     private final JobEstimateService jobEstimateService;
     private final JobDatasetService jobDatasetService;
     private final JobAdapterService jobAdapterService;
@@ -99,6 +102,15 @@ public class JobController {
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
         return ResponseEntity.ok(jobResultVerificationService.getVerification(userDetails.getId(), jobId));
+    }
+
+    /** DB는 온체인 위치만 제공하고, 상태·resultHash·영수증은 실제 RPC에서 다시 읽는다. */
+    @GetMapping("/{jobId}/onchain")
+    public ResponseEntity<JobOnchainResponse> getOnchain(
+            @PathVariable Long jobId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        return ResponseEntity.ok(jobOnchainVerificationService.get(userDetails.getId(), jobId));
     }
 
     @GetMapping

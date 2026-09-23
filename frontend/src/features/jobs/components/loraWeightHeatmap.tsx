@@ -23,7 +23,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
   const [selected, setSelected] = useState<Cell | null>(null)
 
   const layers = Object.keys(data).sort((x, y) => Number(x) - Number(y))
-  if (layers.length === 0) return <p className="text-[14px] text-text-muted">Layer별 weight 변화 데이터가 제공되지 않습니다.</p>
+  if (layers.length === 0) return <p className="text-caption text-text-muted">Layer별 weight 변화 데이터가 제공되지 않습니다.</p>
 
   // 전체 셀 min/max 로 0~1 정규화 — MVP 라 값 왜곡 없는 선형만(극단값이 문제되면 log/percentile 검토)
   const values = layers.flatMap((l) => MODULES.map(([, full]) => data[l]?.[full]).filter((v): v is number => v != null))
@@ -39,7 +39,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
             <tr>
               <td />
               {MODULES.map(([short, full]) => (
-                <th key={full} title={full} className="min-w-[36px] pb-1 text-center text-[11px] font-medium text-text-muted">
+                <th key={full} title={full} className="min-w-[36px] pb-1 text-center text-micro font-medium text-text-muted">
                   {short}
                 </th>
               ))}
@@ -48,7 +48,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
           <tbody>
             {layers.map((layer) => (
               <tr key={layer}>
-                <th scope="row" className="pr-2 text-right text-[11px] font-medium tabular-nums text-text-muted">
+                <th scope="row" className="pr-2 text-right text-micro font-medium tabular-nums text-text-muted">
                   L{layer}
                 </th>
                 {MODULES.map(([, full]) => {
@@ -80,7 +80,7 @@ export function LoraWeightHeatmap({ data }: { data: Record<string, Record<string
         </table>
       </div>
       {/* 선택 셀 상세 — 모바일 tap 도 이 줄로 확인한다 */}
-      <p className="min-h-[20px] text-[13px] tabular-nums text-text-muted" aria-live="polite">
+      <p className="min-h-[20px] text-caption tabular-nums text-text-muted" aria-live="polite">
         {selected ? (
           <>
             Layer {selected.layer} · <span className="font-medium text-dark">{selected.module}</span> · Weight delta {selected.value}

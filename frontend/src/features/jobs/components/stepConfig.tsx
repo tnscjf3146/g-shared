@@ -60,40 +60,40 @@ export function StepConfig({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">2. 모델 · 설정</h2>
-        <p className="text-[15px] text-text-muted">
+        <h2 className="text-h2 font-bold tracking-heading text-dark">모델 · 설정</h2>
+        <p className="text-label-sm text-text-muted">
           {workload?.name} · {model?.name ?? '모델 미선택'}
         </p>
       </header>
 
       {/* 모델 — G-shared 제공 모델만(1단계에서 선택). 읽기 전용 확인 */}
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-text-muted">모델</legend>
+        <legend className="text-caption font-medium text-text-muted">모델</legend>
         <div className="card-quiet flex items-center justify-between gap-3 p-4">
-          <span className="text-[15px] font-semibold text-dark">{model ? model.name : '1단계에서 모델을 선택해 주세요'}</span>
-          {model && <span className="text-[13px] text-text-muted">{model.params}</span>}
+          <span className="text-label-sm font-semibold text-dark">{model ? model.name : '1단계에서 모델을 선택해 주세요'}</span>
+          {model && <span className="text-caption text-text-muted">{model.params}</span>}
         </div>
       </fieldset>
 
       {/* 학습 수준 — 학습 워크로드만 */}
       {isTrain && (
         <fieldset className="flex flex-col gap-2">
-          <legend className="text-[13px] font-medium text-text-muted">학습 수준</legend>
+          <legend className="text-caption font-medium text-text-muted">학습 수준</legend>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             {(Object.keys(AUTO_MODE_META) as AutoMode[]).map((k) => {
               const on = state.level === k && !advanced
               return (
                 <label key={k} className={`card-quiet flex cursor-pointer flex-col gap-1 p-4 transition-colors ${advanced ? 'opacity-50' : ''} ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
                   <input type="radio" name="level" value={k} checked={state.level === k} disabled={advanced} onChange={() => onChange({ level: k })} className="sr-only" />
-                  <span className="text-[15px] font-semibold text-dark">{AUTO_MODE_META[k].label}</span>
-                  <span className="text-[13px] text-text-muted">{AUTO_MODE_META[k].description}</span>
+                  <span className="text-label-sm font-semibold text-dark">{AUTO_MODE_META[k].label}</span>
+                  <span className="text-caption text-text-muted">{AUTO_MODE_META[k].description}</span>
                 </label>
               )
             })}
           </div>
           {/* 네이티브 <details> — 고급 설정은 접어 둔다 */}
           <details open={advanced} onToggle={(e) => toggleAdvanced((e.target as HTMLDetailsElement).open)} className="card-quiet mt-1">
-            <summary className="cursor-pointer text-[14px] font-semibold text-dark marker:text-text-muted">고급: 학습 설정 직접 입력</summary>
+            <summary className="cursor-pointer text-caption font-semibold text-dark marker:text-text-muted">고급: 학습 설정 직접 입력</summary>
             <div className="grid grid-cols-2 gap-4 pt-4 md:grid-cols-4">
               {(
                 [
@@ -108,14 +108,14 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 </Field>
               ))}
             </div>
-            <p className="pt-3 text-[12px] text-text-muted">직접 입력하면 학습 수준 대신 이 값으로 견적을 냅니다. 상한은 없고, 실행 가능 여부(VRAM 등)는 서버가 판단합니다.</p>
+            <p className="pt-3 text-hint text-text-muted">직접 입력한 값으로 견적을 냅니다 · 실행 가능 여부는 서버가 판단</p>
           </details>
         </fieldset>
       )}
 
       {/* 어댑터 출발점 — 처음부터 / 내 완료 작업 이어서(v2·v3) / .tar 업로드. 추론·평가는 "적용"의 의미 */}
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-[13px] font-medium text-text-muted">{isTrain ? '학습 시작점' : '어댑터 (선택) — 모델에 적용'}</legend>
+        <legend className="text-caption font-medium text-text-muted">{isTrain ? '학습 시작점' : '어댑터 (선택) — 모델에 적용'}</legend>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {(
             [
@@ -136,9 +136,9 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 }}
                 className="sr-only"
               />
-              <span className="text-[15px] font-semibold text-dark">{label}</span>
+              <span className="text-label-sm font-semibold text-dark">{label}</span>
               {/* break-keep: 한국어가 단어(어절) 중간에서 끊기지 않고 띄어쓰기 단위로 줄바꿈 */}
-              <span className="text-[13px] break-keep text-text-muted">{description}</span>
+              <span className="text-caption break-keep text-text-muted">{description}</span>
             </label>
           ))}
         </div>
@@ -146,7 +146,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
         {state.adapterSource === 'job' && (
           <div className="flex flex-col gap-1.5 pt-1">
             <AdapterPicker catalog={catalog} value={chosen} onChange={(p) => onChange({ parent: p })} describedBy="adapter-parent-hint" />
-            <p id="adapter-parent-hint" className="text-[12px] text-text-muted">
+            <p id="adapter-parent-hint" className="text-hint text-text-muted">
               {chosen ? `${adapterLabel(chosen.jobId, chosen.name, chosen.version)} 에서 이어서 학습합니다. 파일을 다시 올릴 필요가 없습니다.` : '이어서 학습할 어댑터를 선택해 주세요.'}
             </p>
           </div>
@@ -162,11 +162,11 @@ export function StepConfig({ catalog, state, onChange }: Props) {
               hint="같은 기본 모델로 학습한 결과여야 합니다 · 1 GiB 이하"
             />
             {fileError ? (
-              <p role="alert" className="text-[13px] text-danger">
+              <p role="alert" className="text-caption text-danger">
                 {fileError}
               </p>
             ) : (
-              <p className="text-[12px] text-text-muted">비압축 .tar 안에 adapter_config.json · adapter_model.safetensors 가 있어야 합니다. 완료된 작업에서 받은 파일을 그대로 올려도 됩니다.</p>
+              <p className="text-hint text-text-muted">비압축 .tar · adapter_config.json + adapter_model.safetensors 포함</p>
             )}
           </div>
         )}
@@ -174,7 +174,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
 
       {/* 결과 어댑터 이름 — 다운로드 파일 이름이 된다. 학습 워크로드만(추론·평가는 어댑터를 만들지 않는다) */}
       {isTrain && (
-        <Field id="adapterName" label="어댑터 이름" error={nameError} hint={<span className="text-[12px] text-text-muted">다운로드 파일 이름이 됩니다</span>}>
+        <Field id="adapterName" label="어댑터 이름" error={nameError} hint={<span className="text-hint text-text-muted">다운로드 파일 이름이 됩니다</span>}>
           <Input
             id="adapterName"
             value={state.adapterName}
@@ -184,7 +184,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
             aria-invalid={!!nameError}
             aria-describedby={nameError ? 'adapterName-error' : 'adapterName-hint'}
           />
-          <p id="adapterName-hint" className="text-[12px] text-text-muted">
+          <p id="adapterName-hint" className="text-hint text-text-muted">
             비워 두면 <span className="font-medium text-dark">{suggested}</span> 로 저장됩니다. {nextVersion ? `이번 학습 결과는 v${nextVersion} 입니다.` : ''} 등록 뒤에도 작업 상세에서 바꿀 수 있습니다.
           </p>
         </Field>

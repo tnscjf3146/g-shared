@@ -17,7 +17,7 @@ export function LossChart({ history }: { history: LossPoint[] }) {
   if (history.length === 0) {
     return (
       <div className="flex h-[170px] items-center justify-center">
-        <p className="text-[14px] text-text-muted">Step별 Loss 기록이 제공되지 않습니다.</p>
+        <p className="text-caption text-text-muted">Step별 Loss 기록이 제공되지 않습니다.</p>
       </div>
     )
   }
@@ -103,7 +103,7 @@ export function LossChart({ history }: { history: LossPoint[] }) {
           </g>
         )}
       </svg>
-      <figcaption className="text-[12px] tabular-nums text-text-muted">
+      <figcaption className="text-hint tabular-nums text-text-muted">
         Step {xMin} → {xMax} · Loss {ys[0].toFixed(3)} → {ys[ys.length - 1].toFixed(3)}
       </figcaption>
     </figure>

@@ -30,14 +30,14 @@ export function WalletPage() {
   if (state.status === 'error') {
     return (
       <section className="card flex w-[520px] max-w-full flex-col items-start gap-3 p-10">
-        <p className="text-[15px] text-dark">지갑 정보를 불러오지 못했습니다.</p>
+        <p className="text-label-sm text-dark">지갑 정보를 불러오지 못했습니다.</p>
         <button
           type="button"
           onClick={() => {
             setState({ status: 'loading' })
             void load()
           }}
-          className="text-[14px] text-primary hover:underline"
+          className="text-caption text-primary hover:underline"
         >
           다시 시도 →
         </button>

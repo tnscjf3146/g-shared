@@ -60,13 +60,13 @@ export function WalletDashboard({ address, onUnlinked }: { address: string; onUn
     <section className="card animate-enter flex w-[520px] max-w-full flex-col gap-6 p-10">
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <span className="text-[13px] font-medium text-text-muted">연결된 지갑</span>
+          <span className="text-caption font-medium text-text-muted">연결된 지갑</span>
           <button type="button" onClick={copy} title={address} className="group flex items-center gap-2 text-left">
             <span className="text-h2 font-bold tabular-nums tracking-heading text-dark">{shortAddress(address)}</span>
-            <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-[11px] text-text-muted group-hover:text-dark">{copied ? '복사됨' : '복사'}</span>
+            <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-micro text-text-muted group-hover:text-dark">{copied ? '복사됨' : '복사'}</span>
           </button>
         </div>
-        <span className="rounded-pill bg-success-tint px-3 py-1 text-[12px] font-semibold text-success">
+        <span className="rounded-pill bg-success-tint px-3 py-1 text-hint font-semibold text-success">
           {SSAFY_CHAIN.name} · {SSAFY_CHAIN.id}
         </span>
       </div>
@@ -77,18 +77,18 @@ export function WalletDashboard({ address, onUnlinked }: { address: string; onUn
       </dl>
       {/* MetaMask 자산 목록에 GSC 표시 — 사용자 승인 1회(정책상 강제 등록 불가). 거절해도 무해 */}
       {getProvider() && (
-        <button type="button" onClick={() => watchGsc(getProvider()!).catch(() => {})} className="self-start text-[13px] text-primary hover:underline">
+        <button type="button" onClick={() => watchGsc(getProvider()!).catch(() => {})} className="self-start text-caption text-primary hover:underline">
           MetaMask에 GSC 추가 →
         </button>
       )}
       {balances === 'error' && (
-        <button type="button" onClick={retryBalances} className="self-start text-[13px] text-primary hover:underline">
+        <button type="button" onClick={retryBalances} className="self-start text-caption text-primary hover:underline">
           잔액을 불러오지 못했습니다. 다시 시도 →
         </button>
       )}
 
       {error && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {error}
         </p>
       )}
@@ -103,8 +103,8 @@ export function WalletDashboard({ address, onUnlinked }: { address: string; onUn
 function BalanceRow({ label, value, pick }: { label: string; value: Balances | null | 'error'; pick: (b: Balances) => bigint }) {
   return (
     <div className="flex items-center justify-between px-5 py-4">
-      <dt className="text-[14px] font-medium text-text-muted">{label}</dt>
-      <dd className="text-[18px] font-semibold tabular-nums text-dark">
+      <dt className="text-caption font-medium text-text-muted">{label}</dt>
+      <dd className="text-body font-semibold tabular-nums text-dark">
         {value === null ? (
           <span aria-label="불러오는 중" className="inline-block h-5 w-24 animate-pulse rounded-xs bg-neutral-tint" />
         ) : value === 'error' ? (
