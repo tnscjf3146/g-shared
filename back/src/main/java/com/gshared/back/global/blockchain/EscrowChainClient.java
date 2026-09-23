@@ -278,9 +278,12 @@ public class EscrowChainClient {
                         if (logArray != null && logArray.isArray()) {
                             logArray.forEach(logs::add);
                         }
+                        Long blockNumber = hexQuantity(result.get("blockNumber"))
+                                .map(BigInteger::longValue).orElse(null);
                         return ReceiptLookup.found(new Receipt(
                                 success,
                                 to == null || to.isNull() ? null : to.asString(),
+                                blockNumber,
                                 logs));
                     } catch (RuntimeException e) {
                         log.warn("[CHAIN] 영수증을 읽지 못했다: {}", e.toString());
@@ -322,6 +325,11 @@ public class EscrowChainClient {
         return rpc("eth_getBlockByNumber", List.of("latest", false))
                 .flatMap(block -> hexQuantity(block.get("timestamp")))
                 .map(BigInteger::longValue);
+    }
+
+    /** 조회 응답이 어느 체인 시점의 증거인지 표시할 최신 블록 번호. */
+    public Optional<Long> latestBlockNumber() {
+        return rpc("eth_blockNumber", List.of()).flatMap(this::hexQuantity).map(BigInteger::longValue);
     }
 
     // ── 쓰기 (keeper 전용) ──────────────────────────────────────
@@ -540,7 +548,11 @@ public class EscrowChainClient {
     }
 
     /** {@code eth_getTransactionReceipt} 에서 필요한 것만. */
-    public record Receipt(boolean success, String to, List<JsonNode> logs) {
+    public record Receipt(boolean success, String to, Long blockNumber, List<JsonNode> logs) {
+
+        public Receipt(boolean success, String to, List<JsonNode> logs) {
+            this(success, to, null, logs);
+        }
 
         public boolean sentTo(String address) {
             return sameAddress(to, address);
