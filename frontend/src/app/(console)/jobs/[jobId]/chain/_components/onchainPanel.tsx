@@ -62,13 +62,24 @@ export function OnchainPanel({ data, dbStatus }: { data: JobOnchain | null; dbSt
     const raw = data.onchain?.price
     if (!raw) return null
     try {
-      return `${formatUnits(BigInt(raw), GSC_TOKEN.decimals)} ${GSC_TOKEN.symbol}`
+      const wei = BigInt(raw)
+      // 음수는 uint256 에서 나올 수 없다 — 나왔다면 백엔드가 깨진 것이다. formatUnits 는 예외를
+      // 던지지 않고 "0.0000" 을 돌려주므로, 막지 않으면 **틀린 금액이 조용히** 표시된다
+      if (wei < BigInt(0)) return null
+      return `${formatUnits(wei, GSC_TOKEN.decimals)} ${GSC_TOKEN.symbol}`
     } catch {
       return null
     }
   })()
-  // deadline 은 epoch seconds. 0 은 "기한 없음"이라 표시하지 않는다
-  const deadline = data.onchain?.deadline ? formatDateTime(new Date(data.onchain.deadline * 1000).toISOString()) : null
+  // deadline 은 epoch seconds. 0 은 "기한 없음"이라 표시하지 않는다.
+  // ⚠️ uint256 이라 Date 가 표현할 수 있는 범위(±8.64e15 ms)를 넘는 값이 올 수 있고,
+  //    그때 toISOString() 이 RangeError 를 던져 **패널이 아니라 화면 전체가 죽는다.** 먼저 검사한다
+  const deadline = (() => {
+    const sec = data.onchain?.deadline
+    if (!sec) return null
+    const d = new Date(sec * 1000)
+    return Number.isNaN(d.getTime()) ? null : formatDateTime(d.toISOString())
+  })()
 
   const chainState = data.onchain?.state ?? null
   const expected = EXPECTED_STATE[dbStatus]
