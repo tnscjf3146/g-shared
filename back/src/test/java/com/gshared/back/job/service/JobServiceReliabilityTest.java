@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -24,6 +25,7 @@ class JobServiceReliabilityTest {
     @Mock JobRepository jobs;
     @Mock WorkerRepository workers;
     @Mock EscrowVerification escrow;
+    @Mock ApplicationEventPublisher eventPublisher;
     @Mock Job job;
     @Mock Worker worker;
     @InjectMocks JobService service;

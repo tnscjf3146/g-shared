@@ -27,15 +27,19 @@ import com.gshared.back.job.service.JobEstimateService;
 import com.gshared.back.job.service.JobOnchainVerificationService;
 import com.gshared.back.job.service.JobResultVerificationService;
 import com.gshared.back.job.service.JobService;
+import com.gshared.back.job.realtime.JobRealtimeSubscriptionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -50,6 +54,7 @@ public class JobController {
     private final JobEstimateService jobEstimateService;
     private final JobDatasetService jobDatasetService;
     private final JobAdapterService jobAdapterService;
+    private final JobRealtimeSubscriptionService jobRealtimeSubscriptionService;
 
     @PostMapping
     public ResponseEntity<CreateJobResponse> create(
@@ -90,6 +95,19 @@ public class JobController {
             @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
         return ResponseEntity.ok(jobService.getJob(userDetails.getId(), jobId));
+    }
+
+    @GetMapping(value = "/{jobId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> subscribeToJobEvents(
+            @PathVariable Long jobId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
+    ) {
+        SseEmitter emitter = jobRealtimeSubscriptionService.subscribe(userDetails.getId(), jobId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .cacheControl(CacheControl.noCache())
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
     }
 
     /**

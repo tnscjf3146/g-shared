@@ -4,10 +4,12 @@ import com.gshared.back.global.blockchain.EscrowChainClient;
 import com.gshared.back.job.domain.Job;
 import com.gshared.back.job.domain.JobStatus;
 import com.gshared.back.job.repository.JobRepository;
+import com.gshared.back.job.realtime.JobRealtimeEvent;
 import com.gshared.back.worker.repository.WorkerRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -31,6 +33,7 @@ public class EscrowSettlementService {
     private final JobRepository jobRepository;
     private final WorkerRepository workerRepository;
     private final JobService jobService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** 호출자가 예치의 동일성과 미정산 상태를 체인에서 확인한 뒤 사용한다. */
     public boolean recoverRefund(Long jobId) {
@@ -102,6 +105,7 @@ public class EscrowSettlementService {
                     .ifPresent(worker -> worker.finishJob());
             jobService.sendCancel(workerId, jobId, "ESCROW_CANCELLED");
         }
+        eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
         return true;
     }
 
@@ -146,6 +150,7 @@ public class EscrowSettlementService {
         workerRepository.findById(workerId)
                 .filter(worker -> jobId.equals(worker.getCurrentJobId()))
                 .ifPresent(worker -> worker.finishJob());
+        eventPublisher.publishEvent(JobRealtimeEvent.completed(jobId));
         return true;
     }
 

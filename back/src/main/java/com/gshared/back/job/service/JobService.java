@@ -23,6 +23,8 @@ import com.gshared.back.job.dto.response.JobPageResponse;
 import com.gshared.back.job.dto.response.JobSummaryResponse;
 import com.gshared.back.job.exception.JobErrorCode;
 import com.gshared.back.job.repository.JobRepository;
+import com.gshared.back.job.realtime.JobRealtimeEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import com.gshared.back.user.domain.User;
@@ -81,6 +83,7 @@ public class JobService {
     private final ObjectMapper objectMapper;
     private final ObjectStorage objectStorage;
     private final StorageProperties storageProperties;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
@@ -473,6 +476,7 @@ public class JobService {
         // — 의뢰자가 온체인 cancelJob 을 건너뛰고 API 만 불러도 acceptTimeout 만료 후 settleTimeout 이 환불한다.
         if (refundConfirmedOnChain(jobId)) {
             if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
+                eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
                 return;   // 워커 손에 가기 전 — 알릴 상대가 없다
             }
         } else if (jobRepository.cancelToRefundWaitIfFunded(jobId, ownerId,
@@ -601,8 +605,12 @@ public class JobService {
     public boolean updateProgress(String workerId, Long jobId, Double percent,
                                   Integer step, Integer totalSteps,
                                   Integer epoch, Integer totalEpochs, Integer elapsedSec) {
-        return jobRepository.updateProgressIfRunning(jobId, workerId,
+        boolean updated = jobRepository.updateProgressIfRunning(jobId, workerId,
                 percent, step, totalSteps, epoch, totalEpochs, elapsedSec) > 0;
+        if (updated) {
+            eventPublisher.publishEvent(JobRealtimeEvent.progress(jobId, percent, step, totalSteps));
+        }
+        return updated;
     }
 
     /**
@@ -673,6 +681,7 @@ public class JobService {
             log.warn("[JOB] 취소 요청과 겹친 JOB_RESULT → COMPLETED jobId={} workerId={}", jobId, workerId);
         }
         workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        eventPublisher.publishEvent(JobRealtimeEvent.completed(jobId));
         return true;
     }
 
@@ -755,11 +764,12 @@ public class JobService {
         }
 
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
-        boolean failedFromRunning = updated > 0;
+        JobStatus terminalStatus = updated > 0 ? JobStatus.FAILED : null;
         if (updated == 0) {
             updated = jobRepository.cancelIfFailedWhileCancelling(
                     jobId, workerId, reason, abortTxHash, actualRuntimeSec, CANCEL_MET_FAILURE, now);
             if (updated > 0) {
+                terminalStatus = JobStatus.CANCELLED;
                 log.warn("[JOB] 취소 요청 중 실패 → CANCELLED jobId={} workerId={} reason={}",
                         jobId, workerId, reason);
             }
@@ -767,12 +777,17 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
-        if (failedFromRunning && WorkerReliabilityPolicy.isWorkerFailure(code)) {
+        if (terminalStatus == JobStatus.FAILED && WorkerReliabilityPolicy.isWorkerFailure(code)) {
             workerRepository.incrementFailedCount(workerId);
         }
         workerRepository.findById(workerId)
                 .filter(worker -> jobId.equals(worker.getCurrentJobId()))
                 .ifPresent(worker -> worker.finishJob());
+        if (terminalStatus == JobStatus.FAILED) {
+            eventPublisher.publishEvent(JobRealtimeEvent.failed(jobId, publicFailureCode(code)));
+        } else {
+            eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
+        }
         return true;
     }
 
@@ -794,6 +809,7 @@ public class JobService {
         workerRepository.findById(workerId)
                 .filter(worker -> jobId.equals(worker.getCurrentJobId()))
                 .ifPresent(worker -> worker.finishJob());
+        eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
         return true;
     }
 
@@ -859,5 +875,9 @@ public class JobService {
     private static String failReason(String code, String message) {
         String reason = (code != null ? code : "UNKNOWN") + (message != null ? ": " + message : "");
         return reason.length() > FAIL_REASON_MAX ? reason.substring(0, FAIL_REASON_MAX) : reason;
+    }
+
+    private static String publicFailureCode(String code) {
+        return code != null && code.matches("[A-Z0-9_]{1,64}") ? code : "UNKNOWN";
     }
 }
