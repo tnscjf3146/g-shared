@@ -48,7 +48,11 @@ function isStale(prev: JobRealtimeEvent | null, next: JobRealtimeEvent): boolean
   if (!prev) return false
   if (next.type !== 'JOB_PROGRESS') return false
   if (prev.type !== 'JOB_PROGRESS') return true // 이미 종료된 뒤 온 진행률은 버린다
-  if (prev.updatedAt && next.updatedAt && next.updatedAt !== prev.updatedAt) return next.updatedAt < prev.updatedAt
+  // ⚠️ 문자열 비교 금지 — 백엔드 Instant 는 소수부 자릿수가 가변이라("…03Z" vs "…03.400Z")
+  //    사전순으로는 'Z' > '.' 이 돼 늦은 이벤트를 옛것으로 오판한다. 시각으로 파싱해 비교한다
+  const a = prev.updatedAt ? Date.parse(prev.updatedAt) : NaN
+  const b = next.updatedAt ? Date.parse(next.updatedAt) : NaN
+  if (!Number.isNaN(a) && !Number.isNaN(b) && a !== b) return b < a
   return (next.progress ?? 0) < (prev.progress ?? 0)
 }
 
@@ -63,6 +67,10 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
     const ac = new AbortController()
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let wake: (() => void) | undefined // 대기 중인 재시도 — cleanup 에서 깨워 루프를 즉시 끝낸다
+    // 다른 작업으로 옮겨 붙을 때 이전 작업의 이벤트가 남아 있으면 안 된다.
+    // 특히 이전 작업의 종료 이벤트가 남으면 isStale 이 새 작업의 진행률을 전부 버린다
+    setState({ event: null, connected: false })
 
     const run = async () => {
       while (!stopped) {
@@ -76,6 +84,11 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
           // 404·501 = 이 서버엔 이 엔드포인트가 없다(구버전·목업). 일시 장애가 아니므로 재시도하지 않는다 —
           // 계속 두드리면 3초마다 404 를 만드는 루프가 된다. 폴링이 화면을 맡는다
           if (res.status === 404 || res.status === 501) return
+          // 토큰이 만료된 채로 재시도하면 3초마다 401 만 찍는다 — 한 번 갈아 끼우고 다음 회차에 다시 붙는다
+          if (res.status === 401) {
+            await reissue()
+            throw new Error('SSE 401')
+          }
           if (!res.ok || !res.body) throw new Error(`SSE ${res.status}`)
 
           // 재연결이면 그사이 놓친 변화가 있다 → REST 로 현재 상태를 맞추고 시작(스펙 §7 reconnect)
@@ -107,6 +120,7 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
         if (stopped) return
         setState((s) => ({ ...s, connected: false }))
         await new Promise<void>((r) => {
+          wake = r // cleanup 이 이 promise 를 깨워야 루프가 매달린 채 남지 않는다
           timer = setTimeout(r, RETRY_MS)
         })
       }
@@ -117,6 +131,7 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
       stopped = true
       ac.abort()
       if (timer) clearTimeout(timer)
+      wake?.() // 대기 중이면 깨워서 즉시 종료(깨어난 직후 stopped 검사에 걸린다)
     }
   }, [jobId, enabled])
 

@@ -66,22 +66,33 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   // (진행률·상태 말고도 결과물·해시 같은 게 같이 채워지므로 상세를 다시 받는 편이 안전하다)
   const realtime = useJobRealtime(jobId, active, load)
   const ev = realtime.event
+  // 종료 이벤트는 물론, **이벤트가 말하는 상태가 지금 화면과 다르면** 상세를 다시 받는다.
+  // (진행률 말고도 결과물·해시가 같이 채워지고, 놓친 전이를 여기서 따라잡는다)
+  const evStatus = ev?.status ?? null
+  const shownStatus = state.status === 'ready' ? state.job.status : null
   useEffect(() => {
-    if (ev && ev.type !== 'JOB_PROGRESS') void load(true)
-  }, [ev, load])
-  const livePercent = ev?.type === 'JOB_PROGRESS' && ev.progress != null ? Math.round(ev.progress) : null
+    if (!ev) return
+    if (ev.type !== 'JOB_PROGRESS' || (evStatus != null && evStatus !== shownStatus)) void load(true)
+  }, [ev, evStatus, shownStatus, load])
+  // 완료 이벤트가 왔는데 REST 가 아직 RUNNING 을 돌려주는 짧은 틈이 있다. 그때 진행률이
+  // 100% 에서 옛 값으로 뚝 떨어져 보이면 안 되므로 100 으로 고정해 둔다(다음 응답이 오면 바가 사라진다)
+  const livePercent =
+    ev?.type === 'JOB_COMPLETED' ? 100 : ev?.type === 'JOB_PROGRESS' && ev.progress != null ? Math.round(ev.progress) : null
   // 백엔드가 스텝을 줄 때만 — 없으면 줄 자체를 안 그린다
   const liveStep = ev?.type === 'JOB_PROGRESS' && ev.currentStep != null && ev.totalSteps != null ? `${ev.currentStep} / ${ev.totalSteps}` : null
 
-  // 폴링은 **실시간이 끊겼을 때만** 돈다(스펙 §7 — 실시간 정상이면 폴링 중지, 장애면 fallback).
-  // 발표 중 블록이 10초마다 생기는데 화면이 그보다 늦게 바뀌면 안 되므로 폴백도 짧게 잡는다
+  // ⚠️ SSE 가 알려주는 건 **RUNNING 중의 진행률과 종료뿐**이다. 백엔드에 FUNDED→ASSIGNED,
+  //    ASSIGNED→RUNNING 전이 이벤트가 없다(JobRealtimeEvent 는 progress·completed·failed·cancelled 4종).
+  //    그래서 "연결됐으니 폴링 중지"로 두면 예치 후 학습이 시작돼도 화면이 안 바뀐다.
+  //    → 폴링은 **RUNNING 이면서 연결된 동안만** 쉰다.
+  const sseCoversStatus = state.status === 'ready' && state.job.status === 'RUNNING'
   useEffect(() => {
-    if (!active || realtime.connected) return
+    if (!active || (realtime.connected && sseCoversStatus)) return
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') void load(true)
     }, POLL_MS)
     return () => clearInterval(id)
-  }, [active, realtime.connected, load])
+  }, [active, realtime.connected, sseCoversStatus, load])
   useEffect(() => {
     getCatalog()
       .then(setCatalog)

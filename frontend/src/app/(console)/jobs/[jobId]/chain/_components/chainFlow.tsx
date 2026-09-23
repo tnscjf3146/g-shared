@@ -120,7 +120,9 @@ export function ChainFlow({ jobId }: { jobId: number }) {
     () =>
       getJobOnchain(jobId)
         .then(setOnchain)
-        .catch(() => setOnchain(null)),
+        // ⚠️ 실패해도 **직전 성공값을 지우지 않는다.** 5초마다 다시 부르는데 한 번 실패할 때마다
+        //    패널이 사라졌다 나타나면 발표 중에 깜빡인다. 계속 실패하면 어차피 화면이 안 바뀔 뿐이다
+        .catch(() => {}),
     [jobId],
   )
 

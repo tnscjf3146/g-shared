@@ -29,12 +29,17 @@ const TX_LABEL: Record<string, string> = { FUND: '예치', ACCEPT: '수락', SUB
 
 /** DB 상태(JobStatus) ↔ 체인 상태(EscrowJobState) 대응.
  *  둘이 같아야 정상이고 다르면 **체인이 정본**이다(백엔드 EscrowReconciler 와 같은 원칙). */
+//  FAILED 도 넣는다 — 실패하면 환불되어 체인은 CANCELLED 여야 한다. 그런데 백엔드는
+//  "DB 는 끝났지만 온체인 에스크로는 아직 FUNDED 일 수 있어 **사람이 봐야 한다**"는 경우를
+//  명시적으로 남긴다(JobService.rejectJob 주석). 그때 돈이 묶여 있다는 걸 화면이 잡아내야 한다.
+//  CREATED(아직 체인에 없음)·CANCELLING(정리 중)은 과도기라 비교하지 않는다.
 const EXPECTED_STATE: Partial<Record<JobStatus, EscrowState>> = {
   FUNDED: 'FUNDED',
   ASSIGNED: 'ASSIGNED',
   RUNNING: 'ASSIGNED',
   COMPLETED: 'COMPLETED',
   CANCELLED: 'CANCELLED',
+  FAILED: 'CANCELLED',
 }
 
 export function OnchainPanel({ data, dbStatus }: { data: JobOnchain | null; dbStatus: JobStatus }) {

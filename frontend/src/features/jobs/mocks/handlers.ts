@@ -261,6 +261,42 @@ export const jobHandlers = [
     })
   }),
 
+  // 실시간 이벤트(SSE) — 백엔드와 같은 와이어 형식(`event: <type>` + `data: <json>` + 빈 줄)으로 흘린다.
+  // 이 핸들러가 없으면 목업 모드에서 SSE 경로가 **한 번도 실행되지 않아** 그쪽 버그가 그대로 배포된다.
+  // RUNNING 인 작업만 진행률을 올리고, 100% 에서 JOB_COMPLETED 를 보내고 닫는다.
+  http.get(`${URL}/:jobId/events`, ({ request, params }) => {
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const jobId = job.jobId
+    const encoder = new TextEncoder()
+    let percent = job.progressPercent ?? 0
+    let timer: ReturnType<typeof setInterval> | undefined
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (type: string, payload: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify({ type, jobId, ...payload, updatedAt: new Date().toISOString() })}\n\n`))
+        if (job.status !== 'RUNNING') return // 진행 중이 아니면 연결만 유지(백엔드도 전이 이벤트는 안 준다)
+        timer = setInterval(() => {
+          percent = Math.min(100, percent + 4)
+          // REST 스냅샷도 같이 움직인다 — 안 그러면 이벤트와 상세 응답이 어긋나 종료 경로를 검증할 수 없다
+          job.progressPercent = percent
+          if (percent < 100) send('JOB_PROGRESS', { status: 'RUNNING', progress: percent, currentStep: Math.round((percent / 100) * 15), totalSteps: 15 })
+          else {
+            job.status = 'COMPLETED'
+            send('JOB_COMPLETED', { status: 'COMPLETED', progress: 100, resultAvailable: true })
+            clearInterval(timer)
+            controller.close()
+          }
+        }, 1_500)
+      },
+      cancel() {
+        if (timer) clearInterval(timer)
+      },
+    })
+    return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } })
+  }),
+
   // 온체인 검증 — 백엔드가 RPC 로 다시 읽은 값. 실제 응답 형태(JobOnchainResponse)를 그대로 흉내낸다.
   // 예치 전(CREATED)은 available=false + ESCROW_JOB_ID_MISSING, 그 외는 상태에 따라 거래가 쌓인다.
   http.get(`${URL}/:jobId/onchain`, async ({ request, params }) => {
