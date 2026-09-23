@@ -244,7 +244,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                 setTab(nextKey)
                 document.getElementById(`jobtab-${nextKey}`)?.focus()
               }}
-              className={`flex-none rounded-md px-4 py-2 text-label-sm font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
+              // 탭 필(~36h)은 버튼 스케일을 따른다 — btn-sm 32h/13 · btn-md 40h/14 사이라 14(caption).
+              // 이전 15px 은 btn-lg(46h) 라벨 크기여서 컨트롤 높이에 비해 컸다
+              className={`flex-none rounded-md px-4 py-2 text-caption font-semibold transition-colors ${activeTab === t.key ? 'bg-primary text-white shadow-2' : 'bg-surface-1 text-text-muted hover:bg-black/5 hover:text-dark'}`}
             >
               {t.label}
             </button>

@@ -140,7 +140,7 @@ export function ChainFlow({ jobId }: { jobId: number }) {
           <span aria-hidden />
         </div>
         <p className="mt-2 text-center text-caption text-text-muted">
-          이 작업이 예치→수락→실행→정산까지 흐르는 관계. 현재 상태는 {POLL_MS / 1000}초마다 갱신돼 빛납니다.
+          이 작업이 예치→수락→실행→정산까지 흐르는 관계. 현재 상태가 빛납니다.
         </p>
       </header>
 

@@ -100,10 +100,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
       <section className="card card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
           <header className="flex items-center justify-between gap-3">
             <h2 className="text-body font-bold tracking-heading text-dark">진행 중 작업</h2>
-            <div className="flex items-center gap-3">
-              <span className="text-caption text-text-muted">15초마다 갱신</span>
-              <Pager page={runningPage} totalPages={runningPages} onChange={setRunningPage} />
-            </div>
+            <Pager page={runningPage} totalPages={runningPages} onChange={setRunningPage} />
           </header>
           {loading && <div className="h-40 animate-pulse rounded-md bg-neutral-tint" />}
           {!loading && runningJobs.length === 0 && (
