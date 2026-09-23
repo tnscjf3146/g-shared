@@ -35,9 +35,14 @@ public record WorkerResponse(
         String currentJobId,
         LocalDateTime lastHeartbeatAt,
         LocalDateTime createdAt,
-        boolean walletLinked
+        boolean walletLinked,
+        long completedCount,
+        long failedCount,
+        long totalExecutionCount,
+        Double successRate
 ) {
     public static WorkerResponse from(Worker worker, WorkerAvailability availability) {
+        long total = worker.getCompletedCount() + worker.getFailedCount();
         return new WorkerResponse(
                 worker.getId(),
                 // 옛 규격 필드 — 화면이 문자열을 기대하므로 빈 값으로 막는다.
@@ -59,7 +64,11 @@ public record WorkerResponse(
                 worker.getCreatedAt(),
                 // 지갑이 없으면 이 PC 는 작업 후보에 오르지 못한다(예치할 때 넣을 주소가 없다).
                 // 그 사실을 아는 사람은 주인뿐이라 여기서 알려 준다.
-                worker.getOwner().getWalletAddress() != null
+                worker.getOwner().getWalletAddress() != null,
+                worker.getCompletedCount(),
+                worker.getFailedCount(),
+                total,
+                total == 0 ? null : (double) worker.getCompletedCount() / total
         );
     }
 }

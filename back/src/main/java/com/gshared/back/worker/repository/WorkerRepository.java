@@ -3,13 +3,23 @@ package com.gshared.back.worker.repository;
 import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.domain.WorkerStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 public interface WorkerRepository extends JpaRepository<Worker, String> {
+
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Worker w SET w.completedCount = w.completedCount + 1 WHERE w.id = :workerId")
+    int incrementCompletedCount(@Param("workerId") String workerId);
+
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE Worker w SET w.failedCount = w.failedCount + 1 WHERE w.id = :workerId")
+    int incrementFailedCount(@Param("workerId") String workerId);
 
     /** 네트워크 지표용 — 상태별 개수. OFFLINE 판정은 WorkerHeartbeatSweeper 가 이미 status 에 반영하므로 상태만 세면 된다. */
     long countByStatusIn(java.util.Collection<WorkerStatus> statuses);

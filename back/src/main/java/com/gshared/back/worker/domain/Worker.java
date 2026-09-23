@@ -61,6 +61,12 @@ public class Worker extends BaseTimeEntity {
     private Long currentJobId;        // jobs.job_id 와 타입 일치 (BIGINT)
     private LocalDateTime lastHeartbeatAt;
 
+    @Column(nullable = false)
+    private long completedCount;
+
+    @Column(nullable = false)
+    private long failedCount;
+
     private Worker(String id, User owner, String workerToken, String operatorAddress, String clientVersion,
                    String osVersion, Boolean wslAvailable, String gpuModel, Integer vramMb,
                    Double benchmarkTokensPerSec, Integer benchmarkPeakVramMb, String benchmarkVersion) {

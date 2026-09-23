@@ -666,6 +666,9 @@ public class JobService {
         if (updated == 0) {
             return false;
         }
+        if (status == JobStatus.RUNNING) {
+            workerRepository.incrementCompletedCount(workerId);
+        }
         if (status == JobStatus.CANCELLING) {
             log.warn("[JOB] 취소 요청과 겹친 JOB_RESULT → COMPLETED jobId={} workerId={}", jobId, workerId);
         }
@@ -752,6 +755,7 @@ public class JobService {
         }
 
         int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
+        boolean failedFromRunning = updated > 0;
         if (updated == 0) {
             updated = jobRepository.cancelIfFailedWhileCancelling(
                     jobId, workerId, reason, abortTxHash, actualRuntimeSec, CANCEL_MET_FAILURE, now);
@@ -762,6 +766,9 @@ public class JobService {
         }
         if (updated == 0) {
             return false;
+        }
+        if (failedFromRunning && WorkerReliabilityPolicy.isWorkerFailure(code)) {
+            workerRepository.incrementFailedCount(workerId);
         }
         workerRepository.findById(workerId)
                 .filter(worker -> jobId.equals(worker.getCurrentJobId()))
