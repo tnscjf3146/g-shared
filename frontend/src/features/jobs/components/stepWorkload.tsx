@@ -15,7 +15,7 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">1. 워크로드</h2>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">워크로드</h2>
         <p className="text-label-sm text-text-muted">무엇을 할지 고르면 그 작업을 지원하는 모델이 나타납니다.</p>
       </header>
 

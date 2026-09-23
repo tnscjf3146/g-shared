@@ -41,7 +41,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">3. {copy.title}</h2>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">{copy.title}</h2>
         <p className="text-label-sm text-text-muted">{copy.desc}</p>
       </header>
 
@@ -50,7 +50,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
         onFile={onFile}
         accept={DATASET_ACCEPT}
         label="데이터셋 파일을 끌어놓거나 클릭해 선택"
-        hint={`${DATASET_ACCEPT} · 파일은 브라우저에서 분석만 하고, 마지막 업로드 단계에서 서버로 보냅니다`}
+        hint="JSONL · JSON · CSV · TXT"
       />
 
       {/* 분석 상태 — 진행 중 / 결과 / 실패 */}
@@ -80,7 +80,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
               <dd className="font-semibold text-dark">{v}</dd>
             </div>
           ))}
-          <p className="col-span-full text-hint text-text-muted">토큰 수는 문자 비율로 근사한 값입니다. 이 5개 값만 서버로 보내 GPU 추천과 견적에 씁니다.</p>
+          <p className="col-span-full text-hint text-text-muted">토큰 수는 근사값 · 이 5개 값만 서버로 전송</p>
         </dl>
       )}
 

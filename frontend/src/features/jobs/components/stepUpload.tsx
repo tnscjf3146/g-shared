@@ -35,8 +35,8 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">5. 업로드</h2>
-        <p className="text-label-sm text-text-muted">아래 내용으로 워크로드를 등록합니다. 지갑에 예상 비용만큼 GSC 가 있어야 등록할 수 있습니다. GPU 배정과 최종 견적은 서버가 다시 계산합니다.</p>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">업로드</h2>
+        <p className="text-label-sm text-text-muted">등록 내용을 확인하세요. GPU 배정과 최종 견적은 서버가 확정합니다.</p>
       </header>
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 rounded-lg border border-hairline bg-surface-1 p-5 text-caption">
@@ -117,7 +117,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
             )}
           </div>
         )}
-        {funds.status === 'ready' && !enough && <p className="text-hint text-text-muted">지갑에 GSC 를 채운 뒤 [잔액 다시 확인]을 누르면 아래 업로드 버튼이 켜집니다. 이 화면의 선택은 유지됩니다.</p>}
+        {funds.status === 'ready' && !enough && <p className="text-hint text-text-muted">GSC 충전 후 [잔액 다시 확인]을 누르세요</p>}
       </section>
 
       {state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}

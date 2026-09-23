@@ -52,7 +52,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">4. GPU 등급</h2>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">GPU 등급</h2>
         <p className="text-label-sm text-text-muted">데이터셋 분석 결과와 모델·설정을 기준으로 적합도를 매겼습니다. 등급을 고르면 아래에 견적이 나옵니다.</p>
       </header>
 

@@ -35,7 +35,7 @@ export function WorkerRegisterCard({ compact = false }: { compact?: boolean }) {
         G-shared 다운로드 (Windows)
       </a>
 
-      <p className="text-hint text-text-muted">요구사항: Windows 10/11 · NVIDIA GPU(드라이버 설치됨) · 인터넷 연결. 등록이 끝나면 새로고침 없이 15초 안에 여기 나타납니다.</p>
+      <p className="text-hint text-text-muted">Windows 10/11 · NVIDIA GPU · 인터넷 연결 필요</p>
     </section>
   )
 }

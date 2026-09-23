@@ -60,7 +60,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">2. 모델 · 설정</h2>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">모델 · 설정</h2>
         <p className="text-label-sm text-text-muted">
           {workload?.name} · {model?.name ?? '모델 미선택'}
         </p>
@@ -108,7 +108,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 </Field>
               ))}
             </div>
-            <p className="pt-3 text-hint text-text-muted">직접 입력하면 학습 수준 대신 이 값으로 견적을 냅니다. 상한은 없고, 실행 가능 여부(VRAM 등)는 서버가 판단합니다.</p>
+            <p className="pt-3 text-hint text-text-muted">직접 입력한 값으로 견적을 냅니다 · 실행 가능 여부는 서버가 판단</p>
           </details>
         </fieldset>
       )}
@@ -166,7 +166,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 {fileError}
               </p>
             ) : (
-              <p className="text-hint text-text-muted">비압축 .tar 안에 adapter_config.json · adapter_model.safetensors 가 있어야 합니다. 완료된 작업에서 받은 파일을 그대로 올려도 됩니다.</p>
+              <p className="text-hint text-text-muted">비압축 .tar · adapter_config.json + adapter_model.safetensors 포함</p>
             )}
           </div>
         )}
