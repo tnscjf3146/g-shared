@@ -117,7 +117,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
             )}
           </div>
         )}
-        {funds.status === 'ready' && !enough && <p className="text-hint text-text-muted">GSC 충전 후 [잔액 다시 확인]을 누르세요</p>}
+        {funds.status === 'ready' && !enough && <p className="text-hint text-text-muted">GSC 충전 후 [잔액 다시 확인] · 선택한 내용은 유지됩니다</p>}
       </section>
 
       {state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}

@@ -9,6 +9,10 @@ import type { WizardState } from './workloadWizard'
 
 // 3단계: 데이터셋 — 파일 끌어놓기/클릭. 파일은 서버로 안 가고 **브라우저에서 분석**해 메타데이터 5값만 뽑는다(job.md §4-3)
 const DATASET_ACCEPT = '.jsonl,.json,.csv,.txt'
+// 화면 표기는 accept 에서 파생한다 — 두 곳에 적으면 형식을 늘릴 때 안내만 조용히 어긋난다
+const DATASET_ACCEPT_LABEL = DATASET_ACCEPT.split(',')
+  .map((e) => e.slice(1).toUpperCase())
+  .join(' · ')
 const COPY: Record<WorkloadKind, { title: string; desc: string }> = {
   TRAIN_LORA: { title: '학습 데이터셋', desc: '한 줄에 샘플 하나(JSONL 권장). 지시-응답 쌍 또는 텍스트-라벨 쌍.' },
   INFERENCE: { title: '입력 데이터', desc: '모델에 넣을 입력 샘플 목록. 결과는 같은 순서로 돌아옵니다.' },
@@ -50,7 +54,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
         onFile={onFile}
         accept={DATASET_ACCEPT}
         label="데이터셋 파일을 끌어놓거나 클릭해 선택"
-        hint="JSONL · JSON · CSV · TXT"
+        hint={DATASET_ACCEPT_LABEL}
       />
 
       {/* 분석 상태 — 진행 중 / 결과 / 실패 */}

@@ -72,7 +72,7 @@ export function WalletConnectCard({ onLinked }: { onLinked: (address: string) =>
         </div>
       )}
 
-      <p className="text-hint text-text-muted">
+      <p className="text-caption text-text-muted">
         네트워크: {SSAFY_CHAIN.name} (Chain ID {SSAFY_CHAIN.id}). 다른 네트워크에 있으면 연결 중 자동으로 전환을 요청합니다. 모바일은 MetaMask 앱
         브라우저에서 이용해 주세요.
       </p>

@@ -56,7 +56,7 @@ export function DashboardJobRow({ job, index, workloadName, catalog, onCancel, s
             <span className="tabular-nums">{index}.</span> {workloadName}
           </h3>
         </div>
-        {/* 다른 상태와 같은 17px 글자. 완료는 검정(배경 회색으로 구분), 실패는 빨강, 취소됨은 회색+취소선 */}
+        {/* 다른 상태와 같은 본문(18px) 글자. 완료는 검정(배경 회색으로 구분), 실패는 빨강, 취소됨은 회색+취소선 */}
         <div className="hidden md:block">
           <span className={`text-body font-medium ${failed ? 'text-danger' : cancelled ? strike : 'text-dark'}`}>{jobStatusMeta(job.status, job.failReason, job.cancelReason).label}</span>
         </div>

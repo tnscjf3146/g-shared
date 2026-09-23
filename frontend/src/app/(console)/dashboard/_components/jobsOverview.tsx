@@ -87,7 +87,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
               <span className="text-caption font-semibold text-text-muted">{k.label}</span>
             </div>
             <div className="flex flex-col gap-1">
-              {loading ? <span className="h-9 w-20 animate-pulse rounded-xs bg-neutral-tint" /> : <span className="text-h1 leading-none font-bold tabular-nums tracking-heading text-dark">{k.value}</span>}
+              {loading ? <span className="h-8 w-20 animate-pulse rounded-xs bg-neutral-tint" /> : <span className="text-h1 leading-none font-bold tabular-nums tracking-heading text-dark">{k.value}</span>}
               <span className="text-caption text-text-muted tabular-nums">{k.sub}</span>
             </div>
           </section>

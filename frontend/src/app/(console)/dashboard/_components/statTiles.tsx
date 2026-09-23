@@ -7,7 +7,7 @@ export function StatTiles({ items, loading }: { items: { label: string; value: s
       {items.map((s, i) => (
         <div key={s.label} className={`relative flex flex-col gap-1.5 px-6 py-5 ${i % 2 === 1 ? DIVIDER : i > 0 ? LG_DIVIDER : ''} ${i >= 2 ? 'border-t border-hairline lg:border-t-0' : ''}`}>
           <span className="text-caption font-semibold tracking-eyebrow text-dark">{s.label}</span>
-          {loading ? <span className="h-9 w-24 animate-pulse rounded-xs bg-neutral-tint" /> : <span className="text-h1 leading-none font-bold tabular-nums tracking-heading text-dark">{s.value}</span>}
+          {loading ? <span className="h-8 w-24 animate-pulse rounded-xs bg-neutral-tint" /> : <span className="text-h1 leading-none font-bold tabular-nums tracking-heading text-dark">{s.value}</span>}
           <span className="text-caption text-text-muted">{s.sub}</span>
         </div>
       ))}

@@ -52,7 +52,7 @@ export function EstimateCard({ estimate, stale, pending = false, onCreate, onEdi
           </div>
         )}
       </div>
-      <p className="text-hint text-text-muted">
+      <p className="text-caption text-text-muted">
         견적은 데이터셋 분석(근사 토큰 수) 기준이며 실행 시 서버가 다시 계산합니다. 비용은 예치 시점에 GSC 로 결제되고 실제 소요에 따라 정산됩니다. 예상
         소요는 순수 학습 시간으로, 매칭과 실행 환경 준비(이미지·데이터 다운로드)는 포함되지 않습니다 — 첫 실행은 10분 이상 더 걸릴 수 있어요.
       </p>
