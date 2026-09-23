@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { STATUS_META } from '@/features/jobs/format'
+import { STATUS_META, formatDateTime } from '@/features/jobs/format'
+import { GSC_TOKEN, formatUnits } from '@/features/wallet/ethereum'
 import type { EscrowState, JobOnchain, JobStatus } from '@/features/jobs/types'
 
 // 체인이 말하는 것 — DB 스냅샷이 아니라 백엔드가 RPC 로 노드에서 다시 읽은 값.
@@ -55,6 +56,31 @@ export function OnchainPanel({ data, dbStatus }: { data: JobOnchain | null; dbSt
     )
   }
 
+  // price 는 wei 문자열(uint256) — BigInt 로 변환해 GSC 단위로. 숫자로 바꾸면 큰 값에서 정밀도가 깨진다.
+  // 형식이 예상과 다르면(빈 문자열·비숫자) 표시를 건너뛴다 — 틀린 금액을 보여 주느니 안 보여 주는 게 낫다
+  const price = (() => {
+    const raw = data.onchain?.price
+    if (!raw) return null
+    try {
+      const wei = BigInt(raw)
+      // 음수는 uint256 에서 나올 수 없다 — 나왔다면 백엔드가 깨진 것이다. formatUnits 는 예외를
+      // 던지지 않고 "0.0000" 을 돌려주므로, 막지 않으면 **틀린 금액이 조용히** 표시된다
+      if (wei < BigInt(0)) return null
+      return `${formatUnits(wei, GSC_TOKEN.decimals)} ${GSC_TOKEN.symbol}`
+    } catch {
+      return null
+    }
+  })()
+  // deadline 은 epoch seconds. 0 은 "기한 없음"이라 표시하지 않는다.
+  // ⚠️ uint256 이라 Date 가 표현할 수 있는 범위(±8.64e15 ms)를 넘는 값이 올 수 있고,
+  //    그때 toISOString() 이 RangeError 를 던져 **패널이 아니라 화면 전체가 죽는다.** 먼저 검사한다
+  const deadline = (() => {
+    const sec = data.onchain?.deadline
+    if (!sec) return null
+    const d = new Date(sec * 1000)
+    return Number.isNaN(d.getTime()) ? null : formatDateTime(d.toISOString())
+  })()
+
   const chainState = data.onchain?.state ?? null
   const expected = EXPECTED_STATE[dbStatus]
   // 대응표에 없는 DB 상태(CREATED·CANCELLING 등)는 "아직/과도기"라 불일치로 보지 않는다
@@ -86,6 +112,9 @@ export function OnchainPanel({ data, dbStatus }: { data: JobOnchain | null; dbSt
       {/* 체인에 적힌 값들 */}
       <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
         {data.escrowJobId && <Row label="에스크로 Job" value={`#${data.escrowJobId}`} />}
+        {/* 체인에 잠긴 금액·기한 — "얼마가 걸려 있고 언제까지인가"는 에스크로의 본질이라 상태와 함께 보여 준다 */}
+        {price && <Row label="예치 금액" value={price} mono />}
+        {deadline && <Row label="정산 기한" value={deadline} mono />}
         {data.onchain?.resultHash && <Row label="체인의 Result Hash" value={data.onchain.resultHash} mono copyable />}
         {data.chain?.contractAddress && <Row label="에스크로 계약" value={data.chain.contractAddress} mono copyable />}
         {data.chain?.chainId != null && <Row label="체인 ID" value={String(data.chain.chainId)} />}
