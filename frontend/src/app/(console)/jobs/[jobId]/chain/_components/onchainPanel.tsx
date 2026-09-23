@@ -72,7 +72,14 @@ export function OnchainPanel({ data, dbStatus }: { data: JobOnchain | null; dbSt
       </div>
       {mismatch && (
         <p role="status" className="rounded-md bg-warning-tint px-3 py-2 text-caption text-warning">
-          체인과 서비스 상태가 다릅니다. <strong>체인 기록이 정본</strong>이며, 서비스 상태는 곧 맞춰집니다.
+          체인과 서비스 상태가 다릅니다. <strong>체인 기록이 정본</strong>입니다.
+          {/* "곧 맞춰집니다"라고 쓰면 안 된다 — 워커가 수락 전 거절한 경우처럼 자동으로 정리되지 않고
+              사람이 봐야 하는 상태가 실제로 존재한다(back JobService.rejectJob 주석) */}
+        </p>
+      )}
+      {mismatch && dbStatus === 'FAILED' && (
+        <p className="text-caption text-text-muted">
+          실패로 닫혔지만 체인의 예치금이 아직 정리되지 않았을 수 있습니다. 환불이 반영되지 않으면 문의해 주세요.
         </p>
       )}
 

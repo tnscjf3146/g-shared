@@ -17,7 +17,10 @@ import type { JobRealtimeEvent } from './types'
 // 그래서 이 훅은 "화면을 직접 고치지" 않고 이벤트를 올려보내기만 하고,
 // 연결이 끊겼다 붙을 때마다 `onResync` 로 호출자에게 REST 재조회를 시킨다.
 
-const RETRY_MS = 3_000
+// 재시도는 지수 백오프 — 서버가 죽어 있거나 토큰 재발급까지 실패하면 3초마다 두드려 봐야 소용없다.
+// 연결에 성공하면 처음 값으로 되돌린다
+const RETRY_MIN_MS = 3_000
+const RETRY_MAX_MS = 30_000
 
 export type JobRealtimeState = {
   /** 마지막으로 받은 이벤트 — 없으면 아직 아무 소식 없음 */
@@ -68,6 +71,7 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let wake: (() => void) | undefined // 대기 중인 재시도 — cleanup 에서 깨워 루프를 즉시 끝낸다
+    let backoff = RETRY_MIN_MS
     // 다른 작업으로 옮겨 붙을 때 이전 작업의 이벤트가 남아 있으면 안 된다.
     // 특히 이전 작업의 종료 이벤트가 남으면 isStale 이 새 작업의 진행률을 전부 버린다
     setState({ event: null, connected: false })
@@ -93,6 +97,7 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
 
           // 재연결이면 그사이 놓친 변화가 있다 → REST 로 현재 상태를 맞추고 시작(스펙 §7 reconnect)
           resyncRef.current?.()
+          backoff = RETRY_MIN_MS // 붙었으니 다음 끊김은 다시 3초부터
           if (!stopped) setState((s) => ({ ...s, connected: true }))
 
           const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
@@ -121,8 +126,9 @@ export function useJobRealtime(jobId: number, enabled: boolean, onResync?: () =>
         setState((s) => ({ ...s, connected: false }))
         await new Promise<void>((r) => {
           wake = r // cleanup 이 이 promise 를 깨워야 루프가 매달린 채 남지 않는다
-          timer = setTimeout(r, RETRY_MS)
+          timer = setTimeout(r, backoff)
         })
+        backoff = Math.min(backoff * 2, RETRY_MAX_MS)
       }
     }
     void run()

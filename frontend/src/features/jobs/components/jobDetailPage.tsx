@@ -19,7 +19,8 @@ import { JobDetailSkeleton } from './jobSkeleton'
 import { TrainingResultVerificationPanel } from './trainingResultVerificationPanel'
 
 // /jobs/[id] 본문(job.md §5) — 대시보드와 같은 톤: 배지·모션 없이 제목 줄 + 속성 카드. 진행 중 상태면 10초 폴링, 끝나면 중단. 이름(workload·모델·GPU)은 카탈로그로 id→이름
-const POLL_MS = 3_000 // 실시간(SSE)이 끊겼을 때만 도는 폴백 — 시연 중 블록 생성(10초)보다 화면이 늦지 않게 짧게
+const POLL_MS = 3_000 // 실시간이 없거나 SSE 가 못 덮는 상태 — 시연 중 블록 생성(10초)보다 화면이 늦지 않게 짧게
+const SLOW_POLL_MS = 15_000 // SSE 가 살아 있을 때의 안전망 — 죽은 커넥션에 화면이 얼어붙지 않게 최소한만 돈다
 type TabKey = 'config' | 'dataset' | 'cost' | 'adapter' | 'verify'
 
 // 한 건의 속성을 읽기 쉽게 — 표 대신 "라벨(작게·회색) 위, 값(크게·진하게)" 키-값 그리드. 테두리 대신 여백으로 구분
@@ -70,9 +71,11 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   // (진행률 말고도 결과물·해시가 같이 채워지고, 놓친 전이를 여기서 따라잡는다)
   const evStatus = ev?.status ?? null
   const shownStatus = state.status === 'ready' ? state.job.status : null
+  // 조건을 "상태가 다를 때"로 통일한다 — 종료 이벤트에도 같은 조건을 걸어야 load 가 두 번 나가지 않는다
+  // (첫 load 로 shownStatus 가 바뀌면 이 effect 가 다시 도는데, 그때는 이미 같아져 멈춘다)
   useEffect(() => {
-    if (!ev) return
-    if (ev.type !== 'JOB_PROGRESS' || (evStatus != null && evStatus !== shownStatus)) void load(true)
+    if (!ev || evStatus == null) return
+    if (evStatus !== shownStatus) void load(true)
   }, [ev, evStatus, shownStatus, load])
   // 완료 이벤트가 왔는데 REST 가 아직 RUNNING 을 돌려주는 짧은 틈이 있다. 그때 진행률이
   // 100% 에서 옛 값으로 뚝 떨어져 보이면 안 되므로 100 으로 고정해 둔다(다음 응답이 오면 바가 사라진다)
@@ -81,18 +84,22 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   // 백엔드가 스텝을 줄 때만 — 없으면 줄 자체를 안 그린다
   const liveStep = ev?.type === 'JOB_PROGRESS' && ev.currentStep != null && ev.totalSteps != null ? `${ev.currentStep} / ${ev.totalSteps}` : null
 
-  // ⚠️ SSE 가 알려주는 건 **RUNNING 중의 진행률과 종료뿐**이다. 백엔드에 FUNDED→ASSIGNED,
-  //    ASSIGNED→RUNNING 전이 이벤트가 없다(JobRealtimeEvent 는 progress·completed·failed·cancelled 4종).
-  //    그래서 "연결됐으니 폴링 중지"로 두면 예치 후 학습이 시작돼도 화면이 안 바뀐다.
-  //    → 폴링은 **RUNNING 이면서 연결된 동안만** 쉰다.
-  const sseCoversStatus = state.status === 'ready' && state.job.status === 'RUNNING'
+  // 폴링을 **끄지 않고 간격만 늦춘다.** 두 가지 이유가 겹친다:
+  //  ① SSE 가 알려주는 건 RUNNING 중의 진행률과 종료뿐이다 — 백엔드에 FUNDED→ASSIGNED,
+  //     ASSIGNED→RUNNING 전이 이벤트가 없다(progress·completed·failed·cancelled 4종).
+  //  ② 백엔드 SSE 는 `new SseEmitter(0L)`(무한 타임아웃)에 heartbeat 가 없다. 네트워크가 조용히
+  //     죽으면(와이파이 전환·프록시 idle kill) read() 가 TCP 타임아웃까지 매달려 connected 는
+  //     true 인 채 이벤트만 끊긴다. 그때 폴링까지 꺼져 있으면 **진행률이 그대로 얼어붙는다.**
+  //  → RUNNING + 연결됨이면 느리게(15초), 그 밖에는 빠르게(3초). 어느 경우에도 화면이 멈추지 않는다
+  const sseLive = realtime.connected && state.status === 'ready' && state.job.status === 'RUNNING'
+  const pollMs = sseLive ? SLOW_POLL_MS : POLL_MS
   useEffect(() => {
-    if (!active || (realtime.connected && sseCoversStatus)) return
+    if (!active) return
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') void load(true)
-    }, POLL_MS)
+    }, pollMs)
     return () => clearInterval(id)
-  }, [active, realtime.connected, sseCoversStatus, load])
+  }, [active, pollMs, load])
   useEffect(() => {
     getCatalog()
       .then(setCatalog)
