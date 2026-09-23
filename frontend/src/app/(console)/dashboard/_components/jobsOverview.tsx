@@ -6,7 +6,7 @@ import type { JobSummary } from '@/features/jobs/types'
 import type { NetworkStats } from '@/features/workers/types'
 import { Pager } from './pager'
 
-// 작업 탭 상단(대시보드.png 참고 구조, 프로필 사진 없음): 히어로 배너 + 상태 도넛 → KPI 카드 4개 → 워크로드별 작업 · 진행 중 작업(진행률)
+// 작업 탭 상단(대시보드.png 참고 구조, 프로필 사진 없음): 히어로 배너 + 상태 도넛 → KPI 카드 3개 → 진행 중 작업(진행률)
 // 데이터는 DashboardView 가 이미 들고 있는 작업 목록·카탈로그를 그대로 받는다(추가 fetch 없음, 15초 폴링도 거기서)
 
 // 도넛 조각 — 상태 4묶음. 채도·명도를 맞춘 조화 팔레트(초록·앰버·슬레이트·로즈, 모두 중간 톤)로 한 벌처럼 보이게 한다.
@@ -40,7 +40,8 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
       {/* 1행: 히어로 배너 + 상태 분포 */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         {/* 히어로 — 연한 그린 틴트 단색. 브랜드 색은 배경 틴트와 "수익" 강조, CTA 에만 */}
-        <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-2xl border border-hairline bg-primary/10 p-8 shadow-2">
+        {/* 옆 카드와 같은 행·같은 레벨 → 모서리도 card 와 같은 12 (AGENTS.md: 같은 레벨 카드끼리 다른 모서리를 쓰지 않는다) */}
+        <section className="animate-enter relative flex flex-col justify-between gap-8 rounded-lg border border-hairline bg-primary/10 p-8 shadow-2">
           <div className="relative flex flex-col gap-3">
             <h2 className="max-w-[420px] text-h1 leading-[1.2] font-extrabold tracking-display text-dark">
               유휴 GPU가 <span className="text-primary">수익</span>이 되는 곳
@@ -54,7 +55,8 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
 
         <section className="card animate-enter flex flex-col gap-5" style={{ animationDelay: '40ms' }}>
           <span className="text-caption font-semibold tracking-eyebrow text-text-muted">작업 상태 분포</span>
-          <div className="flex items-center gap-6">
+          {/* 옆 히어로 높이에 맞춰 카드가 늘어난다 — flex-1 로 남는 높이를 먹고 세로 가운데 정렬(아래가 비어 보이는 것 방지) */}
+          <div className="flex flex-1 items-center gap-6">
             <Donut counts={counts} total={total} />
             <ul className="flex min-w-0 flex-1 flex-col gap-2">
               {SEGMENTS.map((s, i) => (
@@ -70,7 +72,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
       </div>
 
       {/* 2행: 지표 — 도넛(개수·구성비)과 겹치지 않는 것만. 개수 중복 대신 비용·추세·네트워크 */}
-      <div className="grid grid-cols-2 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         {[
           { label: '진행 중 예상 비용', value: formatCost(activeCost), sub: `진행·대기 ${counts[0] + counts[1]}건 견적 합`, d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
           { label: '최근 7일 새 작업', value: String(recent7), sub: '이번 주에 만든 작업', d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
