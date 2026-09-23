@@ -27,6 +27,13 @@ export const workerSchema = z.object({
   createdAt: z.string(),
   walletLinked: z.boolean(), // 주인 지갑 연결 여부. false 면 예치 때 넣을 공급자 주소가 없어 작업 후보에 오르지 못한다
   operatorAddress: z.optional(z.nullable(z.string())), // 워커 프로그램의 온체인 서명 키(공개 주소). 승인 여부는 operator-status 로 따로 조회
+  // 작업 이력 — 이 워커가 실제로 얼마나 끝까지 해냈나. 백엔드가 완료·실패를 세서 준다(V23).
+  // 아직 이 필드를 안 주는 서버(구버전)가 있을 수 있으니 optional — 없으면 화면이 이력 칸만 감춘다.
+  // successRate 는 **실행 0건이면 null** 이다. 0 과 구분해야 한다 — 신규 워커를 "성공률 0%"로 낙인찍지 않기 위해서(스펙 §6)
+  completedCount: z.optional(z.number()),
+  failedCount: z.optional(z.number()),
+  totalExecutionCount: z.optional(z.number()),
+  successRate: z.optional(z.nullable(z.number())),
 })
 
 export const workerListSchema = z.array(workerSchema)

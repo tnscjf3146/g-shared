@@ -16,6 +16,7 @@ export const MOCK_WORKERS: Worker[] = workerListSchema.parse([
     lastHeartbeatAt: '2026-09-08T00:00:00Z',
     createdAt: '2026-09-01T09:00:00Z',
     walletLinked: true, // 목록 응답에서는 지갑 목업의 연결 상태로 덮인다(handlers.ts)
+    completedCount: 7, failedCount: 1, totalExecutionCount: 8, successRate: 0.875,
     operatorAddress: '0x1111111111111111111111111111111111111111', // 미승인 → 지갑 연결 뒤 '실행 권한: 승인 필요' + [GPU 실행 권한 승인](서명은 MetaMask 필요)
   },
   {
@@ -31,6 +32,7 @@ export const MOCK_WORKERS: Worker[] = workerListSchema.parse([
     lastHeartbeatAt: '2026-09-08T00:00:00Z',
     createdAt: '2026-09-05T09:00:00Z',
     walletLinked: true, // 목록 응답에서는 지갑 목업의 연결 상태로 덮인다(handlers.ts)
+    completedCount: 2, failedCount: 0, totalExecutionCount: 2, successRate: 1,
     operatorAddress: '0x2222222222222222222222222222222222222222', // 승인 완료(MOCK_OPERATOR_APPROVED) → '실행 권한: 승인 완료 · 상태: 작업 가능'
   },
   {
@@ -46,6 +48,7 @@ export const MOCK_WORKERS: Worker[] = workerListSchema.parse([
     lastHeartbeatAt: '2026-09-08T00:00:00Z',
     createdAt: '2026-08-20T13:30:00Z',
     walletLinked: false, // 목록 응답에서는 지갑 목업의 연결 상태로 덮인다(handlers.ts)
+    completedCount: 0, failedCount: 0, totalExecutionCount: 0, successRate: null, // 신규 공급자 — 성공률 0% 로 표시하면 안 된다
     operatorAddress: null, // 옛 버전으로 등록 — 키 미등록
   },
 ])
