@@ -7,7 +7,7 @@ export function SiteFooter() {
       <Link href="/" className="font-logo text-xl font-semibold text-white">
         G-shared
       </Link>
-      <p className="text-[13px] text-text-muted">
+      <p className="text-caption text-text-muted">
         SSAFY 15기 특화 프로젝트 · E204 ·{' '}
         <Link href="/" className="transition-colors hover:text-white">
           이용약관

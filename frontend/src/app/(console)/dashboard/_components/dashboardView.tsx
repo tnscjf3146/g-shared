@@ -142,7 +142,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       </section>
 
       {notice && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[16px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-label-sm text-danger">
           {notice}
         </p>
       )}
@@ -155,9 +155,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       {tab === 'jobs' ? (
         <section className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[24px] font-bold tracking-heading text-dark">내 학습 작업</h2>
+            <h2 className="text-h2 font-bold tracking-heading text-dark">내 학습 작업</h2>
             {jobs.status === 'ready' && jobList.length > 0 && (
-              <label className="flex items-center gap-2 text-[13px] text-text-muted">
+              <label className="flex items-center gap-2 text-caption text-text-muted">
                 분류
                 <select
                   value={jobView}
@@ -165,7 +165,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
                     setJobView(e.target.value as typeof jobView)
                     setJobPage(0) // 분류 바뀌면 첫 페이지로
                   }}
-                  className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-[14px] text-dark focus:border-primary focus:outline-none"
+                  className="rounded-md border border-border bg-surface-2 px-2.5 py-1.5 text-caption text-dark focus:border-primary focus:outline-none"
                 >
                   <option value="latest">최신순</option>
                   <option value="oldest">오래된순</option>
@@ -179,12 +179,12 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
           {jobs.status === 'ready' && jobList.length === 0 && (
             <section className="card animate-enter mx-auto flex w-full max-w-[640px] flex-col items-start gap-4 p-10">
               <h3 className="text-h2 font-bold tracking-heading text-dark">아직 작업이 없습니다</h3>
-              <p className="text-[17px] text-text-muted">워크로드·모델·데이터셋을 고르고 견적을 확인하면 GPU 학습을 주문할 수 있습니다.</p>
+              <p className="text-body text-text-muted">워크로드·모델·데이터셋을 고르고 견적을 확인하면 GPU 학습을 주문할 수 있습니다.</p>
               <Button href="/jobs/new" size="lg">첫 워크로드 등록</Button>
             </section>
           )}
           {jobs.status === 'ready' && jobList.length > 0 && displayList.length === 0 && (
-            <p className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-text-muted">이 분류에 해당하는 작업이 없습니다.</p>
+            <p className="rounded-md bg-neutral-tint px-4 py-3 text-caption text-text-muted">이 분류에 해당하는 작업이 없습니다.</p>
           )}
           {jobs.status === 'ready' && displayList.length > 0 && (
             <>
@@ -203,7 +203,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       ) : (
         <section className="flex flex-col gap-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-[24px] font-bold tracking-heading text-dark">내 워커</h2>
+            <h2 className="text-h2 font-bold tracking-heading text-dark">내 워커</h2>
           </div>
           {workers.status === 'error' && <Retry what="워커 목록" onRetry={() => { setWorkers({ status: 'loading' }); load() }} />}
           {workers.status === 'loading' && <ListSkeleton />}
@@ -233,8 +233,8 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 function Retry({ what, onRetry }: { what: string; onRetry: () => void }) {
   return (
     <section className="card mx-auto flex w-full max-w-[640px] flex-col items-start gap-3 p-8">
-      <p className="text-[17px] text-dark">{what}을 불러오지 못했습니다.</p>
-      <button type="button" onClick={onRetry} className="text-[16px] text-primary hover:underline">
+      <p className="text-body text-dark">{what}을 불러오지 못했습니다.</p>
+      <button type="button" onClick={onRetry} className="text-label-sm text-primary hover:underline">
         다시 시도 →
       </button>
     </section>

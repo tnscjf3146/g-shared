@@ -117,7 +117,7 @@ export function OperatorApproval({ worker, onWork }: { worker: Worker; onWork?: 
   }, [onWork, work.text, work.tone])
 
   return (
-    <div className="flex min-w-0 flex-col gap-1 text-[14px]">
+    <div className="flex min-w-0 flex-col gap-1 text-caption">
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
         <dt className="text-text-muted">연결 상태</dt>
         <dd className="truncate font-medium text-dark">{CONNECTION[worker.status]}</dd>
@@ -127,14 +127,14 @@ export function OperatorApproval({ worker, onWork }: { worker: Worker; onWork?: 
         </dd>
       </dl>
       {/* §9 공급자에겐 실제 원인을 그대로 */}
-      {worker.status === 'ONLINE' && ready && approval.s === 'OPERATOR_APPROVAL_REQUIRED' && <p className="text-[13px] text-danger">GPU가 온라인 상태지만 실행 권한 승인이 필요합니다.</p>}
+      {worker.status === 'ONLINE' && ready && approval.s === 'OPERATOR_APPROVAL_REQUIRED' && <p className="text-caption text-danger">GPU가 온라인 상태지만 실행 권한 승인이 필요합니다.</p>}
       {approval.s === 'OPERATOR_APPROVAL_FAILED' && approval.detail && (
-        <p role="alert" className="text-[13px] text-danger">
+        <p role="alert" className="text-caption text-danger">
           {approval.detail}
         </p>
       )}
       {((approval.s === 'OPERATOR_APPROVAL_PENDING' && approval.detail === WAITING_SERVER) || (status !== null && status !== 'error' && status.status === 'UNVERIFIED')) && (
-        <button type="button" onClick={() => void refresh()} className="self-start text-[13px] text-primary hover:underline">
+        <button type="button" onClick={() => void refresh()} className="self-start text-caption text-primary hover:underline">
           다시 확인
         </button>
       )}

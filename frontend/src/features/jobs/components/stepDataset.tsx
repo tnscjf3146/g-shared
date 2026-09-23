@@ -9,6 +9,10 @@ import type { WizardState } from './workloadWizard'
 
 // 3단계: 데이터셋 — 파일 끌어놓기/클릭. 파일은 서버로 안 가고 **브라우저에서 분석**해 메타데이터 5값만 뽑는다(job.md §4-3)
 const DATASET_ACCEPT = '.jsonl,.json,.csv,.txt'
+// 화면 표기는 accept 에서 파생한다 — 두 곳에 적으면 형식을 늘릴 때 안내만 조용히 어긋난다
+const DATASET_ACCEPT_LABEL = DATASET_ACCEPT.split(',')
+  .map((e) => e.slice(1).toUpperCase())
+  .join(' · ')
 const COPY: Record<WorkloadKind, { title: string; desc: string }> = {
   TRAIN_LORA: { title: '학습 데이터셋', desc: '한 줄에 샘플 하나(JSONL 권장). 지시-응답 쌍 또는 텍스트-라벨 쌍.' },
   INFERENCE: { title: '입력 데이터', desc: '모델에 넣을 입력 샘플 목록. 결과는 같은 순서로 돌아옵니다.' },
@@ -41,8 +45,8 @@ export function StepDataset({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">3. {copy.title}</h2>
-        <p className="text-[15px] text-text-muted">{copy.desc}</p>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">{copy.title}</h2>
+        <p className="text-label-sm text-text-muted">{copy.desc}</p>
       </header>
 
       <FileDrop
@@ -50,22 +54,22 @@ export function StepDataset({ catalog, state, onChange }: Props) {
         onFile={onFile}
         accept={DATASET_ACCEPT}
         label="데이터셋 파일을 끌어놓거나 클릭해 선택"
-        hint={`${DATASET_ACCEPT} · 파일은 브라우저에서 분석만 하고, 마지막 업로드 단계에서 서버로 보냅니다`}
+        hint={DATASET_ACCEPT_LABEL}
       />
 
       {/* 분석 상태 — 진행 중 / 결과 / 실패 */}
       {state.analyzing && (
-        <p role="status" className="text-[13px] tabular-nums text-text-muted">
+        <p role="status" className="text-caption tabular-nums text-text-muted">
           분석 중… {state.datasetFile ? `${Math.min(100, Math.round((progress / Math.max(1, state.datasetFile.size)) * 100))}%` : ''}
         </p>
       )}
       {failure && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {failure}
         </p>
       )}
       {meta && !state.analyzing && (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-hairline bg-surface-1 p-4 text-[13px] tabular-nums md:grid-cols-5">
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg border border-hairline bg-surface-1 p-4 text-caption tabular-nums md:grid-cols-5">
           {(
             [
               ['크기', formatBytes(meta.sizeBytes)],
@@ -80,7 +84,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
               <dd className="font-semibold text-dark">{v}</dd>
             </div>
           ))}
-          <p className="col-span-full text-[12px] text-text-muted">토큰 수는 문자 비율로 근사한 값입니다. 이 5개 값만 서버로 보내 GPU 추천과 견적에 씁니다.</p>
+          <p className="col-span-full text-hint text-text-muted">토큰 수는 근사값 · 이 5개 값만 서버로 전송</p>
         </dl>
       )}
 

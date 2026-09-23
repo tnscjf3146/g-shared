@@ -13,12 +13,12 @@ export function Pager({ page, totalPages, onChange, numbered = false }: { page: 
       </button>
       {numbered ? (
         Array.from({ length: totalPages }, (_, i) => (
-          <button key={i} type="button" aria-label={`${i + 1}페이지`} aria-current={i === page ? 'page' : undefined} onClick={() => onChange(i)} className={`h-7 min-w-7 rounded-md px-1.5 text-[14px] tabular-nums transition-colors ${i === page ? 'bg-primary/10 font-semibold text-primary' : 'text-text-muted hover:bg-black/5'}`}>
+          <button key={i} type="button" aria-label={`${i + 1}페이지`} aria-current={i === page ? 'page' : undefined} onClick={() => onChange(i)} className={`h-7 min-w-7 rounded-md px-1.5 text-caption tabular-nums transition-colors ${i === page ? 'bg-primary/10 font-semibold text-primary' : 'text-text-muted hover:bg-black/5'}`}>
             {i + 1}
           </button>
         ))
       ) : (
-        <span className="px-1 text-[13px] text-text-muted tabular-nums">{page + 1} / {totalPages}</span>
+        <span className="px-1 text-caption text-text-muted tabular-nums">{page + 1} / {totalPages}</span>
       )}
       <button type="button" aria-label="다음 페이지" disabled={page >= totalPages - 1} onClick={() => onChange(page + 1)} className={BTN}>
         <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>

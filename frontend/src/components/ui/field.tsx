@@ -7,14 +7,14 @@ export function Field({ id, label, error, hint, children }: Props) {
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
-        <label htmlFor={id} className="text-[13px] font-medium text-text-muted">
+        <label htmlFor={id} className="text-caption font-medium text-text-muted">
           {label}
         </label>
         {hint}
       </div>
       {children}
       {error && (
-        <p id={`${id}-error`} role="alert" className="text-[13px] text-danger">
+        <p id={`${id}-error`} role="alert" className="text-caption text-danger">
           {error}
         </p>
       )}

@@ -17,7 +17,7 @@ export function Stepper({ steps, current, maxReached, onSelect }: { steps: Step[
                 disabled={!reachable}
                 onClick={() => onSelect?.(i)}
                 aria-current={active ? 'step' : undefined}
-                className={`flex size-8 shrink-0 items-center justify-center rounded-pill text-[13px] font-bold tabular-nums transition-colors ${
+                className={`flex size-8 shrink-0 items-center justify-center rounded-pill text-caption font-bold tabular-nums transition-colors ${
                   active ? 'bg-primary text-white shadow-glow-primary' : done ? 'bg-primary/15 text-primary' : 'bg-neutral-tint text-text-muted'
                 } ${reachable ? 'cursor-pointer' : 'cursor-default'}`}
               >
@@ -32,8 +32,8 @@ export function Stepper({ steps, current, maxReached, onSelect }: { steps: Step[
               <span aria-hidden className={`h-px flex-1 ${i === steps.length - 1 ? 'bg-transparent' : done ? 'bg-primary' : 'bg-hairline-strong'}`} />
             </div>
             <div className="flex flex-col items-center gap-0.5">
-              <span className={`text-[13px] font-semibold ${active ? 'text-dark' : 'text-text-muted'}`}>{s.label}</span>
-              {s.note && <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-[11px] text-text-muted">{s.note}</span>}
+              <span className={`text-caption font-semibold ${active ? 'text-dark' : 'text-text-muted'}`}>{s.label}</span>
+              {s.note && <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-micro text-text-muted">{s.note}</span>}
             </div>
           </li>
         )

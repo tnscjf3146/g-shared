@@ -52,8 +52,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">4. GPU 등급</h2>
-        <p className="text-[15px] text-text-muted">데이터셋 분석 결과와 모델·설정을 기준으로 적합도를 매겼습니다. 등급을 고르면 아래에 견적이 나옵니다.</p>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">GPU 등급</h2>
+        <p className="text-label-sm text-text-muted">데이터셋 분석 결과와 모델·설정을 기준으로 적합도를 매겼습니다. 등급을 고르면 아래에 견적이 나옵니다.</p>
       </header>
 
       {!current && (
@@ -64,12 +64,12 @@ export function StepGpu({ spec, state, onChange }: Props) {
         </div>
       )}
       {current && 'error' in current && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {current.error}
         </p>
       )}
       {visible && visible.length === 0 && (
-        <p role="status" className="rounded-md bg-neutral-tint px-4 py-3 text-[14px] text-dark">
+        <p role="status" className="rounded-md bg-neutral-tint px-4 py-3 text-caption text-dark">
           현재 작업 가능한 GPU가 없습니다. 등급 목록은 켜져 있는 공급자 PC 로 만들어져서, 잠시 후 다시 오면 나타날 수 있습니다.
         </p>
       )}
@@ -86,24 +86,24 @@ export function StepGpu({ spec, state, onChange }: Props) {
                 >
                   <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-[15px] font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
+                    <span className="text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
                     <StatusBadge tone={FIT[g.fit].tone}>{FIT[g.fit].label}</StatusBadge>
                   </div>
-                  <span className="text-[13px] tabular-nums text-text-muted">
+                  <span className="text-caption tabular-nums text-text-muted">
                     {Math.round(g.vramMb / 1024)} GB · 대기 워커 {g.availableWorkers}대
                   </span>
-                  <span className="text-[12px] text-text-muted">{g.reason}</span>
+                  <span className="text-hint text-text-muted">{g.reason}</span>
                 </label>
               )
             })}
           </div>
-          {visible[0] && <p className="text-[12px] tabular-nums text-text-muted">필요 VRAM 약 {Math.round(visible[0].requiredVramMb / 1024)} GB 기준. 대기 워커가 0대인 등급은 배정까지 기다릴 수 있습니다.</p>}
+          {visible[0] && <p className="text-hint tabular-nums text-text-muted">필요 VRAM 약 {Math.round(visible[0].requiredVramMb / 1024)} GB 기준. 대기 워커가 0대인 등급은 배정까지 기다릴 수 있습니다.</p>}
         </fieldset>
       )}
 
       {/* 견적 — GPU 선택 직후 */}
       {gpuId != null && estimateError && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-[14px] text-danger">
+        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
           {estimateError}
         </p>
       )}
