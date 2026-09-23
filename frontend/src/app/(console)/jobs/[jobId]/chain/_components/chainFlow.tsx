@@ -240,7 +240,7 @@ function DotLegend() {
     ['오프체인', DOT.offchain],
   ]
   return (
-    <ul className="pointer-events-none absolute bottom-3 left-4 z-10 flex max-w-[46%] flex-wrap gap-x-4 gap-y-1.5 text-[11.5px]" style={{ color: 'rgba(226,228,233,.75)' }}>
+    <ul className="pointer-events-none absolute bottom-3 left-4 z-10 flex max-w-[46%] flex-wrap gap-x-4 gap-y-1.5 text-micro" style={{ color: 'rgba(226,228,233,.75)' }}>
       {dots.map(([label, color]) => (
         <li key={label} className="flex items-center gap-1.5">
           <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
@@ -259,7 +259,7 @@ function LineLegend() {
     ['취소·만료 → 환불', BAD_RED, false],
   ]
   return (
-    <ul className="pointer-events-none absolute right-4 bottom-3 z-10 flex flex-col items-end gap-1.5 text-[11.5px]" style={{ color: 'rgba(226,228,233,.75)' }}>
+    <ul className="pointer-events-none absolute right-4 bottom-3 z-10 flex flex-col items-end gap-1.5 text-micro" style={{ color: 'rgba(226,228,233,.75)' }}>
       {lines.map(([label, color, dashed]) => (
         <li key={label} className="flex items-center gap-1.5">
           {label}
