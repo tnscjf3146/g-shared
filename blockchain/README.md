@@ -323,6 +323,30 @@ npm run verify:escrow:ssafy
 **재배포하면 `nextJobId` 가 1 로 돌아간다.** 그래서 백엔드는 작업마다 에스크로 주소를 함께 저장한다.
 
 
+## SSAFY 체인 이벤트 보기
+
+배포된 에스크로의 이벤트를 **체인에서 직접** 읽는다. 우리 백엔드를 거치지 않고, 키도 필요 없다. SSAFY 블록 탐색기가 막혀 있어 그 대신 쓴다.
+
+```bash
+npm run events                    # 배포 이후 전체
+npm run events -- --job 13        # 에스크로 작업 하나만
+npm run events:follow             # 새 블록을 계속 따라간다
+npm run events:stats              # 작업 수 · 완료 · 환불 · settleTimeout 실행 수
+```
+
+```
+블록 11,338,610  09-22 15:37:55  예치         job 13  1 GSC · 의뢰자 0xb056…1e78 → 공급자 0x9cB9…0Af9     tx 0x963b…959d
+블록 11,338,613  09-22 15:38:25  수락         job 13  Worker 0x0394…E815                                  tx 0x7724…c353
+블록 11,338,621  09-22 15:39:45  결과 제출    job 13  결과 Hash 0xe021…1316                               tx 0xc615…69f2
+블록 11,338,621  09-22 15:39:45  정산         job 13  1 GSC → 공급자 0x9cB9…0Af9                          tx 0xc615…69f2
+```
+
+- 주소와 ABI 는 `deployments/ssafy-31221/GPUJobEscrow.json` 에서 읽는다. 실제로 배포된 것과 어긋날 일이 없다
+- 결과 제출과 정산이 같은 블록·같은 tx 로 찍히는 것은 정상이다. `submitResult` 한 번이 둘 다 한다
+- `--follow` 는 과거 5줄(`--tail`)을 보인 뒤 3초(`--interval`)마다 새 블록을 확인한다. 블록 간격이 약 10초라 서명 뒤 10초 안팎에 한 줄이 뜬다
+- RPC 는 `SSAFY_RPC_URL` 이 있으면 그것을, 없으면 `https://rpc.ssafy-blockchain.com` 을 쓴다
+
+
 ## 다음 단계
 
 - 에스크로 SSAFY 체인 배포와 배포 후 검증 (`S15P21E204-155`)
