@@ -39,6 +39,12 @@ export function formatReliability(w: { completedCount?: number; totalExecutionCo
   if (total == null) return null // 이 서버는 이력을 주지 않는다
   if (total === 0) return { short: '신규', detail: '아직 수행한 작업이 없습니다.' }
   const done = w.completedCount ?? 0
-  const rate = w.successRate != null ? `${Math.round(w.successRate * 100)}%` : '—'
-  return { short: `${done} / ${total}`, detail: `완료 ${done}건 · 실행 ${total}건 · 성공률 ${rate}` }
+  const rate = w.successRate != null ? `${Math.round(w.successRate * 100)}%` : null
+  // 성공률을 **분모와 함께** 한 줄에 — 둘 중 하나만 있으면 오해를 부른다.
+  // 분모만: "좋은 건가?" / 성공률만: "몇 건 중에요?"(요청서 지적)
+  // 표 한 칸에 들어가야 해서 슬래시 주변 공백은 뺀다 — "2 / 2 · 100%" 는 칸을 넘겨 잘렸다
+  return {
+    short: rate ? `${done}/${total} · ${rate}` : `${done}/${total}`,
+    detail: `완료 ${done}건 · 실행 ${total}건 · 성공률 ${rate ?? '—'}`,
+  }
 }

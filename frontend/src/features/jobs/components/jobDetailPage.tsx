@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { ApiError } from '@/lib/fetcher'
+import { toastStore } from '@/lib/stores/toast-store'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
@@ -22,6 +23,8 @@ import { TrainingResultVerificationPanel } from './trainingResultVerificationPan
 const POLL_MS = 3_000 // 실시간이 없거나 SSE 가 못 덮는 상태 — 시연 중 블록 생성(10초)보다 화면이 늦지 않게 짧게
 const SLOW_POLL_MS = 15_000 // SSE 가 살아 있을 때의 안전망 — 죽은 커넥션에 화면이 얼어붙지 않게 최소한만 돈다
 type TabKey = 'config' | 'dataset' | 'cost' | 'adapter' | 'verify'
+// 종료 이벤트 타입 → REST 가 쓰는 상태값. 토스트 중복 제거 키를 대시보드와 같은 문자열로 맞추는 용도
+const TERMINAL_STATUS = { JOB_COMPLETED: 'COMPLETED', JOB_FAILED: 'FAILED', JOB_CANCELLED: 'CANCELLED' } as const
 
 // 한 건의 속성을 읽기 쉽게 — 표 대신 "라벨(작게·회색) 위, 값(크게·진하게)" 키-값 그리드. 테두리 대신 여백으로 구분
 function DetailGrid({ items }: { items: [string, React.ReactNode][] }) {
@@ -77,6 +80,28 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     if (!ev || evStatus == null) return
     if (evStatus !== shownStatus) void load(true)
   }, [ev, evStatus, shownStatus, load])
+
+  // 종료 알림 — 재연결·재조회로 같은 종료를 다시 관측해도 `jobId + 상태` 로 1회만(스펙 §8).
+  // 실패 사유(reason)는 내부 코드라 그대로 노출하지 않는다 — 상세 화면이 사람이 읽을 문장을 따로 보여 준다
+  //
+  // 키는 **이벤트 타입이 아니라 상태값**(`COMPLETED`)으로 만든다. 대시보드는 REST 목록의
+  // `status` 로 같은 키를 만드는데, 여기서 `JOB_COMPLETED` 를 쓰면 문자열이 달라
+  // 두 화면 사이 중복 제거가 조용히 깨진다(지금은 라우트가 배타적이라 안 드러날 뿐이다).
+  // `status` 는 스키마상 없을 수도 있어(optional·nullable) 없으면 타입에서 직접 만든다 —
+  // 이벤트 타입을 그대로 폴백으로 쓰면 바로 그 어긋난 키가 되살아난다
+  useEffect(() => {
+    if (!ev || ev.type === 'JOB_PROGRESS') return
+    const dedupeKey = `job:${ev.jobId}:${ev.status ?? TERMINAL_STATUS[ev.type]}`
+    if (ev.type === 'JOB_COMPLETED') {
+      // 링크를 달지 않는다 — 이 토스트는 **그 작업의 상세 화면에서만** 뜨므로
+      // "결과 보기"가 지금 보고 있는 페이지를 가리키게 된다. 결과는 아래 탭에 이미 나타난다
+      toastStore.push({ tone: 'success', message: '학습이 완료되었습니다. 아래에서 결과를 확인할 수 있습니다.', dedupeKey })
+    } else if (ev.type === 'JOB_FAILED') {
+      toastStore.push({ tone: 'danger', message: '학습 작업이 완료되지 않았습니다. 상세 상태를 확인해 주세요.', dedupeKey })
+    } else {
+      toastStore.push({ tone: 'neutral', message: '작업이 취소되었습니다.', dedupeKey })
+    }
+  }, [ev])
   // 완료 이벤트가 왔는데 REST 가 아직 RUNNING 을 돌려주는 짧은 틈이 있다. 그때 진행률이
   // 100% 에서 옛 값으로 뚝 떨어져 보이면 안 되므로 100 으로 고정해 둔다(다음 응답이 오면 바가 사라진다)
   const livePercent =
