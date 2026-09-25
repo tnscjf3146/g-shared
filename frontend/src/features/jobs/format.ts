@@ -52,7 +52,18 @@ export function jobStatusMeta(status: JobStatus, failReason?: string | null, can
 }
 
 /** 실패·원인까지 구분한 상세 한 문장 (jobStatusMeta 와 같은 조합 규칙). 모든 취소 문장은 환불 사실을 함께 말한다 */
-export function jobStatusSentence(status: JobStatus, failReason?: string | null, cancelReason?: string | null): string {
+/**
+ * 상세 화면의 상태 한 문장.
+ *
+ * <p>{@code percent} 를 받는 이유: RUNNING 100% 에서 COMPLETED 까지 **25초쯤 걸린다**
+ * (2026-09-25 실서버 측정 — 학습은 끝났고 워커가 결과물을 올린 뒤 체인에 submitResult 를 보내는 구간).
+ * 그동안 "학습이 진행 중입니다 · 100%" 로 굳어 있으면 멈춘 것처럼 보인다. 실제로는 이 프로젝트에서
+ * 제일 중요한 일(결과 해시를 체인에 남기는 것)을 하는 중이라, 그걸 그대로 말해 준다.
+ */
+export function jobStatusSentence(status: JobStatus, failReason?: string | null, cancelReason?: string | null, percent?: number | null): string {
+  if (status === 'RUNNING' && percent != null && percent >= 100) {
+    return '학습이 끝났습니다. 결과물을 올리고 블록체인에 기록하는 중입니다.'
+  }
   if (failReason) {
     if (status === 'CANCELLING') return '학습이 실패했습니다. 예치금 환불을 처리하는 중입니다 — 완료되면 자동으로 반영됩니다.'
     if (status === 'CANCELLED') return '학습이 실패해 예치금이 환불됐습니다.'
