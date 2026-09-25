@@ -55,8 +55,10 @@ public class JobRealtimeEventStream {
      *   <li><b>연결 확인</b> — 아무 바이트도 안 흐르면 클라이언트는 "조용히 죽은 연결"과 구분할 수 없다.
      * </ul>
      *
-     * <p>순찰 스레드 풀은 {@code spring.task.scheduling.pool.size} 로 늘려 뒀다 —
-     * 기본값(1)이면 이 작업이 배정 순찰(JobMatcher)을 막는다.
+     * <p>순찰 스레드 풀은 {@code spring.task.scheduling.pool.size} 를 순찰 수(8)만큼 늘려 뒀다 —
+     * 기본값(1)이면 이 작업이 배정 순찰(JobMatcher)을 막는다. 여기서 쓰는 send 는 블로킹이고
+     * {@code SseEmitter(0L)} 이라 쓰기 타임아웃이 없어, 죽은 소켓 하나가 이 스레드를 오래 잡을 수 있다.
+     * 순찰마다 스레드가 따로 있어야 그래도 배정·스위퍼가 계속 돈다.
      */
     @Scheduled(fixedDelay = HEARTBEAT_MS)
     public void heartbeat() {
