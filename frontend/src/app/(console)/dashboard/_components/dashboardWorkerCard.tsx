@@ -11,7 +11,7 @@ import type { Worker } from '@/features/workers/types'
 // 색·점·배지 없이 글자만. 온도·전력·가동률·수익·수신 토글은 백엔드에 없어 그리지 않는다
 // 작업 가능/불가(상태)는 OperatorApproval 이 판정해 올려주고, 아래 표의 마지막 "상태" 칸에 표시한다(현재 작업 옆). ONLINE 은 연결 상태일 뿐 작업 가능이 아니다
 // 컬럼 폭 고정: GPU | VRAM | 드라이버 | 벤치마크 | 작업 이력 | 하트비트 | 현재 작업 | 상태
-const COLS = ['20%', '8%', '11%', '13%', '11%', '13%', '10%', '14%']
+const COLS = ['19%', '8%', '10%', '12%', '15%', '13%', '10%', '13%']
 const WORK_TONE = { muted: 'text-text-muted', danger: 'text-danger', ok: 'font-semibold text-primary' }
 
 export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { worker: Worker; index: number; now: number; onUnlink: (w: Worker) => void; style?: React.CSSProperties }) {

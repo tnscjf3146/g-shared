@@ -1,3 +1,4 @@
+import { Toaster } from '@/components/ui/toaster'
 import { AuthGate } from './_components/authGate'
 import { ConsoleEntrance } from './_components/consoleEntrance'
 import { DashboardSidebar } from './dashboard/_components/dashboardSidebar'
@@ -16,6 +17,8 @@ export default function ConsoleLayout({ children }: LayoutProps<'/'>) {
         <main className="min-w-0 flex-1 overflow-x-hidden">
           <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pt-6 pb-10 sm:px-6 md:px-8">{children}</div>
         </main>
+        {/* 작업 완료·실패 알림 — 로그인 후 화면에서만 필요하므로 랜딩·로그인이 아닌 이 셸에 둔다 */}
+        <Toaster />
       </AuthGate>
     </div>
   )

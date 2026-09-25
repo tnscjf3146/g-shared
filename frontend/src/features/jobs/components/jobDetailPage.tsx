@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { ApiError } from '@/lib/fetcher'
+import { toastStore } from '@/lib/stores/toast-store'
 import { cancelEscrowJob, ensureSsafyChain, getProvider, requestAccount, shortAddress, waitForReceipt } from '@/features/wallet/ethereum'
 import { cancelJob, getCatalog, getDataset, getJob } from '../api'
 import { jobMessageFor } from '../errors'
@@ -77,6 +78,20 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     if (!ev || evStatus == null) return
     if (evStatus !== shownStatus) void load(true)
   }, [ev, evStatus, shownStatus, load])
+
+  // 종료 알림 — 재연결·재조회로 같은 종료를 다시 관측해도 `jobId + 상태` 로 1회만(스펙 §8).
+  // 실패 사유(reason)는 내부 코드라 그대로 노출하지 않는다 — 상세 화면이 사람이 읽을 문장을 따로 보여 준다
+  useEffect(() => {
+    if (!ev || ev.type === 'JOB_PROGRESS') return
+    const dedupeKey = `job:${ev.jobId}:${ev.type}`
+    if (ev.type === 'JOB_COMPLETED') {
+      toastStore.push({ tone: 'success', message: '학습이 완료되었습니다. 결과를 확인할 수 있습니다.', action: { label: '결과 보기', href: `/jobs/${ev.jobId}` }, dedupeKey })
+    } else if (ev.type === 'JOB_FAILED') {
+      toastStore.push({ tone: 'danger', message: '학습 작업이 완료되지 않았습니다. 상세 상태를 확인해 주세요.', dedupeKey })
+    } else {
+      toastStore.push({ tone: 'neutral', message: '작업이 취소되었습니다.', dedupeKey })
+    }
+  }, [ev])
   // 완료 이벤트가 왔는데 REST 가 아직 RUNNING 을 돌려주는 짧은 틈이 있다. 그때 진행률이
   // 100% 에서 옛 값으로 뚝 떨어져 보이면 안 되므로 100 으로 고정해 둔다(다음 응답이 오면 바가 사라진다)
   const livePercent =
