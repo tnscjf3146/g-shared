@@ -85,7 +85,9 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
     if (!ev || ev.type === 'JOB_PROGRESS') return
     const dedupeKey = `job:${ev.jobId}:${ev.type}`
     if (ev.type === 'JOB_COMPLETED') {
-      toastStore.push({ tone: 'success', message: '학습이 완료되었습니다. 결과를 확인할 수 있습니다.', action: { label: '결과 보기', href: `/jobs/${ev.jobId}` }, dedupeKey })
+      // 링크를 달지 않는다 — 이 토스트는 **그 작업의 상세 화면에서만** 뜨므로
+      // "결과 보기"가 지금 보고 있는 페이지를 가리키게 된다. 결과는 아래 탭에 이미 나타난다
+      toastStore.push({ tone: 'success', message: '학습이 완료되었습니다. 아래에서 결과를 확인할 수 있습니다.', dedupeKey })
     } else if (ev.type === 'JOB_FAILED') {
       toastStore.push({ tone: 'danger', message: '학습 작업이 완료되지 않았습니다. 상세 상태를 확인해 주세요.', dedupeKey })
     } else {

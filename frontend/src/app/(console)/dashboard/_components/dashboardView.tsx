@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { toastStore } from '@/lib/stores/toast-store'
 import { ConfirmDialog } from '@/components/ui/confirmDialog'
 import { cancelJob, getCatalog, getJobs } from '@/features/jobs/api'
 import { jobMessageFor } from '@/features/jobs/errors'
-import type { Catalog, JobSummary } from '@/features/jobs/types'
+import type { Catalog, JobStatus, JobSummary } from '@/features/jobs/types'
 import { deleteWorker, getMyWorkers, getNetworkStats } from '@/features/workers/api'
 import { WorkerRegisterCard } from '@/features/workers/components/workerRegisterCard'
 import { workerMessageFor } from '@/features/workers/errors'
@@ -72,6 +73,30 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
   // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
+
+  // 대시보드에 있을 때도 작업이 끝나면 알린다.
+  // 실시간 구독(useJobRealtime)은 작업 상세에서만 도는데, 학습을 걸어 두고 대시보드로 돌아와
+  // 기다리는 게 오히려 흔한 동선이다. 그때 알림이 없으면 "끝난 줄 모르고" 있게 된다.
+  // 여기선 SSE 대신 **폴링으로 받은 목록의 상태 전이**를 본다 — 이미 15초마다 받고 있어 추가 요청이 없다.
+  const seenStatus = useRef<Map<number, JobStatus>>(new Map())
+  useEffect(() => {
+    if (jobs.status !== 'ready') return
+    const prev = seenStatus.current
+    for (const j of jobs.data) {
+      const before = prev.get(j.jobId)
+      prev.set(j.jobId, j.status)
+      // 첫 관측(before 없음)은 알리지 않는다 — 화면에 처음 들어왔을 때 과거 완료분이 쏟아지면 안 된다
+      if (before == null || before === j.status) continue
+      const dedupeKey = `job:${j.jobId}:${j.status}` // 상세 화면 토스트와 같은 키 — 둘 다 떠도 1회만
+      if (j.status === 'COMPLETED') {
+        toastStore.push({ tone: 'success', message: `작업 #${j.jobId} 학습이 완료되었습니다.`, action: { label: '결과 보기', href: `/jobs/${j.jobId}` }, dedupeKey })
+      } else if (j.status === 'FAILED') {
+        toastStore.push({ tone: 'danger', message: `작업 #${j.jobId} 이(가) 완료되지 않았습니다. 상세 상태를 확인해 주세요.`, dedupeKey })
+      } else if (j.status === 'CANCELLED') {
+        toastStore.push({ tone: 'neutral', message: `작업 #${j.jobId} 이(가) 취소되었습니다.`, dedupeKey })
+      }
+    }
+  }, [jobs])
   // "내 학습 작업" 목록에 보여줄 것 — '오래된순'은 위에서 서버 정렬로 받았고, 여기 정렬은 페이지 안 표시 순서 확정용.
   // ⚠️ 'done' 필터는 여전히 받아온 50건 기준 — 작업이 50건을 넘으면 서버 status 필터+페이징으로 옮겨야 한다
   const newestFirst = (a: JobSummary, b: JobSummary) => b.createdAt.localeCompare(a.createdAt)
