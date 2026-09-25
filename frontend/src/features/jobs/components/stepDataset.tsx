@@ -13,17 +13,18 @@ const DATASET_ACCEPT = '.jsonl,.json,.csv,.txt'
 const DATASET_ACCEPT_LABEL = DATASET_ACCEPT.split(',')
   .map((e) => e.slice(1).toUpperCase())
   .join(' · ')
-const COPY: Record<WorkloadKind, { title: string; desc: string }> = {
-  TRAIN_LORA: { title: '학습 데이터셋', desc: '한 줄에 샘플 하나(JSONL 권장). 지시-응답 쌍 또는 텍스트-라벨 쌍.' },
-  INFERENCE: { title: '입력 데이터', desc: '모델에 넣을 입력 샘플 목록. 결과는 같은 순서로 돌아옵니다.' },
-  EVALUATION: { title: '평가 데이터셋', desc: '정답이 포함된 샘플. 지표 계산에 씁니다.' },
+// 제목만. 형식 안내는 아래 FileDrop 이 받을 수 있는 확장자로 이미 말해 준다
+const TITLE: Record<WorkloadKind, string> = {
+  TRAIN_LORA: '학습 데이터셋',
+  INFERENCE: '입력 데이터',
+  EVALUATION: '평가 데이터셋',
 }
 
 type Props = { catalog: Catalog; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 
 export function StepDataset({ catalog, state, onChange }: Props) {
   const kind = catalog.workloads.find((w) => w.id === state.workloadId)?.kind ?? 'TRAIN_LORA'
-  const copy = COPY[kind]
+  const title = TITLE[kind]
   const [progress, setProgress] = useState(0) // 읽은 바이트
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -45,8 +46,7 @@ export function StepDataset({ catalog, state, onChange }: Props) {
   return (
     <>
       <header className="flex flex-col gap-1">
-        <h2 className="text-h2 font-bold tracking-heading text-dark">{copy.title}</h2>
-        <p className="text-label-sm text-text-muted">{copy.desc}</p>
+        <h2 className="text-h2 font-bold tracking-heading text-dark">{title}</h2>
       </header>
 
       <FileDrop

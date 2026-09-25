@@ -86,7 +86,6 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 <label key={k} className={`card-quiet flex cursor-pointer flex-col gap-1 p-4 transition-colors ${advanced ? 'opacity-50' : ''} ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
                   <input type="radio" name="level" value={k} checked={state.level === k} disabled={advanced} onChange={() => onChange({ level: k })} className="sr-only" />
                   <span className="text-label-sm font-semibold text-dark">{AUTO_MODE_META[k].label}</span>
-                  <span className="text-caption text-text-muted">{AUTO_MODE_META[k].description}</span>
                 </label>
               )
             })}
@@ -119,11 +118,11 @@ export function StepConfig({ catalog, state, onChange }: Props) {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {(
             [
-              ['none', isTrain ? '처음부터 학습' : '어댑터 없이', isTrain ? '베이스 모델에서 시작해 v1 어댑터를 만듭니다.' : '베이스 모델만으로 진행합니다.'],
-              ['job', isTrain ? '이어서 학습 (버전 올리기)' : '내 학습 결과 적용', isTrain ? '완료된 내 어댑터에 이어서 학습합니다 (v2, v3…).' : '완료된 내 학습 작업의 어댑터를 모델에 얹습니다.'],
-              ['file', '어댑터 파일 올리기', '다른 데서 받아 온 어댑터 .tar 를 올려 사용합니다.'],
-            ] as [AdapterSource, string, string][]
-          ).map(([value, label, description]) => (
+              ['none', isTrain ? '처음부터 학습' : '어댑터 없이'],
+              ['job', isTrain ? '이어서 학습 (버전 올리기)' : '내 학습 결과 적용'],
+              ['file', '어댑터 파일 올리기'],
+            ] as [AdapterSource, string][]
+          ).map(([value, label]) => (
             <label key={value} className={`card-quiet flex cursor-pointer flex-col gap-1 p-4 transition-colors ${state.adapterSource === value ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
               <input
                 type="radio"
@@ -137,8 +136,6 @@ export function StepConfig({ catalog, state, onChange }: Props) {
                 className="sr-only"
               />
               <span className="text-label-sm font-semibold text-dark">{label}</span>
-              {/* break-keep: 한국어가 단어(어절) 중간에서 끊기지 않고 띄어쓰기 단위로 줄바꿈 */}
-              <span className="text-caption break-keep text-text-muted">{description}</span>
             </label>
           ))}
         </div>

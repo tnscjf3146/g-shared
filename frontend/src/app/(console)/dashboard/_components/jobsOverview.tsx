@@ -74,10 +74,10 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
       {/* 2행: 지표 — 도넛(개수·구성비)과 겹치지 않는 것만. 개수 중복 대신 비용·추세·네트워크 */}
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
         {[
-          { label: '진행 중 예상 비용', value: formatCost(activeCost), sub: `진행·대기 ${counts[0] + counts[1]}건 견적 합`, d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
-          { label: '최근 7일 새 작업', value: String(recent7), sub: '이번 주에 만든 작업', d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
+          { label: '진행 중 예상 비용', value: formatCost(activeCost), d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
+          { label: '최근 7일 새 작업', value: String(recent7), d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
           // 네트워크 전체(GET /network/stats) — 내 워커가 아니라 "지금 일 받을 수 있는 GPU가 몇 대냐"
-          { label: '네트워크 온라인 워커', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', sub: '지금 작업을 받을 수 있는 GPU', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
+          { label: '네트워크 온라인 워커', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
         ].map((k, i) => (
           <section key={k.label} className="card animate-enter flex flex-col gap-4" style={{ animationDelay: `${80 + i * 40}ms` }}>
             <div className="flex items-center gap-2.5">
@@ -90,22 +90,21 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
             </div>
             <div className="flex flex-col gap-1">
               {loading ? <span className="h-8 w-20 animate-pulse rounded-xs bg-neutral-tint" /> : <span className="text-h1 leading-none font-bold tabular-nums tracking-heading text-dark">{k.value}</span>}
-              <span className="text-caption text-text-muted tabular-nums">{k.sub}</span>
             </div>
           </section>
         ))}
       </div>
 
-      {/* 3행: 진행 중 작업 — 이 화면의 주인공. card-featured(그린 테두리 + 글로우, 화면당 하나)로 위계를 준다 */}
-      <section className="card card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
+      {/* 3행: 진행 중 작업 — 이 화면의 주인공. card-featured(그린 테두리 + 글로우, 화면당 하나)로 위계를 준다.
+          진행 중인 게 없으면 섹션째 안 그린다 — "없습니다" 한 줄을 위해 큰 빈 카드를 띄우면 화면만 길어진다.
+          작업이 0건인지 아닌지는 위 도넛이 이미 말해 준다 */}
+      {(loading || runningJobs.length > 0) && (
+        <section className="card card-featured animate-enter flex flex-col gap-4" style={{ animationDelay: '160ms' }}>
           <header className="flex items-center justify-between gap-3">
             <h2 className="text-body font-bold tracking-heading text-dark">진행 중 작업</h2>
             <Pager page={runningPage} totalPages={runningPages} onChange={setRunningPage} />
           </header>
           {loading && <div className="h-40 animate-pulse rounded-md bg-neutral-tint" />}
-          {!loading && runningJobs.length === 0 && (
-            <p className="flex flex-1 items-center justify-center text-label-sm text-text-muted">지금 학습 중인 작업이 없습니다.</p>
-          )}
           <ul className="flex flex-col gap-5">
             {runningJobs.map((j) => (
               <li key={j.jobId} className="flex flex-col gap-2">
@@ -128,6 +127,7 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
             ))}
           </ul>
         </section>
+      )}
     </>
   )
 }
