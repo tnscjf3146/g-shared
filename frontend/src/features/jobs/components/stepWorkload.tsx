@@ -33,7 +33,6 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
                   </svg>
                   <span className="text-label-sm font-semibold text-dark">{w.name}</span>
                 </span>
-                <span className="text-caption text-text-muted">{w.description}</span>
               </label>
             )
           })}

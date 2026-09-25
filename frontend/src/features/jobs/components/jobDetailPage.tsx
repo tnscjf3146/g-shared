@@ -281,11 +281,6 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
             {liveStep && <p className="text-caption tabular-nums text-text-muted">Step {liveStep}</p>}
           </>
         )}
-        {job.assignedWorkerId && (
-          <p className="text-caption text-text-muted" title={job.assignedWorkerId}>
-            배정 워커 <span className="font-medium tabular-nums text-dark">{shortWorkerId(job.assignedWorkerId)}</span>
-          </p>
-        )}
       </section>
 
       {/* 상세는 탭으로 — 진행 아래에서 설정·데이터셋·비용·어댑터를 하나씩 (스크롤 대신). 진행 카드와 간격을 둔다 */}
@@ -326,6 +321,8 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
                   ['작업 종류', name.workload],
                   ['베이스 모델', name.model],
                   ['학습 설정', job.trainingMode === 'AUTO' ? '자동' : '직접 설정'],
+                  // 배정 워커는 진행 카드 아래 별도 줄이었다 — 값 하나짜리 줄을 없애고 같은 성격의 속성들과 한 격자에 모은다
+                  ...(job.assignedWorkerId ? ([['배정 워커', <span key="w" title={job.assignedWorkerId}>{shortWorkerId(job.assignedWorkerId)}</span>]] as [string, React.ReactNode][]) : []),
                   ['에폭', String(job.epochs)],
                   ['배치 크기', String(job.batchSize)],
                   ['학습률', String(job.learningRate)],
