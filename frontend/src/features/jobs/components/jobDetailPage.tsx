@@ -81,9 +81,13 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
   // 종료 알림 — 재연결·재조회로 같은 종료를 다시 관측해도 `jobId + 상태` 로 1회만(스펙 §8).
   // 실패 사유(reason)는 내부 코드라 그대로 노출하지 않는다 — 상세 화면이 사람이 읽을 문장을 따로 보여 준다
+  //
+  // 키는 **이벤트 타입이 아니라 상태값**(`COMPLETED`)으로 만든다. 대시보드는 REST 목록의
+  // `status` 로 같은 키를 만드는데, 여기서 `JOB_COMPLETED` 를 쓰면 문자열이 달라
+  // 두 화면 사이 중복 제거가 조용히 깨진다(지금은 라우트가 배타적이라 안 드러날 뿐이다).
   useEffect(() => {
     if (!ev || ev.type === 'JOB_PROGRESS') return
-    const dedupeKey = `job:${ev.jobId}:${ev.type}`
+    const dedupeKey = `job:${ev.jobId}:${ev.status ?? ev.type}`
     if (ev.type === 'JOB_COMPLETED') {
       // 링크를 달지 않는다 — 이 토스트는 **그 작업의 상세 화면에서만** 뜨므로
       // "결과 보기"가 지금 보고 있는 페이지를 가리키게 된다. 결과는 아래 탭에 이미 나타난다

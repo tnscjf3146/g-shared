@@ -16,6 +16,10 @@ export type Toast = {
 }
 
 const AUTO_DISMISS_MS = 6_000
+// 동시에 떠 있을 수 있는 최대 개수. 우하단에서 위로 쌓이는 구조라 상한이 없으면
+// 한꺼번에 여러 건이 들어올 때(예: 오래 자리를 비운 사이 끝난 작업들) 뷰포트를 넘어가고,
+// 넘친 토스트의 닫기 버튼이 화면 밖으로 나간다. 오래된 것부터 버린다 — 최신이 더 중요하다
+const MAX_VISIBLE = 3
 
 let seq = 0
 let toasts: Toast[] = []
@@ -38,7 +42,7 @@ export const toastStore = {
       shown.add(t.dedupeKey)
     }
     const toast: Toast = { ...t, id: ++seq }
-    toasts = [...toasts, toast]
+    toasts = [...toasts, toast].slice(-MAX_VISIBLE)
     emit()
     // 자동 소멸 — 사용자가 먼저 닫으면 dismiss 가 이미 지웠고, 여기선 없는 id 라 무해
     setTimeout(() => toastStore.dismiss(toast.id), AUTO_DISMISS_MS)

@@ -79,6 +79,12 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   // 기다리는 게 오히려 흔한 동선이다. 그때 알림이 없으면 "끝난 줄 모르고" 있게 된다.
   // 여기선 SSE 대신 **폴링으로 받은 목록의 상태 전이**를 본다 — 이미 15초마다 받고 있어 추가 요청이 없다.
   const seenStatus = useRef<Map<number, JobStatus>>(new Map())
+  // 정렬이 바뀌면 관측 기록을 버린다. '최신순'(id,desc)과 '오래된순'(id,asc)은 50건씩 **서로 다른 창**이라
+  // 한쪽에서 RUNNING 으로 본 작업이 다른 창에 머무는 동안 끝나면, 돌아오는 순간 그 사이 끝난 만큼
+  // 전이가 한꺼번에 성립해 "지금 끝난 것처럼" 보이는 토스트가 쏟아진다. 창이 바뀌면 다시 첫 관측부터
+  useEffect(() => {
+    seenStatus.current.clear()
+  }, [jobView])
   useEffect(() => {
     if (jobs.status !== 'ready') return
     const prev = seenStatus.current
@@ -87,7 +93,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       prev.set(j.jobId, j.status)
       // 첫 관측(before 없음)은 알리지 않는다 — 화면에 처음 들어왔을 때 과거 완료분이 쏟아지면 안 된다
       if (before == null || before === j.status) continue
-      const dedupeKey = `job:${j.jobId}:${j.status}` // 상세 화면 토스트와 같은 키 — 둘 다 떠도 1회만
+      const dedupeKey = `job:${j.jobId}:${j.status}` // 상세 화면과 같은 키(둘 다 상태값 기준) — 둘 다 떠도 1회만
       if (j.status === 'COMPLETED') {
         toastStore.push({ tone: 'success', message: `작업 #${j.jobId} 학습이 완료되었습니다.`, action: { label: '결과 보기', href: `/jobs/${j.jobId}` }, dedupeKey })
       } else if (j.status === 'FAILED') {
