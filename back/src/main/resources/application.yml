@@ -5,6 +5,16 @@ spring:
   jpa:
     open-in-view: false     # 지연 로딩이 컨트롤러까지 새는 걸 막음
 
+  task:
+    scheduling:
+      pool:
+        # 기본값은 1 — 순찰 7개(JobMatcher·하트비트 스위퍼·키퍼·대조기·환불복구·정리 2종)가
+        # 한 스레드를 나눠 쓰면 서로를 막는다. 특히 EscrowTimeoutKeeper 는 영수증을 기다리며
+        # 만료 Job 하나당 최대 30초(10 × 3초)를 Thread.sleep 으로 자고, 체인 RPC 도 건당 10초까지 간다.
+        # 그동안 JobMatcher(30초 주기)가 아예 못 돌아 "예치했는데 배정이 안 된다"로 나타난다.
+        # 순찰끼리는 서로 독립이고 상태 전이는 전부 조건부 UPDATE(…IfXxx)라 병렬로 돌아도 안전하다.
+        size: 4
+
   flyway:
     placeholders:
       # V20(UTC→KST 시각 보정)이 몇 시간 밀지. 기본 0 = 아무것도 안 함 — 로컬·테스트는 호스트가 KST 라 밀면 틀어진다.
