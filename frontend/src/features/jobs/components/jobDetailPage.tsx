@@ -262,7 +262,7 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
 
       <section className="card flex flex-col gap-3 px-6 py-5">
         <h2 className="text-body font-bold tracking-heading text-dark">진행</h2>
-        <p className={`text-label-sm ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason, job.cancelReason)}</p>
+        <p className={`text-label-sm ${meta.tone === 'danger' ? 'text-danger' : 'text-dark'}`}>{jobStatusSentence(job.status, job.failReason, job.cancelReason, livePercent ?? job.progressPercent)}</p>
         {job.status === 'FAILED' && job.failReason && <p className="rounded-md bg-danger-tint px-4 py-3 text-caption break-all text-danger">{job.failReason}</p>}
         {job.status === 'CREATED' &&
           (missingUpload ? (

@@ -14,6 +14,13 @@ import { chosenParent, defaultAdapterName, resultAdapterVersion, type AdapterSou
 
 // 2단계: 모델·설정. 제공 모델만 사용(내 모델 가져오기 제거) · 학습 수준(학습 워크로드만) · 어댑터 출발점(처음부터 / 내 완료 작업 이어서 = v2·v3 / .tar 업로드) · 결과 어댑터 이름 · 고급(직접 설정)
 
+// 고급 설정을 처음 열었을 때의 값. **실제로 통과하는 값**이어야 한다 —
+// 예전 기본값(배치 16 · 길이 512)은 지금 네트워크에 붙은 워커(6GB)에서 전부
+// SCHEDULER_REJECTED 로 막혔다(2026-09-25 실서버 확인, 배치 8도 거절 / 4가 경계).
+// 서버는 거절 사유를 안 알려주므로, 열어 보기만 해도 막히는 값을 기본으로 두면 원인을 찾을 수 없다.
+// 더 큰 GPU 가 붙으면 보수적인 값이 되지만, 값을 올리는 건 사용자가 할 수 있고 막힌 이유를 찾는 건 못 한다.
+const DEFAULT_CUSTOM = { epochs: '3', batchSize: '4', learningRate: '0.00003', maxLength: '128' }
+
 type Props = { catalog: Catalog; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 
 export function StepConfig({ catalog, state, onChange }: Props) {
@@ -24,7 +31,7 @@ export function StepConfig({ catalog, state, onChange }: Props) {
   const c = typeof state.custom === 'object' ? state.custom : null
   const custom = useZodForm(
     customConfigFormSchema,
-    c ? { epochs: String(c.epochs), batchSize: String(c.batchSize), learningRate: String(c.learningRate), maxLength: String(c.maxLength) } : { epochs: '3', batchSize: '16', learningRate: '0.00003', maxLength: '512' },
+    c ? { epochs: String(c.epochs), batchSize: String(c.batchSize), learningRate: String(c.learningRate), maxLength: String(c.maxLength) } : DEFAULT_CUSTOM,
   )
   const str = (v: unknown) => (v == null ? '' : String(v))
 
