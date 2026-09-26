@@ -25,6 +25,7 @@ choosing them is the AI Scheduler's job.
 from __future__ import annotations
 
 import json
+import math
 import tempfile
 import time
 from dataclasses import asdict
@@ -36,6 +37,7 @@ from .config import check_model_directory
 from .dataset import read_dataset
 from .events import EventWriter
 from .failures import ExitCode, TrainingFailure
+from .verification import TensorStat, summarize
 
 #: 4-bit NF4 with double quantisation -- the configuration QLoRA describes.
 QUANT_TYPE = "nf4"
@@ -112,9 +114,15 @@ def run(request, events=None) -> dict:
     started = time.monotonic()
     model = _load_quantized(torch, request.model_path)
     model = _attach_adapters(model, request.config, init_adapter)
+    # Taken before the first step: "changed" has to mean "moved from where it
+    # started", and for a continued job that start is the incoming adapter,
+    # not zero.
+    baseline = _adapter_baseline(model)
     metrics = _train(torch, model, tokenizer, encoded, request,
                      total_steps, events)
     _save(model, request.output_dir)
+    metrics.update(_verify_adapter(torch, model, baseline))
+    del baseline
 
     # The model is dropped before the adapter is loaded back, so the check
     # happens with the GPU in the state a fresh process would find it in
@@ -346,12 +354,15 @@ def _train(torch, model, tokenizer, encoded, request, total_steps, events) -> di
         disable_tqdm=True,
         dataloader_pin_memory=False,
     )
+    # Held by name: it is the only place the per-step losses exist once the
+    # run is over, and the metrics file needs them.
+    progress = ProgressEvents(events, total_steps)
     trainer = Trainer(
         model=model,
         args=arguments,
         train_dataset=encoded,
         data_collator=_collate(tokenizer.pad_token_id),
-        callbacks=[ProgressEvents(events, total_steps)],
+        callbacks=[progress],
     )
     torch.cuda.reset_peak_memory_stats()
     try:
@@ -372,6 +383,11 @@ def _train(torch, model, tokenizer, encoded, request, total_steps, events) -> di
 
     elapsed = result.metrics.get("train_runtime") or 0.0
     return {
+        # trainLoss is the Trainer's mean over the run. finalLoss is the last
+        # step's own number -- they are different values and the screen wants
+        # the second one.
+        "lossHistory": progress.loss_history(),
+        "finalLoss": progress.final_loss(),
         "trainLoss": round(float(result.training_loss), 6),
         "trainingRuntimeSec": round(float(elapsed), 3),
         "stepsPerSecond": round(float(
@@ -409,6 +425,10 @@ class ProgressEvents:
         self._events = events
         self._total = total_steps
         self._reported_through = 0
+        #: Every step's loss, kept as well as published. The Trainer hands
+        #: back one mean over the whole run; the job detail screen draws a
+        #: curve, and this is the only place the per-step numbers exist.
+        self._history: list[dict] = []
         #: Monotonic, never the wall clock: a training run measured with
         #: ``time.time()`` changes length when the host adjusts its clock.
         self._started = time.monotonic()
@@ -450,6 +470,23 @@ class ProgressEvents:
                           current_epoch=whole, total_epochs=of_many,
                           elapsed_sec=round(time.monotonic() - self._started, 3))
         self._reported_through = step
+        # A null loss is a real progress event -- the step happened -- but it
+        # is not a point on a chart.
+        if loss is not None:
+            self._history.append({"step": step, "loss": round(float(loss), 6)})
+
+    def loss_history(self) -> list[dict]:
+        """``[{"step": 1, "loss": 3.291}, ...]`` in the order they happened."""
+        return list(self._history)
+
+    def final_loss(self) -> float | None:
+        """The last step's loss, or ``None`` if no step reported one.
+
+        Not the Trainer's ``training_loss``: that is the mean over the run,
+        and showing a mean under the label "Final Loss" is a wrong number
+        that looks right.
+        """
+        return self._history[-1]["loss"] if self._history else None
 
 
 def _epoch_numbers(args, state) -> tuple[int | None, int | None]:
@@ -497,6 +534,61 @@ def _save(model, output_dir) -> None:
     card = output / MODEL_CARD_FILE
     if card.is_file():
         card.unlink()
+
+
+def _adapter_baseline(model) -> dict:
+    """Every LoRA tensor as it was before the first step, copied to CPU.
+
+    Only the adapter, which is tens of megabytes -- the 4-bit base is not
+    touched. The copy is needed because these are the same tensors training
+    is about to write through.
+    """
+    return {name: parameter.detach().to("cpu", copy=True)
+            for name, parameter in model.named_parameters()
+            if ".lora_" in name}
+
+
+def _verify_adapter(torch, model, baseline: dict) -> dict:
+    """Did the weights move, and did any of them go bad.
+
+    Read from the live parameters rather than from the file that was just
+    written: they are the same numbers, and reading them back would cost a
+    second model load for nothing.
+
+    A run is not failed over this. The adapter is already written and
+    validated by :func:`_check_output`; an arithmetic problem here would cost
+    a customer a finished job to gain a chart, so the reason is recorded in
+    the metrics instead.
+    """
+    try:
+        stats = []
+        for name, parameter in model.named_parameters():
+            if ".lora_" not in name:
+                continue
+            after = parameter.detach().to("cpu").float()
+            before = baseline.get(name)
+            if before is None or before.shape != after.shape:
+                # A tensor that was not there before it trained did change,
+                # but there is nothing to measure the distance from.
+                delta, changed = 0.0, True
+            else:
+                difference = (after - before.float()).abs()
+                delta = float(difference.mean())
+                changed = bool(difference.ne(0).any())
+            stats.append(TensorStat(
+                name=name,
+                # NaN reaches the heatmap as a mean and json.dumps refuses to
+                # write it -- a bad tensor would cost the whole metrics file.
+                # nanCount already reports it.
+                delta=delta if math.isfinite(delta) else 0.0,
+                changed=changed,
+                non_zero=bool(after.ne(0).any()),
+                has_nan=bool(torch.isnan(after).any()),
+                has_inf=bool(torch.isinf(after).any()),
+            ))
+        return {"verification": summarize(stats)}
+    except Exception as error:
+        return {"verificationError": type(error).__name__}
 
 
 def _check_output(torch, request) -> None:
