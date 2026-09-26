@@ -12,6 +12,8 @@
  *
  *   npm run events:jobs               작업별 장부 — 단계마다 한 문장, 토큰이 들고 난 기록, 계약에 남은 돈
  *   npm run events:jobs -- --job 15   작업 하나 (--all 이면 전체, 기본은 최근 5건)
+ *   npm run events:watch              새 기록을 문장과 토큰 이동으로 실시간 표시
+ *   npm run events:watch -- --from 11365390   그 블록부터 다시 흘려 보기 (리허설·시험용)
  *
  * 키가 필요 없다. 읽기만 한다. RPC 는 SSAFY_RPC_URL 이 있으면 그것을 쓴다.
  */
@@ -458,6 +460,71 @@ async function jobsView(only: bigint | null, all: boolean): Promise<void> {
   }
 }
 
+/** from 을 주면 그 블록부터 다시 흘려 보낸다. 리허설 때 지난 시연을 실제처럼 다시 보이거나 이 화면을 시험할 때 쓴다. */
+async function watch(intervalSec: number, from?: bigint): Promise<void> {
+  let latest = await client.getBlockNumber();
+  header(latest);
+  let locked = await lockedNow();
+  console.log(`  지금 계약에 잠긴 돈   ${gsc(locked)}`);
+  const since = from === undefined ? "여기부터 새 기록" : `블록 ${num(from)} 부터 다시 보기`;
+  console.log(`\n── ${since} (${intervalSec}초마다 확인, 끝내려면 Ctrl+C) ──\n`);
+
+  const tty = process.stdout.isTTY;
+  let next = from ?? latest + 1n;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+    try {
+      latest = await client.getBlockNumber();
+      if (latest < next) continue;
+      const [events, { moves, grants }] = await Promise.all([readEvents(next, latest), readMoney(next, latest)]);
+      const ids = [...new Set(events.filter((e) => "jobId" in e.args).map((e) => e.args.jobId as bigint))];
+      const jobs = await readJobs(ids);
+      await Promise.all([...new Set([...events.map((e) => e.log.blockNumber!), ...grants.map((g) => g.block)])].map(timeOf));
+      if (tty) process.stdout.write("\r\x1b[2K");
+
+      // 승인과 에스크로 기록을 한 줄로 합쳐 블록·로그 순서대로 찍는다. 여러 블록을 한 번에 읽어도 순서가 섞이지 않는다
+      const eventTx = new Set(events.map((e) => e.log.transactionHash));
+      const groups = byTx(events.map((e) => ({ ...e, tx: e.log.transactionHash! })));
+      const timeline = [
+        ...grants.filter((g) => !eventTx.has(g.tx)).map((g) => ({ block: g.block, index: g.logIndex, grant: g, group: undefined })),
+        ...[...groups.values()].map((group) => ({ block: group[0].log.blockNumber!, index: group[0].log.logIndex!, grant: undefined, group })),
+      ].sort((x, y) => (x.block === y.block ? x.index - y.index : x.block < y.block ? -1 : 1));
+
+      // 돈이 움직일 때마다 그 시점에 계약이 쥔 돈을 보인다. 지금 잔액에서 이번에 읽은 이동을 되돌려 출발점을 잡는다
+      const money = byTx(moves);
+      const net = (ms: Move[]) => ms.reduce((sum, m) => sum + (same(m.to, ESCROW) ? m.value : -m.value), 0n);
+      locked = await lockedNow();
+      let running = locked - net(moves);
+      for (const item of timeline) {
+        if (item.grant) {
+          const g = item.grant;
+          console.log(`${blockTime.get(g.block)}   ${pad("승인", 10)} ${short(g.owner)} 가 계약이 ${gsc(g.value)} 까지 가져가도록 허락`);
+          continue;
+        }
+        const group = item.group!;
+        for (const e of group) {
+          const id = "jobId" in e.args ? (e.args.jobId as bigint) : null;
+          const tag = id === null ? "" : `작업 #${id}  `;
+          console.log(`${blockTime.get(e.log.blockNumber!)}   ${pad(LABEL[e.name] ?? e.name, 10)} ${tag}${sentence(e)}`);
+        }
+        const withJob = group.find((x) => "jobId" in x.args);
+        const job = withJob ? jobs.get(withJob.args.jobId as bigint) : undefined;
+        const txMoves = money.get(group[0].tx) ?? [];
+        for (const m of txMoves) console.log(`${" ".repeat(30)}${moneyLine(m, job)}`);
+        if (txMoves.length > 0) {
+          running += net(txMoves);
+          console.log(`${" ".repeat(30)}→ 계약에 잠긴 돈 ${gsc(running)}`);
+        }
+      }
+      next = latest + 1n;
+      if (tty) process.stdout.write(`블록 ${num(latest)} 까지 확인 · 계약에 잠긴 돈 ${gsc(locked)} · 대기 중`);
+    } catch (err) {
+      if (tty) process.stdout.write("\r\x1b[2K");
+      console.log(`RPC 응답 없음 — ${intervalSec}초 뒤 다시 시도 (${(err as Error).message.split("\n")[0]})`);
+    }
+  }
+}
+
 // ── 진입점 ───────────────────────────────────────────────────────────
 
 /**
@@ -481,6 +548,10 @@ async function main(): Promise<void> {
 
   if (process.argv.includes("stats")) return stats();
   if (process.argv.includes("jobs")) return jobsView(job, process.argv.includes("--all"));
+  if (process.argv.includes("watch")) {
+    const from = intOption("--from", Number(DEPLOY_BLOCK), "다시 보기 시작 블록");
+    return watch(intOption("--interval", 1, "확인 간격 초") ?? 3, from === undefined ? undefined : BigInt(from));
+  }
   if (process.argv.includes("--follow")) {
     return follow(job, intOption("--tail", 0, "앞서 보일 줄 수") ?? 5, intOption("--interval", 1, "확인 간격 초") ?? 3);
   }
