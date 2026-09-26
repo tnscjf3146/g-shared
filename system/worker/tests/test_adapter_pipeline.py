@@ -31,7 +31,7 @@ from gshared_worker.job_runtime import (
 )
 from gshared_worker.runtime_image import (
     CANONICAL_RUNTIME_DIGEST,
-    PREVIOUS_RUNTIME_DIGEST,
+    LEGACY_RUNTIME_DIGEST,
     RuntimeImage,
 )
 from gshared_worker.runtime_pipeline import RuntimePipeline, RuntimeSettings
@@ -168,11 +168,11 @@ class TestAnAdapterThatCannotBeUsed(unittest.TestCase):
 
 
 class TestARuntimeThatPredatesAdapters(unittest.TestCase):
-    """0.2.0 is still approved while the Backend catalog names it."""
+    """0.2.0 is still approved while any catalog may name it."""
 
     def test_an_adapter_job_stops_before_anything_is_downloaded(self):
         harness = Harness(body(adapter=dict(ADAPTER)),
-                          image_digest=PREVIOUS_RUNTIME_DIGEST)
+                          image_digest=LEGACY_RUNTIME_DIGEST)
 
         outcome = harness.run()
 
@@ -185,7 +185,7 @@ class TestARuntimeThatPredatesAdapters(unittest.TestCase):
         self.assertEqual(harness.training_calls, [])
 
     def test_a_job_without_one_still_runs_on_it(self):
-        harness = Harness(body(), image_digest=PREVIOUS_RUNTIME_DIGEST)
+        harness = Harness(body(), image_digest=LEGACY_RUNTIME_DIGEST)
 
         self.assertIs(harness.run().state, RuntimeState.FINISHED)
         self.assertIs(harness.training_calls[0]["adapter"], False)

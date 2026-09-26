@@ -67,22 +67,36 @@ System 안의 원본은 `gshared_worker/runtime_image.py` 의 `CANONICAL_RUNTIME
 | 항목 | 값 |
 |---|---|
 | repository | `le3560/gshared-qlora-sft-runtime` |
-| tag (사람용, pull에 쓰지 않음) | `0.3.0` |
-| digest | `sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170` |
-| imageRef | `le3560/gshared-qlora-sft-runtime@sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170` |
+| tag (사람용, pull에 쓰지 않음) | `0.4.0` |
+| digest | `sha256:3f054d6d9fc28546818c424e2aa4167a23369463ecaa035e940673e77841e4ec` |
+| imageRef | `le3560/gshared-qlora-sft-runtime@sha256:3f054d6d9fc28546818c424e2aa4167a23369463ecaa035e940673e77841e4ec` |
 
-0.3.0 = 0.2.0 + `--adapter-path` (입력 LoRA Adapter 이어 학습). RTX 4070 Laptop에서 새로 학습(`initAdapter: null`, loss 2.387)과 Job #6 Adapter 이어 학습(`initAdapter.weightsSha256` 일치, loss 0.914)을 확인한 뒤 push했다.
+| 버전 | 추가된 것 |
+|---|---|
+| 0.2.0 | 기본 QLoRA 학습 |
+| 0.3.0 | `--adapter-path` (입력 LoRA Adapter 이어 학습) |
+| **0.4.0** | 학습 결과 검증: `training_metrics.json`에 `lossHistory`·`finalLoss`·`verification`(LoRA 텐서 수, NaN/Inf, layer×module 변화량) — Backend 결과 검증 패널이 `result.tar`에서 읽는다 |
 
-**전환기 허용: 0.2.0** (`PREVIOUS_RUNTIME_DIGEST` = `sha256:acda63bc…126d`). Backend `workloads.image_digest`가 아직 0.2.0이라, 마이그레이션 전까지 거부하면 모든 Job이 실패한다. 0.2.0은 Adapter를 이어 학습하지 못하므로 Adapter가 실린 Job은 이미지 확인 단계에서 `ADAPTER_UNAVAILABLE`로 멈춘다. **Backend가 0.3.0으로 옮긴 뒤 허용 목록에서 제거한다.**
+0.4.0은 RTX 4070 Laptop에서 새로 학습(`initAdapter: null`, loss 점 15개, `verification.valid: true`)과 Job #6 Adapter 이어 학습(`initAdapter.weightsSha256` 일치, final loss 0.605, `valid: true`)을 확인한 뒤 push했다. 이 필드 이름은 Backend `JobResultVerificationService`가 읽는 키와 대조했다.
 
-> **Backend 인계:** `workloads.image_digest`(V14에서 0.2.0으로 설정)를 위 0.3.0 digest로 바꾸는 새 migration이 필요하다(Backend migration 담당).
+**전환기 허용** — 새 이미지는 Backend 카탈로그가 가리키기 **전에** Worker가 먼저 승인해야 한다. 반대 순서면 Worker가 "승인되지 않은 이미지"로 거부해 모든 Job이 실패한다.
+
+| 상수 | 버전 | Adapter | 비고 |
+|---|---|---|---|
+| `CANONICAL_RUNTIME_DIGEST` | 0.4.0 | ✅ | 기준값 |
+| `PREVIOUS_RUNTIME_DIGEST` | 0.3.0 `e32bd1c1…e170` | ✅ | Backend V19가 현재 가리키는 값. 결과 검증 데이터만 없음 |
+| `LEGACY_RUNTIME_DIGEST` | 0.2.0 `acda63bc…126d` | ❌ | V19 이전 카탈로그. Adapter Job은 `ADAPTER_UNAVAILABLE` |
+
+어느 카탈로그도 더 이상 가리키지 않으면 해당 상수를 허용 목록에서 제거한다.
+
+> **Backend 인계:** `workloads.image_digest`를 위 0.4.0 digest로 바꾸는 새 migration이 필요하다(V14·V19와 같은 방식, Backend 담당). **이 Worker(exe)가 배포된 뒤**에 반영해야 한다.
 
 ### 규칙
 
 | 규칙 | |
 |---|---|
 | approved repository | `gshared/qlora-sft-runtime`, `le3560/gshared-qlora-sft-runtime` — **Worker 설정**, 메시지가 아님 |
-| approved digest | **canonical(0.3.0) + 전환기 0.2.0** (`APPROVED_DIGESTS`). 승인 repository의 다른 digest는 거부 |
+| approved digest | **canonical(0.4.0) + 전환기 0.3.0·0.2.0** (`APPROVED_DIGESTS`). 승인 repository의 다른 digest는 거부 |
 | immutable digest | `repository@sha256:<64 hex>` 만 |
 | tag | **거부** (오늘 맞는 이미지를 가리켜도) |
 | all-zero digest | **거부** — Backend 카탈로그 seed의 placeholder |
