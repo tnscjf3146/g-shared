@@ -202,6 +202,9 @@ export function WorkloadWizard() {
         adapterName: workload?.kind === 'TRAIN_LORA' ? resultAdapterName(state, catalog.baseModels.find((m) => m.id === spec.baseModelId)?.name) : undefined,
         parentJobId: chosenParent(state)?.jobId ?? null,
         hasAdapter: spec.hasAdapter,
+        // 4단계에서 고른 GPU 등급. 서버는 이 등급의 워커 중 순위가 가장 높은 한 대를 배정한다 —
+        // 보내지 않으면 서버가 1순위를 고르므로, 화면이 "고를 수 있다"고 말한 것과 결과가 어긋난다.
+        gpuId: state.gpuId,
       })
       // 원본 파일 업로드 — objectKey·storageUri 는 백엔드 몫, 프론트는 발급받은 서명 URL 에 PUT 만
       setSubmitting('데이터셋 업로드 중…')
@@ -273,9 +276,13 @@ export function WorkloadWizard() {
           {last ? (
             // 지갑 미연결·잔액 부족이면 회색(비활성), 잔액이 충분하면 초록(활성)
             (() => {
-              const enough = hasEnough(funds, state.estimate?.estimatedCost ?? 0)
+              // 견적이 없으면 hasEnough 가 비용 0 과 견주어 "충분" 이라고 답한다. 4단계로 돌아가
+              // GPU 를 바꾸면 estimate 가 null 로 비워지므로(stepGpu), 새 견적이 오기 전에
+              // 스테퍼로 5단계에 오면 버튼이 초록으로 활성화되고 눌러도 submit 이 조용히 빠져나간다.
+              const estimate = state.estimate
+              const enough = estimate != null && hasEnough(funds, estimate.estimatedCost)
               return (
-                <Button size="lg" variant={enough ? 'primary' : 'secondary'} disabled={!enough || submitting !== null} onClick={submit} title={enough ? undefined : funds.status === 'nowallet' ? '지갑을 먼저 연결하세요' : '지갑 잔액이 예상 비용보다 적습니다'}>
+                <Button size="lg" variant={enough ? 'primary' : 'secondary'} disabled={!enough || submitting !== null} onClick={submit} title={estimate == null ? '4단계에서 GPU 등급을 고르면 견적이 나옵니다' : enough ? undefined : funds.status === 'nowallet' ? '지갑을 먼저 연결하세요' : '지갑 잔액이 예상 비용보다 적습니다'}>
                   {submitting ? '업로드·등록 중…' : '업로드'}
                 </Button>
               )

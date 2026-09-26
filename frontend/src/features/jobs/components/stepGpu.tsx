@@ -87,7 +87,10 @@ export function StepGpu({ spec, state, onChange }: Props) {
                   <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
-                    <StatusBadge tone={FIT[g.fit].tone}>{FIT[g.fit].label}</StatusBadge>
+                    {/* shrink-0: 이름이 길면("RTX 4070 Laptop GPU") 배지가 눌려 "추/천" 으로 쪼개진다 */}
+                    <StatusBadge tone={FIT[g.fit].tone} className="shrink-0 whitespace-nowrap">
+                      {FIT[g.fit].label}
+                    </StatusBadge>
                   </div>
                   <span className="text-caption tabular-nums text-text-muted">
                     {Math.round(g.vramMb / 1024)} GB · 대기 워커 {g.availableWorkers}대

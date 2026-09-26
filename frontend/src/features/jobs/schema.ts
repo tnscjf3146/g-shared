@@ -118,6 +118,12 @@ export const createJobRequestSchema = z.object({
   parentJobId: z.optional(z.nullable(z.number())),
   /** 어댑터를 얹고 시작하는가(이어서 학습 또는 .tar 업로드). true 면 서버는 adapter-upload 검증까지 끝나야 예치를 허용한다 */
   hasAdapter: z.optional(z.boolean()),
+  /** 사용자가 고른 GPU 등급(gpu-options 의 id). 비우면 서버가 1순위를 쓴다.
+   *  등급 안에 워커가 여럿이면 서버가 그중 순위가 가장 높은 한 대를 고른다 — 예치 때 체인이
+   *  그 공급자 지갑을 잠그므로 한 대로 확정돼야 한다.
+   *  보내는 건 선택뿐 — 예상 시간·비용·정산 지갑은 서버가 추천을 다시 받아 계산한다.
+   *  그 등급에 지금 돌릴 수 있는 워커가 없으면 409 SELECTED_WORKER_UNAVAILABLE */
+  gpuId: z.optional(z.nullable(z.number())),
 })
 export const createJobResponseSchema = z.object({
   jobId: z.number(),
