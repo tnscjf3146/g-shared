@@ -87,7 +87,7 @@ class JobCandidateOperatorFilterTest {
         Long workloadId = workloadRepository.findBySlug("qlora-sft-v1").orElseThrow().getId();
         Long baseModelId = baseModelRepository.findBySlug("qwen3-0.6b").orElseThrow().getId();
         request = new CreateJobRequest(workloadId, baseModelId, datasetId,
-                "CUSTOM", null, objectMapper.readTree(CUSTOM_CONFIG), null, null, null);
+                "CUSTOM", null, objectMapper.readTree(CUSTOM_CONFIG), null, null, null, null);
 
         // 같은 지갑이 의뢰자이자 공급자 — 정상 구성이고, 그래도 승인은 isOperator(providerWallet, operator) 다
         owner.linkWallet(PROVIDER_WALLET);

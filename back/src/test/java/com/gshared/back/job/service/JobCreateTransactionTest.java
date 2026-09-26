@@ -109,7 +109,7 @@ class JobCreateTransactionTest {
         CreateJobResponse response = jobService.create(owner.getId(), new CreateJobRequest(
                 workloadId, baseModelId, datasetId, "CUSTOM", null,
                 objectMapper.readTree("{\"epochs\":3,\"batchSize\":8,\"learningRate\":0.0002,\"maxLength\":1024}"),
-                null, null, null));
+                null, null, null, null));
         createdJobId = response.jobId();
 
         // 별도 커넥션에서 다시 읽는다 — 커밋되지 않았으면 여기서 비어 있다

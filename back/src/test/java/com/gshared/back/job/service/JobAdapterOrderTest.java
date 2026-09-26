@@ -102,7 +102,7 @@ class JobAdapterOrderTest {
     private CreateJobRequest request(Boolean hasAdapter, String adapterName, Long parentJobId) {
         return new CreateJobRequest(workloadId, baseModelId, datasetId, "CUSTOM", null,
                 objectMapper.readTree("{\"epochs\":3,\"batchSize\":8,\"learningRate\":0.0002,\"maxLength\":1024}"),
-                hasAdapter, adapterName, parentJobId);
+                hasAdapter, adapterName, parentJobId, null);
     }
 
     private Job created(CreateJobResponse response) {

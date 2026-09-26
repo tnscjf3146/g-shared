@@ -71,7 +71,7 @@ class JobCreateValidationTest {
 
     private CreateJobRequest customRequest(String configJson) {
         return new CreateJobRequest(workloadId, baseModelId, datasetId,
-                "CUSTOM", null, configJson == null ? null : objectMapper.readTree(configJson), null, null, null);
+                "CUSTOM", null, configJson == null ? null : objectMapper.readTree(configJson), null, null, null, null);
     }
 
     private void addOnlineWorker() {
@@ -89,7 +89,7 @@ class JobCreateValidationTest {
     void nonexistent_workload_id() {
         assertThatThrownBy(() -> jobService.create(owner.getId(),
                 new CreateJobRequest(999_999L, baseModelId, datasetId,
-                        "AUTO", "BALANCED", null, null, null, null)))
+                        "AUTO", "BALANCED", null, null, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode",
                         com.gshared.back.workload.exception.WorkloadErrorCode.WORKLOAD_NOT_FOUND);
@@ -100,7 +100,7 @@ class JobCreateValidationTest {
     void nonexistent_base_model_id() {
         assertThatThrownBy(() -> jobService.create(owner.getId(),
                 new CreateJobRequest(workloadId, 999_999L, datasetId,
-                        "AUTO", "BALANCED", null, null, null, null)))
+                        "AUTO", "BALANCED", null, null, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .hasFieldOrPropertyWithValue("errorCode",
                         com.gshared.back.workload.exception.WorkloadErrorCode.BASE_MODEL_NOT_FOUND);

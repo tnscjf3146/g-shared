@@ -40,6 +40,7 @@ import com.gshared.back.global.storage.StorageProperties;
 import com.gshared.back.global.blockchain.TokenUnits;
 import com.gshared.back.global.wallet.WalletAuthProperties;
 import com.gshared.back.job.dto.response.FundJobResponse;
+import com.gshared.back.worker.domain.GpuGrade;
 import com.gshared.back.worker.domain.Worker;
 import com.gshared.back.worker.websocket.protocol.WorkerMessage;
 import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
@@ -52,8 +53,10 @@ import tools.jackson.databind.node.ObjectNode;
 
 import java.time.LocalDateTime;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -136,9 +139,13 @@ public class JobService {
         // 배정되지 않고 아무도 이유를 모른다.
         //
         // 화면(operator-status)이 뭐라고 했든 여기서 다시 묻는다 — 화면은 UX 이고 이것이 권위다.
-        var candidates = withSpec.stream()
+        // 후보 워커를 그대로 들고 있는다 — 수요자가 고른 등급이 어느 워커인지 되짚어야 하고,
+        // 그 매핑은 Scheduler 응답(워커 단위)에는 없다.
+        List<Worker> candidateWorkers = withSpec.stream()
                 .filter(w -> !escrow.operatorApproved(
                         w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
+                .toList();
+        var candidates = candidateWorkers.stream()
                 .map(w -> new SchedulerRecommendRequest.GpuCandidate(
                         w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec(),
                         w.getBenchmarkPeakVramMb()))   // 구버전 exe 워커는 null — Scheduler 가 허용
@@ -160,21 +167,26 @@ public class JobService {
             throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);
         }
 
-        // ⑤ 공급자 정산 지갑 확정 — 온체인 createAndFundJob 의 provider. 예치 뒤에는 체인이 이 값을 잠그므로
+        // ⑤ 이 Job 이 갈 워커 확정 — 수요자가 등급을 골랐으면 그 등급의 워커, 아니면 Scheduler 의 1 순위.
+        //    선택은 방금 받은 추천 안에 있을 때만 받아들인다. 클라이언트가 보낸 것은 등급 id 하나뿐이고,
+        //    "그 GPU 로 이 설정을 돌릴 수 있는가"는 여기서 Scheduler 의 답으로 다시 확인한다.
+        String chosenWorkerId = chooseWorker(request.gpuId(), rec, candidateWorkers);
+
+        // ⑥ 공급자 정산 지갑 확정 — 온체인 createAndFundJob 의 provider. 예치 뒤에는 체인이 이 값을 잠그므로
         //    견적에 박아 두고, 예치 확인·매칭이 전부 이 값과 대조한다. 후보 쿼리가 지갑 없는 워커를 걸렀지만
         //    그 사이 지워졌을 수 있어 다시 확인한다.
-        String providerWallet = workerRepository.findById(rec.recommendedWorkerId())
+        String providerWallet = workerRepository.findById(chosenWorkerId)
                 .map(Worker::getOwner).map(User::getWalletAddress).orElse(null);
         if (providerWallet == null) {
             throw new BusinessException(JobErrorCode.PROVIDER_WALLET_MISSING);
         }
 
-        // ⑥ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
+        // ⑦ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
         Job job = Job.create(
                 owner, request.workloadId(), request.baseModelId(), request.datasetId(),
                 request.trainingMode(),
                 config.epochs(), config.batchSize(), config.learningRate(), config.maxLength(),
-                recommendedRuntime(rec), rec.schedulerModelVersion(), rec.recommendedWorkerId(),
+                predictedRuntime(rec, chosenWorkerId), rec.schedulerModelVersion(), chosenWorkerId,
                 providerWallet, estimateCost(dataset, config)
         );
         // ⑦ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
@@ -198,10 +210,49 @@ public class JobService {
                 request.trainingConfig(), datasetMeta);
     }
 
-    /** 추천 워커의 예상 실행시간 (rankings 에서 추출, 없으면 1등). */
-    private Double recommendedRuntime(SchedulerRecommendResponse rec) {
+    /**
+     * 이 Job 이 갈 워커 — 수요자가 고른 것, 없으면 Scheduler 의 1 순위.
+     *
+     * <p>선택을 받아들이는 조건은 하나다: <b>방금 받은 추천 안에 그 워커가 있을 것.</b> 후보 목록은
+     * 이 요청을 처리하며 다시 만들어졌고(ONLINE·미배정·operator 승인), Scheduler 가 그중 이 설정으로
+     * 실제 돌릴 수 있는 것만 rankings 에 남긴다. 그러므로 "있다"는 것은 지금 이 순간 그 GPU 가
+     * 가용하고 이 학습을 감당한다는 뜻이고, 그것 말고 클라이언트에게서 받는 것은 없다.
+     *
+     * <p>없으면 409 다 — 화면이 목록을 그린 뒤 사용자가 누르기까지 사이에 그 워커가 일을 잡았거나
+     * 오프라인이 됐다는 뜻이고, 다른 GPU 를 고르거나 기다리면 해결된다.
+     */
+    private String chooseWorker(Long selectedGpuId, SchedulerRecommendResponse rec,
+                                List<Worker> candidateWorkers) {
+        if (selectedGpuId == null) {
+            return rec.recommendedWorkerId();
+        }
+        long gradeId = selectedGpuId;   // 위에서 null 을 걸렀다 — 박싱 비교로 새는 것을 막는다
+        Set<String> inGrade = candidateWorkers.stream()
+                .filter(w -> GpuGrade.idOf(w.getGpuModel()) == gradeId)
+                .map(Worker::getId)
+                .collect(Collectors.toSet());
+        // 등급 안에서 Scheduler 가 매긴 순위가 가장 높은 워커. rank 가 없는 응답(구버전)은 목록 순서를 따른다.
         return rec.rankings().stream()
-                .filter(r -> r.workerId().equals(rec.recommendedWorkerId()))
+                .filter(r -> inGrade.contains(r.workerId()))
+                .min(Comparator.comparing(
+                        r -> r.rank() == null ? Integer.MAX_VALUE : r.rank()))
+                .map(SchedulerRecommendResponse.Ranking::workerId)
+                .orElseThrow(() -> {
+                    log.info("[MATCH] 선택한 등급({})에 돌릴 수 있는 워커 없음 — 등급 내 후보 {}대, 추천 {}건",
+                            selectedGpuId, inGrade.size(), rec.rankings().size());
+                    return new BusinessException(JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
+                });
+    }
+
+    /**
+     * 그 워커의 예상 실행시간 (rankings 에서 추출, 없으면 1등).
+     *
+     * <p>배정만 바꾸고 이 값을 1 순위 것으로 두면 화면이 거짓말을 한다 — 느린 GPU 를 고른
+     * 사용자에게 빠른 GPU 의 시간을 보여주게 된다.
+     */
+    private Double predictedRuntime(SchedulerRecommendResponse rec, String workerId) {
+        return rec.rankings().stream()
+                .filter(r -> r.workerId().equals(workerId))
                 .findFirst()
                 .orElse(rec.rankings().get(0))
                 .predictedRuntimeSec();
