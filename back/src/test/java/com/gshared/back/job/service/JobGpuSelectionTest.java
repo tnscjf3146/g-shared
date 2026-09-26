@@ -171,6 +171,25 @@ class JobGpuSelectionTest {
     }
 
     @Test
+    @DisplayName("등급에 대기 워커가 여러 대면 순위가 가장 높은 한 대를 고른다")
+    void best_ranked_worker_within_the_grade_wins() {
+        // 같은 등급(같은 모델명)의 두 번째 워커 — 등급은 모델명으로 묶이므로 이 둘은 한 칸이다
+        String siblingId = onlineWorker(SLOW_GPU, 6_141, 39_000.0);
+        workerRepository.flush();
+        // 형제가 rankings 에 먼저 오지만 순위는 더 낮다 — 목록 순서가 아니라 rank 로 골라야 한다
+        when(schedulerClient.recommend(any())).thenReturn(new SchedulerRecommendResponse(
+                "runtime-xgb-v1", fastWorkerId, 4_500,
+                List.of(new SchedulerRecommendResponse.Ranking(3, siblingId, 900.0),
+                        new SchedulerRecommendResponse.Ranking(1, fastWorkerId, FAST_RUNTIME_SEC),
+                        new SchedulerRecommendResponse.Ranking(2, slowWorkerId, SLOW_RUNTIME_SEC))));
+
+        Job job = created(jobService.create(owner.getId(), request(grade(SLOW_GPU))));
+
+        assertThat(job.getRecommendedWorkerId()).isEqualTo(slowWorkerId);
+        assertThat(job.getPredictedRuntimeSec()).isEqualTo(SLOW_RUNTIME_SEC);
+    }
+
+    @Test
     @DisplayName("고른 워커가 추천 결과에 없으면 409 — 그 사이 바빠졌거나 돌릴 수 없는 GPU다")
     void selection_outside_the_ranking_is_rejected() {
         // 워커는 있는데 Scheduler 가 이 설정으로 못 돌린다고 판단한 등급(rankings 에 없다)
