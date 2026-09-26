@@ -55,7 +55,9 @@ const LABEL: Record<string, string> = {
   OperatorUpdated: "대행자 지정",
 };
 
-const client = createPublicClient({ transport: http(RPC_URL, { retryCount: 2 }) });
+// batch: 같은 틱에 나간 호출을 JSON-RPC 배치 한 번으로 묶는다. SSAFY RPC 는 배치를 받지만
+// Multicall3 는 배포되어 있지 않아(표준 주소의 코드가 0x) multicall 로는 묶을 수 없다.
+const client = createPublicClient({ transport: http(RPC_URL, { retryCount: 2, batch: true }) });
 
 // ── 출력 ─────────────────────────────────────────────────────────────
 
@@ -217,11 +219,13 @@ async function stats(): Promise<void> {
     address: ESCROW, abi: ABI, functionName: "nextJobId",
   })) as bigint;
 
+  // 상태는 이벤트로 짐작하지 않고 jobs() 로 계약에 직접 묻는다. 한꺼번에 보내 배치 한 번으로 간다.
+  const ids = Array.from({ length: Number(nextJobId - 1n) }, (_, i) => BigInt(i + 1));
+  const jobs = (await Promise.all(
+    ids.map((id) => client.readContract({ address: ESCROW, abi: ABI, functionName: "jobs", args: [id] })),
+  )) as (readonly unknown[])[];
   const byState = new Map<string, number>();
-  for (let id = 1n; id < nextJobId; id++) {
-    const job = (await client.readContract({
-      address: ESCROW, abi: ABI, functionName: "jobs", args: [id],
-    })) as readonly unknown[];
+  for (const job of jobs) {
     const state = STATE_NAME[Number(job[1])] ?? String(job[1]);
     byState.set(state, (byState.get(state) ?? 0) + 1);
   }
