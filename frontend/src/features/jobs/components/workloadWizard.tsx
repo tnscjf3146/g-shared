@@ -202,6 +202,9 @@ export function WorkloadWizard() {
         adapterName: workload?.kind === 'TRAIN_LORA' ? resultAdapterName(state, catalog.baseModels.find((m) => m.id === spec.baseModelId)?.name) : undefined,
         parentJobId: chosenParent(state)?.jobId ?? null,
         hasAdapter: spec.hasAdapter,
+        // 4단계에서 고른 GPU 등급. 서버는 이 등급의 워커 중 순위가 가장 높은 한 대를 배정한다 —
+        // 보내지 않으면 서버가 1순위를 고르므로, 화면이 "고를 수 있다"고 말한 것과 결과가 어긋난다.
+        gpuId: state.gpuId,
       })
       // 원본 파일 업로드 — objectKey·storageUri 는 백엔드 몫, 프론트는 발급받은 서명 URL 에 PUT 만
       setSubmitting('데이터셋 업로드 중…')
