@@ -202,6 +202,29 @@ class JobGpuSelectionTest {
     }
 
     @Test
+    @DisplayName("서로 다른 모델명이 같은 등급 id 를 내면 배정하지 않는다")
+    void colliding_grade_id_is_refused() {
+        // GpuGrade.idOf 는 모델명의 32비트 해시이고, gpuModel 은 공급자가 등록 때 보내는 자유 문자열이다
+        // (RegisterWorkerRequest 는 @NotBlank 뿐). "Aa"/"BB" 치환으로 충돌은 얼마든지 만들 수 있다.
+        // 해시만 보고 등급을 묶으면 남의 등급에 끼어들어 그 등급으로 온 Job 을 가져갈 수 있다.
+        String victim = "RTX 4090 Aa";
+        String impostor = "RTX 4090 BB";
+        assertThat(grade(victim)).isEqualTo(grade(impostor));   // 전제: 충돌한다
+
+        String victimId = onlineWorker(victim, 24_564, 80_000.0);
+        String impostorId = onlineWorker(impostor, 24_564, 99_000.0);   // 벤치마크도 자기 신고값이라 1순위가 될 수 있다
+        workerRepository.flush();
+        when(schedulerClient.recommend(any())).thenReturn(new SchedulerRecommendResponse(
+                "runtime-xgb-v1", impostorId, 4_500,
+                List.of(new SchedulerRecommendResponse.Ranking(1, impostorId, 60.0),
+                        new SchedulerRecommendResponse.Ranking(2, victimId, 90.0))));
+
+        assertThatThrownBy(() -> jobService.create(owner.getId(), request(grade(victim))))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
+    }
+
+    @Test
     @DisplayName("존재하지 않는 등급을 골라도 같은 409 — 없는 id 로 후보를 떠볼 수 없다")
     void unknown_grade_id_is_rejected() {
         assertThatThrownBy(() -> jobService.create(owner.getId(), request(999_999_999L)))

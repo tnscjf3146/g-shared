@@ -189,7 +189,7 @@ public class JobService {
                 predictedRuntime(rec, chosenWorkerId), rec.schedulerModelVersion(), chosenWorkerId,
                 providerWallet, estimateCost(dataset, config)
         );
-        // ⑦ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
+        // ⑧ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
         job.assignAdapterOrder(adapterOrder.required(), adapterOrder.name(), adapterOrder.version(), adapterOrder.parentJobId());
         jobRepository.save(job);
 
@@ -227,8 +227,25 @@ public class JobService {
             return rec.recommendedWorkerId();
         }
         long gradeId = selectedGpuId;   // 위에서 null 을 걸렀다 — 박싱 비교로 새는 것을 막는다
+
+        // 등급 id 는 모델명의 32비트 해시인데(GpuGrade.idOf), gpuModel 은 공급자가 등록 때 보내는
+        // 자유 문자열이다(RegisterWorkerRequest 는 @NotBlank 뿐). "Aa"/"BB" 치환만으로 임의의 이름에
+        // 충돌하는 문자열을 만들 수 있으므로, 해시만 보고 묶으면 남의 등급에 끼어들 수 있다 —
+        // benchmarkTokensPerSec 도 자기 신고값이라 그 등급의 1 순위까지 차지할 수 있다.
+        // 그러면 사용자는 A 를 골랐는데 Job 은 B 의 PC 에서 돌고 정산도 B 가 받는다.
+        //
+        // 이름이 갈리면 그 id 는 라우팅 근거가 될 수 없으므로 배정하지 않는다. 근본 해결은 gpuModel 을
+        // 정규화·허용목록으로 좁히거나 서버가 발급한 대리 키로 등급을 여는 것이고, 여기서는 막기만 한다.
+        Set<String> models = candidateWorkers.stream()
+                .map(Worker::getGpuModel)
+                .filter(m -> GpuGrade.idOf(m) == gradeId)
+                .collect(Collectors.toSet());
+        if (models.size() > 1) {
+            log.error("[MATCH] 등급 id {} 에 서로 다른 모델명이 묶임 — 배정 거부 {}", gradeId, models);
+            throw new BusinessException(JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
+        }
         Set<String> inGrade = candidateWorkers.stream()
-                .filter(w -> GpuGrade.idOf(w.getGpuModel()) == gradeId)
+                .filter(w -> models.contains(w.getGpuModel()))
                 .map(Worker::getId)
                 .collect(Collectors.toSet());
         // 등급 안에서 Scheduler 가 매긴 순위가 가장 높은 워커. rank 가 없는 응답(구버전)은 목록 순서를 따른다.
@@ -238,6 +255,8 @@ public class JobService {
                         r -> r.rank() == null ? Integer.MAX_VALUE : r.rank()))
                 .map(SchedulerRecommendResponse.Ranking::workerId)
                 .orElseThrow(() -> {
+                    // 등급을 아예 모르는 것(오타·사라진 등급)과, 등급은 있는데 operator 미승인 등으로
+                    // 후보에서 빠진 것은 다른 사건이다 — 후자는 기다려도 풀리지 않으므로 구분해 남긴다.
                     log.info("[MATCH] 선택한 등급({})에 돌릴 수 있는 워커 없음 — 등급 내 후보 {}대, 추천 {}건",
                             selectedGpuId, inGrade.size(), rec.rankings().size());
                     return new BusinessException(JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
@@ -252,7 +271,7 @@ public class JobService {
      */
     private Double predictedRuntime(SchedulerRecommendResponse rec, String workerId) {
         return rec.rankings().stream()
-                .filter(r -> r.workerId().equals(workerId))
+                .filter(r -> java.util.Objects.equals(r.workerId(), workerId))
                 .findFirst()
                 .orElse(rec.rankings().get(0))
                 .predictedRuntimeSec();
