@@ -244,18 +244,28 @@ async function stats(): Promise<void> {
 
 // ── 진입점 ───────────────────────────────────────────────────────────
 
-function option(name: string): string | undefined {
+/**
+ * 정수 옵션을 읽는다. 옵션이 없으면 undefined, 있는데 값이 빠졌거나 정수가 아니면 멈춘다.
+ * `--job` 만 쓰고 번호를 빠뜨렸을 때 조용히 전체를 보여 주면 걸러졌다고 착각하게 된다.
+ * `--interval abc` 를 그냥 두면 NaN 이 1ms 로 바뀌어 RPC 를 쉬지 않고 두드린다.
+ */
+function intOption(name: string, min: number, what: string): number | undefined {
   const i = process.argv.indexOf(name);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+  if (i < 0) return undefined;
+  const raw = process.argv[i + 1];
+  if (raw === undefined || !/^\d+$/.test(raw) || Number(raw) < min) {
+    throw new Error(`${name} 에는 ${what}(${min} 이상의 정수)를 넣으세요. 받은 값: ${raw ?? "(없음)"}`);
+  }
+  return Number(raw);
 }
 
 async function main(): Promise<void> {
-  const jobArg = option("--job");
+  const jobArg = intOption("--job", 1, "에스크로 작업 번호");
   const job = jobArg === undefined ? null : BigInt(jobArg);
 
   if (process.argv.includes("stats")) return stats();
   if (process.argv.includes("--follow")) {
-    return follow(job, Number(option("--tail") ?? 5), Number(option("--interval") ?? 3));
+    return follow(job, intOption("--tail", 0, "앞서 보일 줄 수") ?? 5, intOption("--interval", 1, "확인 간격 초") ?? 3);
   }
   return list(job);
 }
