@@ -10,6 +10,11 @@
  *   npm run events:follow             새 블록을 계속 따라간다 (발표 시연 옆 화면용)
  *   npm run events:stats              체인 기준 집계 (발표 대본의 [N] 값)
  *
+ *   npm run events:jobs               작업별 장부 — 단계마다 한 문장, 토큰이 들고 난 기록, 계약에 남은 돈
+ *   npm run events:jobs -- --job 15   작업 하나 (--all 이면 전체, 기본은 최근 5건)
+ *   npm run events:watch              새 기록을 문장과 토큰 이동으로 실시간 표시
+ *   npm run events:watch -- --from 11365390   그 블록부터 다시 흘려 보기 (리허설·시험용)
+ *
  * 키가 필요 없다. 읽기만 한다. RPC 는 SSAFY_RPC_URL 이 있으면 그것을 쓴다.
  */
 import { readFileSync } from "node:fs";
@@ -18,6 +23,7 @@ import {
   decodeEventLog,
   formatUnits,
   http,
+  parseAbiItem,
   type Abi,
   type Hex,
   type Log,
@@ -83,10 +89,13 @@ const timeFormat = new Intl.DateTimeFormat("ko-KR", {
 });
 
 const blockTime = new Map<bigint, string>();
+/** 블록 시각(초). 장부에서 작업이 걸린 시간을 셀 때 쓴다. timeOf 가 함께 채운다. */
+const blockSeconds = new Map<bigint, bigint>();
 async function timeOf(block: bigint): Promise<string> {
   const cached = blockTime.get(block);
   if (cached) return cached;
   const { timestamp } = await client.getBlock({ blockNumber: block });
+  blockSeconds.set(block, timestamp);
   // ko-KR 은 "09. 18. 11:18:15" 로 찍는다. 조각을 받아 "09-18 11:18:15" 로 맞춘다.
   const p = Object.fromEntries(
     timeFormat.formatToParts(new Date(Number(timestamp) * 1000)).map((x) => [x.type, x.value]),
@@ -246,6 +255,276 @@ async function stats(): Promise<void> {
   }
 }
 
+// ── 장부: 작업별로 묶고, 돈이 들고 난 기록을 붙인다 ────────────────────
+//
+// 이벤트에 적힌 금액을 옮겨 적지 않는다. 결제 토큰 계약이 남긴 Transfer·Approval 을 따로 읽어
+// 토큰이 실제로 계약에 들어오고 나간 기록을 보인다. 그래야 들어온 돈 − 나간 돈을 계약의
+// balanceOf 와 맞춰 볼 수 있다. 결제 토큰 주소도 상수로 두지 않고 계약에 묻는다.
+
+const TRANSFER = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
+const APPROVAL = parseAbiItem("event Approval(address indexed owner, address indexed spender, uint256 value)");
+const BALANCE_OF = [parseAbiItem("function balanceOf(address) view returns (uint256)")] as const;
+
+type Move = { from: Hex; to: Hex; value: bigint; tx: Hex; block: bigint; logIndex: number };
+type Grant = { owner: Hex; value: bigint; tx: Hex; block: bigint; logIndex: number };
+type JobOnChain = { client: Hex; state: string; provider: Hex; operator: Hex; price: bigint; resultHash: Hex };
+
+const ZERO = "0x0000000000000000000000000000000000000000";
+const CIRCLE = "①②③④⑤⑥⑦⑧⑨";
+const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+const clock = (block: bigint) => (blockTime.get(block) ?? "").slice(6); // "MM-DD HH:mm:ss" 의 시각만
+
+let paymentToken: Hex | undefined;
+async function tokenAddress(): Promise<Hex> {
+  paymentToken ??= (await client.readContract({ address: ESCROW, abi: ABI, functionName: "paymentToken" })) as Hex;
+  return paymentToken;
+}
+
+/** 지금 계약이 쥐고 있는 토큰. 이벤트로 셈하지 않고 토큰 계약에 잔액을 묻는다. */
+async function lockedNow(): Promise<bigint> {
+  return client.readContract({ address: await tokenAddress(), abi: BALANCE_OF, functionName: "balanceOf", args: [ESCROW] });
+}
+
+/** 계약으로 들어오고 나간 토큰 이동과, 계약에 준 사용 승인. */
+async function readMoney(from: bigint, to: bigint): Promise<{ moves: Move[]; grants: Grant[] }> {
+  const address = await tokenAddress();
+  const moves: Move[] = [];
+  const grants: Grant[] = [];
+  for (let start = from; start <= to; start += CHUNK) {
+    const range = { fromBlock: start, toBlock: start + CHUNK - 1n < to ? start + CHUNK - 1n : to };
+    const [ins, outs, approvals] = await Promise.all([
+      client.getLogs({ address, event: TRANSFER, args: { to: ESCROW }, ...range }),
+      client.getLogs({ address, event: TRANSFER, args: { from: ESCROW }, ...range }),
+      client.getLogs({ address, event: APPROVAL, args: { spender: ESCROW }, ...range }),
+    ]);
+    for (const l of [...ins, ...outs]) {
+      moves.push({ from: l.args.from!, to: l.args.to!, value: l.args.value!, tx: l.transactionHash!, block: l.blockNumber!, logIndex: l.logIndex! });
+    }
+    for (const l of approvals) {
+      grants.push({ owner: l.args.owner!, value: l.args.value!, tx: l.transactionHash!, block: l.blockNumber!, logIndex: l.logIndex! });
+    }
+  }
+  return { moves, grants };
+}
+
+async function readJobs(ids: bigint[]): Promise<Map<bigint, JobOnChain>> {
+  const raw = (await Promise.all(
+    ids.map((id) => client.readContract({ address: ESCROW, abi: ABI, functionName: "jobs", args: [id] })),
+  )) as (readonly unknown[])[];
+  return new Map(ids.map((id, i) => {
+    const j = raw[i];
+    return [id, {
+      client: j[0] as Hex, state: STATE_NAME[Number(j[1])] ?? String(j[1]), provider: j[3] as Hex,
+      operator: j[4] as Hex, price: j[5] as bigint, resultHash: j[6] as Hex,
+    }];
+  }));
+}
+
+/** 주소를 역할로 부른다. 모르는 주소는 줄여서 그대로 보인다. */
+function party(addr: string, job?: JobOnChain): string {
+  if (same(addr, ESCROW)) return "계약";
+  if (job && same(addr, job.client)) return "수요자";
+  if (job && same(addr, job.provider)) return "공급자";
+  return short(addr);
+}
+
+/** 이벤트 하나를 무슨 일이 있었는지 한 문장으로. */
+function sentence(e: Decoded): string {
+  const a = e.args as Record<string, bigint & string & boolean>;
+  switch (e.name) {
+    case "JobFunded": return `수요자가 ${gsc(a.price)} 를 계약에 맡김`;
+    case "JobAccepted": return "공급자의 Worker 가 작업을 맡음";
+    case "ResultSubmitted": return `결과 Hash ${short(a.resultHash)} 를 체인에 기록`;
+    case "JobCompleted": return `계약이 ${gsc(a.payout)} 를 공급자에게 지급`;
+    case "JobCancelled": return `계약이 ${gsc(a.refund)} 를 수요자에게 돌려줌`;
+    case "JobAborted": return "Worker 가 작업을 포기함";
+    case "JobTimedOut":
+      return Number(a.fromState) === 1
+        ? "아무도 수락하지 않은 채 기한이 지나 settleTimeout 으로 정리"
+        : "기한 안에 결과가 없어 settleTimeout 으로 정리";
+    case "OperatorUpdated":
+      return `공급자 ${short(a.provider)} 가 Worker ${short(a.operator)} 를 ${a.allowed ? "승인" : "해제"}`;
+    default: return e.name;
+  }
+}
+
+function moneyLine(m: Move, job?: JobOnChain): string {
+  return `토큰  ${party(m.from, job)} → ${party(m.to, job)}  ${gsc(m.value)}`;
+}
+
+function status(job: JobOnChain, steps: Decoded[]): string {
+  switch (job.state) {
+    case "COMPLETED": return "완료";
+    case "FUNDED": return "예치됨 · 수락 대기";
+    case "ASSIGNED": return "학습 중";
+    case "CANCELLED":
+      if (steps.some((e) => e.name === "JobTimedOut")) return "환불 · 기한 초과";
+      if (steps.some((e) => e.name === "JobAborted")) return "환불 · Worker 반납";
+      return "환불 · 수요자 취소";
+    default: return job.state;
+  }
+}
+
+function duration(from: bigint, to: bigint): string {
+  const s = Number((blockSeconds.get(to) ?? 0n) - (blockSeconds.get(from) ?? 0n));
+  return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
+}
+
+const byTx = <T extends { tx: Hex }>(items: T[]) => {
+  const map = new Map<string, T[]>();
+  for (const it of items) (map.get(it.tx) ?? map.set(it.tx, []).get(it.tx)!).push(it);
+  return map;
+};
+
+function printCard(id: bigint, job: JobOnChain, steps: Decoded[], money: Map<string, Move[]>, grant?: Grant): void {
+  const first = steps[0]?.log.blockNumber ?? 0n;
+  const last = steps.at(-1)?.log.blockNumber ?? 0n;
+  const open = job.state === "FUNDED" || job.state === "ASSIGNED";
+  const span = `${blockTime.get(first) ?? ""} → ${open ? "진행 중" : `${clock(last)} (${duration(first, last)})`}`;
+  console.log("─".repeat(78));
+  console.log(`작업 #${id}   ${status(job, steps)}   ${gsc(job.price)}   ${span}`);
+  const who = [`수요자 ${short(job.client)}`, `공급자 ${short(job.provider)}`];
+  if (!same(job.operator, ZERO)) who.push(`Worker ${short(job.operator)}`);
+  console.log(`  ${who.join("   ")}\n`);
+
+  if (grant) {
+    // 승인은 예치보다 한참 전에 넉넉히 해 둘 수 있다. 날짜가 다르면 날짜까지 보여 같은 흐름으로 착각하지 않게 한다
+    const sameDay = (blockTime.get(grant.block) ?? "").slice(0, 5) === (blockTime.get(first) ?? "").slice(0, 5);
+    const when = sameDay ? clock(grant.block) : blockTime.get(grant.block);
+    console.log(`  ·  ${when}  ${pad("승인", 10)} 수요자가 계약이 ${gsc(grant.value)} 까지 가져가도록 허락`);
+  }
+  let n = 0;
+  let inflow = 0n;
+  let outflow = 0n;
+  for (const [tx, events] of byTx(steps.map((e) => ({ ...e, tx: e.log.transactionHash! })))) {
+    const mark = CIRCLE[n++] ?? "·";
+    events.forEach((e, i) => {
+      const head = i === 0 ? `  ${mark}  ${clock(e.log.blockNumber!)}` : " ".repeat(13); // 같은 트랜잭션의 둘째 줄은 번호·시각을 비운다
+      console.log(`${head}  ${pad(LABEL[e.name] ?? e.name, 10)} ${sentence(e)}`);
+    });
+    for (const m of money.get(tx) ?? []) {
+      console.log(`${" ".repeat(26)}${moneyLine(m, job)}`);
+      if (same(m.to, ESCROW)) inflow += m.value; else outflow += m.value;
+    }
+  }
+  console.log(`\n  돈   들어옴 ${gsc(inflow)} · 나감 ${gsc(outflow)} · 계약에 남음 ${gsc(inflow - outflow)}`);
+}
+
+async function jobsView(only: bigint | null, all: boolean): Promise<void> {
+  const latest = await client.getBlockNumber();
+  const nextJobId = (await client.readContract({ address: ESCROW, abi: ABI, functionName: "nextJobId" })) as bigint;
+  if (only !== null && only >= nextJobId) throw new Error(`작업 #${only} 은 체인에 없습니다. 지금까지 #${nextJobId - 1n} 까지 있습니다.`);
+  const ids = Array.from({ length: Number(nextJobId - 1n) }, (_, i) => BigInt(i + 1));
+
+  const [events, { moves, grants }, jobs, locked] = await Promise.all([
+    readEvents(DEPLOY_BLOCK, latest), readMoney(DEPLOY_BLOCK, latest), readJobs(ids), lockedNow(),
+  ]);
+  const blocks = new Set<bigint>([...events.map((e) => e.log.blockNumber!), ...grants.map((g) => g.block)]);
+  await Promise.all([...blocks].map(timeOf)); // 블록 시각을 한 번에 (배치)
+
+  header(latest);
+
+  // 요약 — 들어온 돈과 나간 돈을 토큰 기록으로 세고, 남아야 할 돈을 실제 잔액과 맞춰 본다
+  const completedTx = new Set(events.filter((e) => e.name === "JobCompleted").map((e) => e.log.transactionHash));
+  let inflow = 0n, paid = 0n, refunded = 0n;
+  for (const m of moves) {
+    if (same(m.to, ESCROW)) inflow += m.value;
+    else if (completedTx.has(m.tx)) paid += m.value;
+    else refunded += m.value;
+  }
+  const count = (label: string) => [...jobs.values()].filter((j) => j.state === label).length;
+  const openJobs = ids.filter((id) => ["FUNDED", "ASSIGNED"].includes(jobs.get(id)!.state));
+  const expected = inflow - paid - refunded;
+
+  console.log(`  지금 계약에 잠긴 돈   ${gsc(locked)}   (토큰 계약에 직접 물은 잔액)`);
+  for (const id of openJobs) console.log(`                        └ 작업 #${id} · ${status(jobs.get(id)!, [])} · ${gsc(jobs.get(id)!.price)}`);
+  console.log(`  체인에 기록된 작업   ${ids.length}건  (완료 ${count("COMPLETED")} · 환불 ${count("CANCELLED")} · 진행 중 ${openJobs.length})`);
+  console.log(`  누적 토큰 흐름       들어옴 ${gsc(inflow)} · 공급자에게 지급 ${gsc(paid)} · 수요자에게 환불 ${gsc(refunded)}`);
+  console.log(`  장부 대조            들어옴 − 나감 = ${gsc(expected)}  →  실제 잔액과 ${expected === locked ? "일치 ✓" : `불일치 ✗ (차이 ${gsc(locked - expected)})`}`);
+  console.log();
+
+  const shown = only !== null ? [only] : all ? [...ids].reverse() : [...ids].reverse().slice(0, 5);
+  const money = byTx(moves);
+  for (const id of shown) {
+    const job = jobs.get(id)!;
+    const steps = forJob(events, id);
+    const fund = steps.find((e) => e.name === "JobFunded");
+    // 예치 직전에 같은 수요자가 계약에 준 승인 — 트랜잭션 넷 중 토큰 계약 쪽 한 건
+    const grant = fund && grants.filter((g) => same(g.owner, job.client) && (g.block < fund.log.blockNumber!
+      || (g.block === fund.log.blockNumber! && g.logIndex < fund.log.logIndex!))).at(-1);
+    printCard(id, job, steps, money, grant);
+  }
+  console.log("─".repeat(78));
+  if (only === null && !all && ids.length > shown.length) {
+    console.log(`최근 ${shown.length}건만 보였습니다. 전체는 --all, 하나는 --job N`);
+  }
+}
+
+/** from 을 주면 그 블록부터 다시 흘려 보낸다. 리허설 때 지난 시연을 실제처럼 다시 보이거나 이 화면을 시험할 때 쓴다. */
+async function watch(intervalSec: number, from?: bigint): Promise<void> {
+  let latest = await client.getBlockNumber();
+  header(latest);
+  let locked = await lockedNow();
+  console.log(`  지금 계약에 잠긴 돈   ${gsc(locked)}`);
+  const since = from === undefined ? "여기부터 새 기록" : `블록 ${num(from)} 부터 다시 보기`;
+  console.log(`\n── ${since} (${intervalSec}초마다 확인, 끝내려면 Ctrl+C) ──\n`);
+
+  const tty = process.stdout.isTTY;
+  let next = from ?? latest + 1n;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+    try {
+      latest = await client.getBlockNumber();
+      if (latest < next) continue;
+      const [events, { moves, grants }] = await Promise.all([readEvents(next, latest), readMoney(next, latest)]);
+      const ids = [...new Set(events.filter((e) => "jobId" in e.args).map((e) => e.args.jobId as bigint))];
+      const jobs = await readJobs(ids);
+      await Promise.all([...new Set([...events.map((e) => e.log.blockNumber!), ...grants.map((g) => g.block)])].map(timeOf));
+      if (tty) process.stdout.write("\r\x1b[2K");
+
+      // 승인과 에스크로 기록을 한 줄로 합쳐 블록·로그 순서대로 찍는다. 여러 블록을 한 번에 읽어도 순서가 섞이지 않는다
+      const eventTx = new Set(events.map((e) => e.log.transactionHash));
+      const groups = byTx(events.map((e) => ({ ...e, tx: e.log.transactionHash! })));
+      const timeline = [
+        ...grants.filter((g) => !eventTx.has(g.tx)).map((g) => ({ block: g.block, index: g.logIndex, grant: g, group: undefined })),
+        ...[...groups.values()].map((group) => ({ block: group[0].log.blockNumber!, index: group[0].log.logIndex!, grant: undefined, group })),
+      ].sort((x, y) => (x.block === y.block ? x.index - y.index : x.block < y.block ? -1 : 1));
+
+      // 돈이 움직일 때마다 그 시점에 계약이 쥔 돈을 보인다. 지금 잔액에서 이번에 읽은 이동을 되돌려 출발점을 잡는다
+      const money = byTx(moves);
+      const net = (ms: Move[]) => ms.reduce((sum, m) => sum + (same(m.to, ESCROW) ? m.value : -m.value), 0n);
+      locked = await lockedNow();
+      let running = locked - net(moves);
+      for (const item of timeline) {
+        if (item.grant) {
+          const g = item.grant;
+          console.log(`${blockTime.get(g.block)}   ${pad("승인", 10)} ${short(g.owner)} 가 계약이 ${gsc(g.value)} 까지 가져가도록 허락`);
+          continue;
+        }
+        const group = item.group!;
+        for (const e of group) {
+          const id = "jobId" in e.args ? (e.args.jobId as bigint) : null;
+          const tag = id === null ? "" : `작업 #${id}  `;
+          console.log(`${blockTime.get(e.log.blockNumber!)}   ${pad(LABEL[e.name] ?? e.name, 10)} ${tag}${sentence(e)}`);
+        }
+        const withJob = group.find((x) => "jobId" in x.args);
+        const job = withJob ? jobs.get(withJob.args.jobId as bigint) : undefined;
+        const txMoves = money.get(group[0].tx) ?? [];
+        for (const m of txMoves) console.log(`${" ".repeat(30)}${moneyLine(m, job)}`);
+        if (txMoves.length > 0) {
+          running += net(txMoves);
+          console.log(`${" ".repeat(30)}→ 계약에 잠긴 돈 ${gsc(running)}`);
+        }
+      }
+      next = latest + 1n;
+      if (tty) process.stdout.write(`블록 ${num(latest)} 까지 확인 · 계약에 잠긴 돈 ${gsc(locked)} · 대기 중`);
+    } catch (err) {
+      if (tty) process.stdout.write("\r\x1b[2K");
+      console.log(`RPC 응답 없음 — ${intervalSec}초 뒤 다시 시도 (${(err as Error).message.split("\n")[0]})`);
+    }
+  }
+}
+
 // ── 진입점 ───────────────────────────────────────────────────────────
 
 /**
@@ -268,6 +547,11 @@ async function main(): Promise<void> {
   const job = jobArg === undefined ? null : BigInt(jobArg);
 
   if (process.argv.includes("stats")) return stats();
+  if (process.argv.includes("jobs")) return jobsView(job, process.argv.includes("--all"));
+  if (process.argv.includes("watch")) {
+    const from = intOption("--from", Number(DEPLOY_BLOCK), "다시 보기 시작 블록");
+    return watch(intOption("--interval", 1, "확인 간격 초") ?? 3, from === undefined ? undefined : BigInt(from));
+  }
   if (process.argv.includes("--follow")) {
     return follow(job, intOption("--tail", 0, "앞서 보일 줄 수") ?? 5, intOption("--interval", 1, "확인 간격 초") ?? 3);
   }
