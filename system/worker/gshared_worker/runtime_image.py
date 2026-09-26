@@ -48,7 +48,7 @@ hash recorded, loss 0.91, ``valid`` true).
 that refused what the catalog names would refuse every Job, so the new one is
 approved *before* the Backend points at it:
 
-* :data:`PREVIOUS_RUNTIME_DIGEST` -- 0.3.0, what the catalog names since V19.
+* :data:`PREVIOUS_RUNTIME_DIGEST` -- 0.3.0, what the catalog named until V24.
   Runs everything, adapters included; only its results lack the verification.
 * :data:`LEGACY_RUNTIME_DIGEST` -- 0.2.0, what the catalog named before V19.
   Cannot continue from an adapter, which :func:`supports_adapter` says.
@@ -79,7 +79,7 @@ CANONICAL_RUNTIME_DIGEST = (
     "sha256:3f054d6d9fc28546818c424e2aa4167a23369463ecaa035e940673e77841e4ec")
 
 #: Runtime 0.3.0 -- adapter-capable, without result verification. What the
-#: Backend's catalog names (V19) until its next migration. Approved, not canonical.
+#: Backend's catalog named until V24. Approved, not canonical.
 PREVIOUS_RUNTIME_TAG = "0.3.0"
 PREVIOUS_RUNTIME_DIGEST = (
     "sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170")

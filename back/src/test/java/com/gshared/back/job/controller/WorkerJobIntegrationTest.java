@@ -163,11 +163,12 @@ class WorkerJobIntegrationTest {
                 .andExpect(jsonPath("$.model.modelRevision")
                         .value(org.hamcrest.Matchers.matchesPattern("[0-9a-f]{40}")))
                 // Worker 는 승인된 canonical 이미지만 실행한다 (system/worker/gshared_worker/runtime_image.py).
-                // 0.3.0(V19) — 어댑터 이어 학습이 되는 이미지. 0.2.0 으로 되돌아가면 어댑터 Job 이 ADAPTER_UNAVAILABLE 로 죽으므로 여기서 걸린다.
+                // 0.4.0(V24) — 학습 결과 검증 데이터를 쓰는 이미지. 0.3.0 으로 되돌아가면 Job 상세의 검증 패널이
+                // 다시 비므로(training_metrics.json 에 lossHistory·verification 이 없다) 여기서 걸린다.
                 .andExpect(jsonPath("$.runtimeImage.imageRef").value(
-                        "le3560/gshared-qlora-sft-runtime@sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170"))
+                        "le3560/gshared-qlora-sft-runtime@sha256:3f054d6d9fc28546818c424e2aa4167a23369463ecaa035e940673e77841e4ec"))
                 .andExpect(jsonPath("$.runtimeImage.digest").value(
-                        "sha256:e32bd1c1b8e7689c33100eaf1718f3ceadea80ff1d13de4da970173762e8e170"))
+                        "sha256:3f054d6d9fc28546818c424e2aa4167a23369463ecaa035e940673e77841e4ec"))
                 .andExpect(jsonPath("$.dataset.sha256").value(DATASET_HASH))          // 0x 벗긴 64자
                 .andExpect(jsonPath("$.dataset.downloadUrl").value(org.hamcrest.Matchers.containsString("/api/storage/jobs/" + job.getId() + "/input/dataset.jsonl?method=GET")))
                 .andExpect(jsonPath("$.dataset.effectiveTokens").value(1_800_000))

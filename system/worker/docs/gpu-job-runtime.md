@@ -84,12 +84,12 @@ System 안의 원본은 `gshared_worker/runtime_image.py` 의 `CANONICAL_RUNTIME
 | 상수 | 버전 | Adapter | 비고 |
 |---|---|---|---|
 | `CANONICAL_RUNTIME_DIGEST` | 0.4.0 | ✅ | 기준값 |
-| `PREVIOUS_RUNTIME_DIGEST` | 0.3.0 `e32bd1c1…e170` | ✅ | Backend V19가 현재 가리키는 값. 결과 검증 데이터만 없음 |
+| `PREVIOUS_RUNTIME_DIGEST` | 0.3.0 `e32bd1c1…e170` | ✅ | V24 이전 카탈로그. 결과 검증 데이터만 없음 |
 | `LEGACY_RUNTIME_DIGEST` | 0.2.0 `acda63bc…126d` | ❌ | V19 이전 카탈로그. Adapter Job은 `ADAPTER_UNAVAILABLE` |
 
 어느 카탈로그도 더 이상 가리키지 않으면 해당 상수를 허용 목록에서 제거한다.
 
-> **Backend 인계:** `workloads.image_digest`를 위 0.4.0 digest로 바꾸는 새 migration이 필요하다(V14·V19와 같은 방식, Backend 담당). **이 Worker(exe)가 배포된 뒤**에 반영해야 한다.
+> **Backend 인계 — 완료.** `workloads.image_digest`는 V24(`V24__runtime_image_result_verification.sql`)에서 0.4.0 digest로 옮겼다. Worker(exe) 배포 뒤라는 순서도 지켰다.
 
 ### 규칙
 
