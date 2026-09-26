@@ -140,6 +140,36 @@ class Comparison(unittest.TestCase):
         self.assertEqual(result["layerModuleDeltaMagnitude"]["0"]["q_proj"], 0.0)
 
 
+class ExactComparison(unittest.TestCase):
+    """Why ``changed`` uses exact inequality and not an epsilon.
+
+    A review suggested a ``1e-8`` threshold against "floating point noise".
+    There is no arithmetic between the snapshot and the comparison -- the
+    baseline is a copy of the same tensor -- so an untouched parameter is
+    bit-identical and the difference is exactly 0.0. Noise has nowhere to
+    enter.
+
+    An epsilon would only make the check weaker against the one failure it
+    exists to catch: a tensor that moved, but barely, would be reported as
+    "not trained".
+    """
+
+    def test_an_untouched_tensor_is_exactly_unchanged(self):
+        untouched = [0.0, 1e-9, -3.7e-8]
+        result = verify({Q_PROJ: untouched},
+                        {Q_PROJ: list(untouched)})["verification"]
+
+        self.assertEqual(result["changedTensorCount"], 0)
+
+    def test_a_tiny_but_real_update_counts_as_changed(self):
+        """An epsilon of 1e-8 would swallow this and call a trained tensor
+        untrained."""
+        result = verify({Q_PROJ: [0.0, 0.0]},
+                        {Q_PROJ: [1e-9, 0.0]})["verification"]
+
+        self.assertEqual(result["changedTensorCount"], 1)
+
+
 class BadWeights(unittest.TestCase):
 
     def test_nan_is_counted_and_kept_out_of_the_heatmap(self):

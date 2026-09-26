@@ -127,6 +127,12 @@ def run(request, events=None) -> dict:
                      total_steps, events)
     _save(model, request.output_dir)
     metrics.update(_verify_adapter(torch, model, baseline))
+    # _attach_adapters refuses to continue with zero trainable parameters, so
+    # by here the model has LoRA tensors and an empty baseline means the
+    # snapshot failed rather than that there was nothing to snapshot. Say so:
+    # otherwise the only symptom is a heatmap of zeros with no explanation.
+    if not baseline:
+        metrics.setdefault("verificationError", "BASELINE_SNAPSHOT_FAILED")
     del baseline
 
     # The model is dropped before the adapter is loaded back, so the check
