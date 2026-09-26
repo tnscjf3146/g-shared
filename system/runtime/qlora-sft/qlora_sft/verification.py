@@ -81,6 +81,11 @@ def summarize(stats: Iterable[TensorStat]) -> dict:
             continue
         layer, module = cell
         modules = heatmap.setdefault(layer, {})
+        # A module is one cell and has two tensors, so they are summed. In
+        # practice the cell is lora_B's number: lora_B starts at exactly zero
+        # while lora_A starts Kaiming-initialised, so their update magnitudes
+        # differ by orders of magnitude. That is consistent across every cell,
+        # which is all the screen's min/max normalisation needs.
         modules[module] = round(modules.get(module, 0.0) + row.delta, _DECIMALS)
 
     nan_count = sum(1 for row in rows if row.has_nan)
@@ -94,7 +99,14 @@ def summarize(stats: Iterable[TensorStat]) -> dict:
         "infCount": inf_count,
         # Weights moved and none of them went bad. Both halves are needed:
         # an all-zero adapter has no NaN in it either.
-        "valid": changed > 0 and nan_count == 0 and inf_count == 0,
+        #
+        # None when there were no tensors to look at, which is a different
+        # event from "it trained nothing" and has to stay distinguishable:
+        # the screen turns False into a red "검증 이상 발견" badge and only
+        # leaves the badge off for null. A job that completed fine should not
+        # be accused because the parameter names were not the ones this knows.
+        "valid": (changed > 0 and nan_count == 0 and inf_count == 0
+                  if rows else None),
         # For whoever reads the file: "2" before "10". The screen sorts the
         # keys itself, and _write_metrics re-sorts them as strings on the way
         # out, so nothing downstream relies on this.

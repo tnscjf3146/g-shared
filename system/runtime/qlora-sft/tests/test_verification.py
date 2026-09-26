@@ -64,7 +64,9 @@ class Counts(unittest.TestCase):
         self.assertEqual(result["tensorCount"], 0)
         self.assertEqual(result["changedTensorCount"], 0)
         self.assertEqual(result["layerModuleDeltaMagnitude"], {})
-        self.assertFalse(result["valid"])
+        # None, not False: "판단할 게 없었다" 와 "학습이 안 됐다" 는 다른 사건이고
+        # 화면은 False 를 빨간 "검증 이상 발견" 배지로 그린다
+        self.assertIsNone(result["valid"])
 
     def test_counts_each_category(self):
         result = summarize([
@@ -93,6 +95,12 @@ class Valid(unittest.TestCase):
     def test_true_when_something_changed_and_nothing_is_bad(self):
         self.assertTrue(summarize([stat(ATTENTION, delta=1e-4, changed=True)])
                         ["valid"])
+
+    def test_none_when_there_was_nothing_to_check(self):
+        """LoRA tensor 가 하나도 없으면 판단 불가다. False 로 답하면 정상
+        완료된 Job 에 "검증 이상 발견" 빨간 배지가 붙는다 —
+        trainingResultVerificationPanel 은 null 일 때만 배지를 생략한다."""
+        self.assertIsNone(summarize([])["valid"])
 
     def test_false_when_nothing_changed(self):
         """The failure this whole block exists to catch: a run that finished

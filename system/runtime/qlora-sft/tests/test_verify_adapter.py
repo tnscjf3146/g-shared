@@ -172,6 +172,18 @@ class BadWeights(unittest.TestCase):
             result["layerModuleDeltaMagnitude"]["0"]["k_proj"], 0.4)
 
 
+class BaselineFailure(unittest.TestCase):
+    """The snapshot runs before the first step, so an exception there costs
+    a job that had not even started -- for a chart."""
+
+    def test_a_broken_snapshot_returns_nothing_instead_of_raising(self):
+        class Exploding:
+            def named_parameters(self):
+                raise RuntimeError("cpu out of memory")
+
+        self.assertEqual(_adapter_baseline(Exploding()), {})
+
+
 class Failure(unittest.TestCase):
 
     def test_a_broken_read_does_not_fail_the_job(self):
