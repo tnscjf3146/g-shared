@@ -68,6 +68,8 @@ class JobCandidateOperatorFilterTest {
     private BaseModelRepository baseModelRepository;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private JobEstimateService jobEstimateService;
 
     @MockitoBean
     private SchedulerClient schedulerClient;
@@ -131,6 +133,40 @@ class JobCandidateOperatorFilterTest {
                 .hasFieldOrPropertyWithValue("errorCode", JobErrorCode.NO_AVAILABLE_WORKER);
 
         then(schedulerClient).should(never()).recommend(any());
+    }
+
+    /** 견적 화면이 보내는 몸통 — 주문(request)과 같은 카탈로그·설정을 쓴다. */
+    private com.gshared.back.job.dto.request.JobSpecRequest gpuOptionsRequest() {
+        return new com.gshared.back.job.dto.request.JobSpecRequest(
+                request.workloadId(), request.baseModelId(),
+                new com.gshared.back.job.dto.request.DatasetMetadataRequest(
+                        52_428_800L, 10_000, 3_500_000L, 350.0, 1800),
+                "CUSTOM", null, objectMapper.readTree(CUSTOM_CONFIG), false, false);
+    }
+
+    @Test
+    @DisplayName("승인 안 된 공급자만 있으면 견적 화면에도 그 등급이 안 뜬다 — 주문과 같은 목록을 봐야 한다")
+    void estimateHidesGradesWithNoApprovedWorker() {
+        // 견적에 이 필터가 없던 동안, 승인 안 된 공급자만 있는 등급이 화면에는 "추천" 으로 뜨고
+        // 주문에서만 거절됐다. 사용자는 화면이 고르라고 한 GPU 를 골랐을 뿐인데 기다려도 풀리지 않는다.
+        given(chain.isOperator(PROVIDER_WALLET, OPERATOR)).willReturn(Optional.of(false));
+
+        assertThatThrownBy(() -> jobEstimateService.getGpuOptions(gpuOptionsRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", JobErrorCode.NO_AVAILABLE_WORKER);
+
+        then(schedulerClient).should(never()).recommend(any());
+    }
+
+    @Test
+    @DisplayName("체인이 답하지 않으면 견적도 거르지 않는다 — 주문과 같은 판단")
+    void estimateKeepsGradesWhenChainIsSilent() {
+        given(chain.isOperator(PROVIDER_WALLET, OPERATOR)).willReturn(Optional.empty());
+
+        // 후보가 넘어간 뒤 Scheduler 가 끊으므로, 여기까지 왔다는 것이 곧 "안 걸러졌다" 는 뜻이다
+        assertThatThrownBy(() -> jobEstimateService.getGpuOptions(gpuOptionsRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
     }
 
     @Test
