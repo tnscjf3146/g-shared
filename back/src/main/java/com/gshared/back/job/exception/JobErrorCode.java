@@ -13,6 +13,8 @@ public enum JobErrorCode implements ErrorCode {
     INVALID_JOB_STATUS(HttpStatus.CONFLICT, "현재 상태에서 할 수 없는 작업입니다."),
     // 409: 기다리면 해결 (지금 일할 워커가 없을 뿐) — NO_FEASIBLE_GPU(422, 요청을 바꿔야 함)와 구분
     NO_AVAILABLE_WORKER(HttpStatus.CONFLICT, "현재 사용 가능한 워커가 없습니다. 잠시 후 다시 시도해주세요."),
+    // 409: 요청은 옳았고 그 사이 상태가 변했다 — 다른 GPU 를 고르거나 기다리면 해결된다.
+    SELECTED_WORKER_UNAVAILABLE(HttpStatus.CONFLICT, "선택하신 GPU를 지금 쓸 수 없습니다. 다른 GPU를 고르거나 잠시 후 다시 시도해주세요."),
     INVALID_TRAINING_CONFIG(HttpStatus.BAD_REQUEST, "trainingConfig가 올바르지 않습니다. (epochs·batchSize·learningRate·maxLength 필수)"),
     INVALID_ESCROW_JOB_ID(HttpStatus.BAD_REQUEST, "escrowJobId는 0 이상의 정수 문자열이어야 합니다."),
     // 예치 확인 — 422: 영수증은 있는데 이 Job 의 예치가 아니다(되돌려짐·다른 externalRef·다른 provider·다른 가격 등)

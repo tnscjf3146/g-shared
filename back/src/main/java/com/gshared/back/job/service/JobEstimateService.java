@@ -1,5 +1,6 @@
 package com.gshared.back.job.service;
 
+import com.gshared.back.global.blockchain.EscrowVerification;
 import com.gshared.back.global.client.SchedulerClient;
 import com.gshared.back.global.client.SchedulerErrorCode;
 import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
@@ -44,6 +45,7 @@ public class JobEstimateService {
     private final GpuCatalogService gpuCatalogService;
     private final SchedulerClient schedulerClient;
     private final TrainingConfigResolver trainingConfigResolver;
+    private final EscrowVerification escrow;
 
     /**
      * 이 명세를 감당할 수 있는 GPU 등급들과 그 적합도.
@@ -53,7 +55,7 @@ public class JobEstimateService {
      */
     public List<GpuOptionResponse> getGpuOptions(JobSpecRequest request) {
         BaseModel baseModel = loadBaseModel(request);
-        List<GpuGrade> grades = gpuCatalogService.grades();
+        List<GpuGrade> grades = approvedOnly(gpuCatalogService.grades());
         if (grades.isEmpty()) {
             throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);
         }
@@ -127,6 +129,28 @@ public class JobEstimateService {
             throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
         }
         return baseModel;
+    }
+
+    /**
+     * operator 승인이 확인된 워커만 남긴 등급들.
+     *
+     * <p>주문({@link JobService#create})은 이 조건으로 후보를 거르는데 견적에는 없어서, 승인 안 된
+     * 공급자만 있는 등급이 화면에는 "추천" 으로 뜨고 주문에서 409 로 거절됐다. 사용자는 화면이
+     * 고르라고 한 GPU 를 골랐을 뿐인데 기다려도 풀리지 않는다 — 공급자가 온체인에서 키를
+     * 승인하기 전에는 아무것도 바뀌지 않기 때문이다. 두 곳이 같은 목록을 봐야 한다.
+     *
+     * <p>{@code isContradicted()} 만 거른다 — 체인을 읽지 못했을 때까지 빼면 노드가 잠깐 답하지
+     * 않는 동안 멀쩡한 등급이 목록에서 사라진다({@link JobService#create} 와 같은 판단).
+     */
+    private List<GpuGrade> approvedOnly(List<GpuGrade> grades) {
+        return grades.stream()
+                .map(grade -> new GpuGrade(grade.id(), grade.model(), grade.vramMb(),
+                        grade.workers().stream()
+                                .filter(w -> !escrow.operatorApproved(
+                                        w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
+                                .toList()))
+                .filter(grade -> !grade.workers().isEmpty())
+                .toList();
     }
 
     private SchedulerRecommendResponse recommend(JobSpecRequest request, BaseModel baseModel,
