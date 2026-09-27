@@ -161,14 +161,19 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
         <p className="text-caption text-text-muted">학습 요약 데이터가 제공되지 않습니다.</p>
       )}
 
-      {/* Loss Curve | Adapter 검증 — 데스크톱 2열, 모바일 세로 */}
+      {/* 상세 셋은 접어 둔다 — 상단 4칸과 무결성만으로 "됐는지" 는 이미 보이고,
+          세 그래프를 늘 펼쳐 두면 상세 화면이 필요 이상으로 길어진다.
+          네이티브 <details> 를 쓴다(stepConfig 의 고급 설정과 같은 방식) — 상태·키보드·스크린리더가 공짜다 */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="card-quiet flex flex-col gap-2 p-4">
-          <h3 className="text-caption font-semibold text-dark">Loss Curve</h3>
-          <LossChart history={t?.lossHistory ?? []} />
-        </div>
-        <div className="card-quiet flex flex-col gap-3 p-4">
-          <h3 className="text-caption font-semibold text-dark">LoRA Adapter 검증</h3>
+        <details className="card-quiet p-4">
+          <summary className="cursor-pointer text-caption font-semibold text-dark marker:text-text-muted">Loss Curve</summary>
+          <div className="pt-3">
+            <LossChart history={t?.lossHistory ?? []} />
+          </div>
+        </details>
+        <details className="card-quiet p-4">
+          <summary className="cursor-pointer text-caption font-semibold text-dark marker:text-text-muted">LoRA Adapter 검증</summary>
+          <div className="flex flex-col gap-3 pt-3">
           {a ? (
             <>
               <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -189,14 +194,17 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
           ) : (
             <p className="text-caption text-text-muted">Adapter 검증 데이터가 제공되지 않습니다.</p>
           )}
-        </div>
+          </div>
+        </details>
       </div>
 
       {/* Layer × Module heatmap */}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-caption font-semibold text-dark">Layer별 LoRA Weight 변화</h3>
-        <LoraWeightHeatmap data={a?.layerModuleDeltaMagnitude ?? {}} />
-      </div>
+      <details className="card-quiet p-4">
+        <summary className="cursor-pointer text-caption font-semibold text-dark marker:text-text-muted">Layer별 LoRA Weight 변화</summary>
+        <div className="pt-3">
+          <LoraWeightHeatmap data={a?.layerModuleDeltaMagnitude ?? {}} />
+        </div>
+      </details>
 
       {/* 결과 무결성 — 검증 hash ↔ 체인 제출 hash. 이 조각만 실패해도 위 섹션은 그대로 */}
       <div className="flex flex-col gap-2 border-t border-hairline pt-4">
