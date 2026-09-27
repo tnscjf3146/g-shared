@@ -16,7 +16,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
 
   const workload = catalog.workloads.find((w) => w.id === state.workloadId)
   const model = catalog.baseModels.find((m) => m.id === state.baseModelId)
-  const gpu = catalog.gpus.find((g) => g.id === state.gpuId)
+  // 4단계에서 고르는 순간 적어 둔 이름을 그대로 쓴다 — /gpus 를 따로 받지 않고, 목록 도착 전에도 "—" 가 되지 않는다
   const dataset = state.datasetFile ? `${state.datasetFile.name} (${formatBytes(state.datasetFile.size)})` : undefined
   const meta = spec.datasetMetadata
   const isTrain = workload?.kind === 'TRAIN_LORA'
@@ -49,7 +49,7 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
             ['설정', workload?.kind === 'TRAIN_LORA' ? (typeof state.custom === 'object' && state.custom ? '직접 설정' : `자동 · ${AUTO_MODE_META[state.level].label}`) : '—'],
             ['데이터셋', dataset],
             ['데이터셋 분석', `샘플 ${meta.sampleCount.toLocaleString('ko-KR')}개 · 약 ${meta.totalTokens.toLocaleString('ko-KR')} 토큰 · 평균 ${Math.round(meta.avgSeqLength)} · 최대 ${meta.maxSeqLength}`],
-            ['GPU 등급', gpu ? `${gpu.model.replace('NVIDIA GeForce ', '')} · ${Math.round(gpu.vramMb / 1024)} GB` : '—'],
+            ['GPU 등급', state.gpuLabel ?? '—'],
           ] as [string, string | undefined][]
         ).map(([k, v]) => (
           <div key={k} className="contents">

@@ -54,12 +54,10 @@ export function NavAuth() {
         className={ICON_BTN}
         onClick={async () => {
           setPending(true)
-          try {
-            await logout() // logout 은 내부에서 실패해도 로컬 세션을 비운다(auth/api). 그래도 네트워크 예외로 throw 될 수 있어 방어
-            router.refresh() // 성공 시 리렌더 → guest 로. 성공 경로에선 pending 을 내리지 않는다(전환 완료까지 로딩 유지)
-          } catch {
-            setPending(false) // 실패 시 다시 시도할 수 있게 버튼 복구
-          }
+          // logout 은 실패해도 로컬 세션을 비우고 throw 하지 않는다(auth/api) — 예전에 있던 catch 는
+          // 이제 닿지 않는 길이라 지웠다. refresh 로 guest 렌더가 되므로 pending 은 내리지 않는다(전환 완료까지 로딩 유지)
+          await logout()
+          router.refresh()
         }}
       >
         <LogoutIcon />

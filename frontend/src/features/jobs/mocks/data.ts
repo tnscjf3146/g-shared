@@ -1,5 +1,5 @@
-import { catalogSchema, datasetSchema, jobDetailSchema } from '../schema'
-import type { Catalog, Dataset, JobDetail } from '../types'
+import { catalogSchema, datasetSchema, gpuSchema, jobDetailSchema } from '../schema'
+import type { Catalog, Dataset, Gpu, JobDetail } from '../types'
 import * as z from 'zod/mini'
 
 // 고정 fixture(schema 통과값만). 카탈로그는 백엔드 제안 스펙(job.md §1-2)의 모양
@@ -15,12 +15,14 @@ export const MOCK_CATALOG: Catalog = catalogSchema.parse({
     { id: 21, name: 'Llama-3.2-1B', params: '1.2B', workloadIds: [1, 2, 3] },
     { id: 22, name: 'Qwen2.5-1.5B-Instruct', params: '1.5B', workloadIds: [1, 2, 3] },
   ],
-  gpus: [
-    { id: 1, model: 'NVIDIA GeForce RTX 3060', vramMb: 12288, hourlyPrice: 400 },
-    { id: 2, model: 'NVIDIA GeForce RTX 4070', vramMb: 12282, hourlyPrice: 600 },
-    { id: 3, model: 'NVIDIA GeForce RTX 4090', vramMb: 24564, hourlyPrice: 1200 },
-  ],
 })
+
+/** GET /gpus 응답. 카탈로그에서 떼어 냈다 — 이름표(workloads·baseModels)와 달리 살아 있는 워커에 따라 변한다(FE-03) */
+export const MOCK_GPUS: Gpu[] = z.array(gpuSchema).parse([
+  { id: 1, model: 'NVIDIA GeForce RTX 3060', vramMb: 12288, hourlyPrice: 400 },
+  { id: 2, model: 'NVIDIA GeForce RTX 4070', vramMb: 12282, hourlyPrice: 600 },
+  { id: 3, model: 'NVIDIA GeForce RTX 4090', vramMb: 24564, hourlyPrice: 1200 },
+])
 
 /** 등록된 데이터셋(back DatasetResponse). 새로 등록한 것은 id 5000 부터 */
 export const MOCK_DATASETS: Dataset[] = z.array(datasetSchema).parse([
@@ -76,6 +78,14 @@ export const MOCK_JOBS: JobDetail[] = z.array(jobDetailSchema).parse([
   },
   { ...base, jobId: 2, status: 'FAILED', assignedWorkerId: 'worker-22222222-2222-4222-8222-222222222222', failReason: 'CUDA_OOM: 학습 도중 GPU 메모리가 부족했습니다(batch 16 × max length 40).', progressPercent: 18, progressEpoch: 1, progressTotalEpochs: 3, actualRuntimeSec: 900, createdAt: '2026-09-08T11:00:00', startedAt: '2026-09-08T11:05:00', finishedAt: '2026-09-08T11:20:00' },
   { ...base, jobId: 1, status: 'CANCELLED', createdAt: '2026-09-07T10:00:00' },
+  // 예치 보류 — 트랜잭션은 보냈는데 서버가 아직 영수증을 못 읽은 상태(CREATED + fundTxHash + escrowJobId 없음).
+  // 목업에 이 모양이 없어서 FE-01(새로고침 후 보류 복원 · 보류 중 취소 차단)을 화면으로 확인할 길이 없었다.
+  // 자동 전이(MOCK_ADVANCE_MS)에 걸리지 않게 createdAt 을 과거로 둔다
+  {
+    ...base, jobId: 9, status: 'CREATED',
+    fundTxHash: '0x' + 'ab'.repeat(32), escrowJobId: null,
+    createdAt: '2026-09-06T09:00:00',
+  },
 ])
 
 /** 목업 전용 자동 전이 간격(ms): 생성 → FUNDED → ASSIGNED → RUNNING → 진행률 +10%/틱 → COMPLETED */

@@ -53,11 +53,12 @@ export type WizardState = {
   datasetMetadata: DatasetMetadata | null // 파일이면 브라우저 분석 결과, 기존이면 카탈로그 값
   analyzing: boolean
   gpuId: number | null
+  gpuLabel: string | null // 4단계에서 고른 등급의 표시 이름. 5단계 요약이 이것만 보면 되도록 고르는 순간 적어 둔다(FE-03·FE-11)
   estimate: Estimate | null
 }
 const INITIAL: WizardState = {
   workloadId: null, baseModelId: null, adapterSource: 'none', parent: null, adapterFile: null, adapterName: '', level: 'BALANCED', custom: null,
-  datasetFile: null, datasetMetadata: null, analyzing: false, gpuId: null, estimate: null,
+  datasetFile: null, datasetMetadata: null, analyzing: false, gpuId: null, gpuLabel: null, estimate: null,
 }
 const STEPS = [{ label: '워크로드' }, { label: '설정' }, { label: '데이터셋' }, { label: 'GPU 등급 · 견적' }, { label: '업로드' }]
 

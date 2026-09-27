@@ -43,7 +43,7 @@
 | `POST /datasets` | `DatasetController` | |
 | `GET /datasets/{id}` | `DatasetController` | |
 | `GET /workloads` · `GET /base-models` | `CatalogController` | |
-| `GET /gpus` | `GpuController` | `hourlyPrice` 는 항상 0(과금이 토큰 기준) |
+| `GET /gpus` | `GpuController` | `hourlyPrice` 는 항상 0(과금이 토큰 기준). **프런트는 호출하지 않는다** — 등급은 `POST /jobs/gpu-options` 로 받는다(FE-03) |
 | `PUT <서명 uploadUrl>` | `StorageController` `/api/storage/**` | 서명이 인증이라 Bearer 없이 원본 `fetch` |
 | `POST /jobs/{id}/adapter-upload` | `JobController` | ✅ 2026-09-17 구현 — 입력 어댑터 `.tar` |
 | `POST /jobs/{id}/adapter-upload/complete` | `JobController` | ✅ 같음. 본문 `{ sha256(0x 없음), sizeBytes }` + tar 형식 검사 |

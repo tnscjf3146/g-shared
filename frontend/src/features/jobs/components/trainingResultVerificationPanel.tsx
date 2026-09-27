@@ -48,7 +48,9 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
       // 404 = 이 작업(또는 아직 API 가 없는 서버)에 검증 데이터가 없다 — 에러가 아니라 legacy 빈 상태.
       // 백엔드 배포 전 실서버에서 이 탭이 "고장"처럼 보이지 않게 한다
       .catch((e) => {
-        if (!ignore) setState(e instanceof ApiError && e.status === 404 ? { s: 'ready', v: { available: false }, forJob } : { s: 'error', forJob })
+        // JOB_NOT_FOUND 는 진짜 에러다 — 그것까지 빈 상태로 덮으면 "없는 작업"이 "검증 데이터만 없는 작업" 처럼 보인다(FE-04)
+        const legacyEmpty = e instanceof ApiError && e.status === 404 && e.code !== 'JOB_NOT_FOUND'
+        if (!ignore) setState(legacyEmpty ? { s: 'ready', v: { available: false }, forJob } : { s: 'error', forJob })
       })
     return () => {
       ignore = true
@@ -131,7 +133,10 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
   const fromChain = chain?.forJob === job.jobId ? chain.hash : null
   const chainHash = fromChain ?? job.resultHash
   const chainHashLabel = fromChain ? 'Chain' : '워커가 제출한 Hash'
-  const hashMatch = backendHash != null && chainHash != null ? backendHash.toLowerCase() === chainHash.toLowerCase() : null
+  // 판정은 **체인에서 읽은 값이 있을 때만** 한다. 체인을 못 읽으면 비교 상대가 DB 의 같은 값(워커가 제출한 hash)이라
+  // 자기 자신과 견주는 꼴이 돼 언제나 "일치" 가 나왔다 — 체인이 죽어 있을수록 화면은 더 확신에 차 보였다(수정요청서 FE-04).
+  // 그래서 이때는 참/거짓 대신 "확인 불가" 로 둔다. 해시 두 줄은 그대로 보여 주되 출처 라벨로 구분한다.
+  const hashMatch = backendHash != null && fromChain != null ? backendHash.toLowerCase() === fromChain.toLowerCase() : null
 
   return (
     <section className="card flex flex-col gap-6 px-6 py-5">
@@ -204,12 +209,16 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
               <span className="text-text-muted">Backend </span>
               {shortHash(backendHash)}
             </span>
-            <span className="text-caption tabular-nums text-dark" title={chainHash ?? undefined}>
-              <span className="text-text-muted">{chainHashLabel} </span>
-              {chainHash ? shortHash(chainHash) : '—'}
-            </span>
+            {/* 체인을 못 읽었을 때는 이 줄을 아예 그리지 않는다 — 내용이 Backend 줄과 바이트까지 같은 값이라,
+                출처만 다른 라벨을 달아 두면 서로 다른 두 증거를 맞춰 본 것처럼 보인다(리뷰 지적) */}
+            {fromChain && (
+              <span className="text-caption tabular-nums text-dark" title={fromChain}>
+                <span className="text-text-muted">{chainHashLabel} </span>
+                {shortHash(fromChain)}
+              </span>
+            )}
             {hashMatch == null ? (
-              <span className="text-caption text-text-muted">Blockchain 기록 hash 가 제공되지 않습니다.</span>
+              <span className="text-caption text-text-muted">{backendHash != null && chainHash != null ? '체인 기록을 읽지 못해 대조하지 못했습니다 — 확인 불가' : 'Blockchain 기록 hash 가 제공되지 않습니다.'}</span>
             ) : (
               <span className={`rounded-full px-2.5 py-0.5 text-caption font-semibold ${hashMatch ? 'bg-primary/12 text-primary-dark' : 'bg-danger-tint text-danger'}`}>{hashMatch ? '결과 Hash 일치' : '결과 Hash 불일치'}</span>
             )}

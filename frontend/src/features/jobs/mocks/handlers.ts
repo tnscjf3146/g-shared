@@ -4,7 +4,7 @@ import { ESCROW_ADDRESS } from '@/features/wallet/ethereum'
 import { CATALOG_PATHS, DATASETS_PATH, JOBS_PATH, createDatasetRequestSchema, createJobRequestSchema, datasetSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema, renameAdapterRequestSchema } from '../schema'
 import type { AutoMode, Dataset, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
 import { getLinkedWallet } from '@/features/wallet/mocks/handlers'
-import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_DATASETS, MOCK_JOBS } from './data'
+import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_DATASETS, MOCK_GPUS, MOCK_JOBS } from './data'
 import * as z from 'zod/mini'
 
 const URL = `${API_BASE_URL}${JOBS_PATH}`
@@ -63,7 +63,7 @@ const AUTO_CONFIG: Record<AutoMode, (maxSeq: number) => TrainingConfig> = {
 
 // 화면용 단순식: 샘플수 × epochs × 길이 계수 / GPU 계수. 정확할 필요 없음
 function estimate(meta: DatasetMetadata, gpuId: number, cfg: TrainingConfig) {
-  const gpu = MOCK_CATALOG.gpus.find((g) => g.id === gpuId)!
+  const gpu = MOCK_GPUS.find((g) => g.id === gpuId)!
   const gpuFactor = gpu.hourlyPrice / 600 // 4070 기준 1.0
   const predictedRuntimeSec = Math.max(60, Math.round((meta.sampleCount * cfg.epochs * (Math.min(cfg.maxLength, meta.maxSeqLength) / 512)) / (12 * gpuFactor)))
   const estimatedCost = Math.ceil(predictedRuntimeSec / 3600) * gpu.hourlyPrice
@@ -77,7 +77,7 @@ function gpuOptions(spec: { baseModelId: number; datasetMetadata: DatasetMetadat
   const weights = PARAMS_GB[spec.baseModelId] ?? 2
   const activations = (cfg.batchSize * Math.min(cfg.maxLength, spec.datasetMetadata.maxSeqLength)) / 4096 // GB
   const requiredVramMb = Math.round((weights * 1.6 + activations + 0.8) * 1024)
-  return MOCK_CATALOG.gpus.map((g) => {
+  return MOCK_GPUS.map((g) => {
     const ratio = g.vramMb / requiredVramMb
     const fit: GpuFit = ratio >= 1.6 ? 'RECOMMENDED' : ratio >= 1.15 ? 'OK' : ratio >= 1 ? 'TIGHT' : 'INSUFFICIENT'
     const reason =
@@ -150,7 +150,7 @@ export const jobHandlers = [
   // ── 카탈로그(제안 스펙, job.md §1-2) ──
   catalogGet(CATALOG_PATHS.workloads, MOCK_CATALOG.workloads),
   catalogGet(CATALOG_PATHS.baseModels, MOCK_CATALOG.baseModels),
-  catalogGet(CATALOG_PATHS.gpus, MOCK_CATALOG.gpus),
+  catalogGet(CATALOG_PATHS.gpus, MOCK_GPUS),
 
   // ── 견적(제안) ──
   http.post(`${URL}/estimate`, async ({ request }) => {
@@ -159,7 +159,7 @@ export const jobHandlers = [
     const r = estimateRequestSchema.safeParse(await request.json().catch(() => null))
     if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
     const { datasetMetadata, gpuId, trainingMode, autoMode, trainingConfig } = r.data
-    if (!MOCK_CATALOG.gpus.some((g) => g.id === gpuId)) return error(400, 'INVALID_INPUT', '선택한 GPU 등급을 찾을 수 없습니다.')
+    if (!MOCK_GPUS.some((g) => g.id === gpuId)) return error(400, 'INVALID_INPUT', '선택한 GPU 등급을 찾을 수 없습니다.')
     const cfg = trainingMode === 'AUTO' ? AUTO_CONFIG[autoMode ?? 'BALANCED'](datasetMetadata.maxSeqLength) : trainingConfig
     if (!cfg) return error(400, 'INVALID_INPUT', 'trainingConfig는 필수값입니다.')
     return HttpResponse.json(estimate(datasetMetadata, gpuId, cfg))

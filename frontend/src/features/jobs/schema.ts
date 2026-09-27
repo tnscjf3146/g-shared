@@ -2,7 +2,8 @@ import * as z from 'zod/mini'
 
 // 경로 상수는 여기(React 의존 없음) — mocks 가 api.ts 를 import 하면 auth store 가 서버 번들로 끌려감(wallet.md §3)
 export const JOBS_PATH = '/jobs'
-/** 카탈로그 3종 — develop 에 있음(2026-09-10 be-feature/job-wizard-apis). gpus 는 살아 있는 워커를 모델명으로 묶어 만든 등급이라 시간에 따라 바뀌고 비어 있을 수 있다 */
+/** 카탈로그 경로. 화면이 실제로 받는 것은 workloads·base-models 둘뿐이고, gpus 는 MSW 핸들러가 그 엔드포인트를 계속 흉내 내기 위해 남겨 둔다
+ *  (앱 코드는 4단계에서 POST /jobs/gpu-options 로 등급을 받는다 — 수정요청서 FE-03) */
 export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-models', gpus: '/gpus' } as const
 /** 데이터셋 메타데이터 등록·조회(develop). 원본 파일 업로드가 아니라 분석 결과 저장 — 파일 저장 위치는 미정(블록체인 회의 6-3) */
 export const DATASETS_PATH = '/datasets'
@@ -60,10 +61,13 @@ export const gpuSchema = z.object({ id: z.number(), model: z.string(), vramMb: z
 /** POST /jobs/gpu-options 응답 원소 — INSUFFICIENT 도 목록에 남아 온다(선택 차단은 화면) */
 export const gpuFitSchema = z.enum(['RECOMMENDED', 'OK', 'TIGHT', 'INSUFFICIENT'])
 export const gpuOptionSchema = z.object({ ...gpuSchema.shape, fit: gpuFitSchema, requiredVramMb: z.number(), reason: z.string(), availableWorkers: z.number() })
+// 이름표용 카탈로그 — 목록·상세·위저드가 id 를 사람이 읽는 이름으로 바꿀 때 쓴다.
+// gpus 는 여기 없다: 살아 있는 워커에 따라 시시각각 변하는 무거운 조회라, 이름표와 한 묶음으로
+// 받으면 그쪽 실패 하나에 워크로드·모델 이름까지 통째로 사라진다(수정요청서 FE-03).
+// 고른 GPU 등급 표시는 4단계에서 고르는 순간 위저드 상태에 담는다.
 export const catalogSchema = z.object({
   workloads: z.array(workloadSchema),
   baseModels: z.array(baseModelSchema),
-  gpus: z.array(gpuSchema),
 })
 
 // ── 데이터셋(back CreateDatasetRequest · DatasetResponse) ──────────
@@ -162,6 +166,10 @@ export const jobDetailSchema = z.object({
   jobId: z.number(),
   externalRef: z.optional(z.nullable(z.string())),
   escrowJobId: z.optional(z.nullable(z.string())), // 온체인 번호 — 예치 전이면 null, FUNDED 취소에 사용
+  // 예치 트랜잭션 해시. CREATED 인데 값이 있으면 "보낸 건 맞는데 서버가 영수증을 아직 못 읽은" 보류 상태다.
+  // 예전에는 이 필드를 스키마에서 버려서 보류가 FundPanel 의 React state 에만 있었다 — 새로고침하면 예치 버튼이
+  // 다시 나오고, 두 번째 서명은 컨트랙트가 ExternalRefAlreadyUsed 로 되돌려 실패 문구로 끝났다(수정요청서 FE-01)
+  fundTxHash: z.optional(z.nullable(z.string())),
   providerWallet: z.optional(z.nullable(hexAddress)),
   priceWei: z.optional(z.nullable(z.string().check(z.regex(/^[0-9]+$/)))),
   clientWallet: z.optional(z.nullable(hexAddress)),
