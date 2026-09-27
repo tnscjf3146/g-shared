@@ -27,11 +27,12 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
             return (
               <label key={w.id} className={`card-quiet flex cursor-pointer flex-col gap-2 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
                 <input type="radio" name="workloadId" value={w.id} checked={on} onChange={() => onChange({ workloadId: w.id, baseModelId: null })} className="sr-only" />
-                <span className="flex items-center gap-2">
-                  <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={on ? 'text-primary' : 'text-text-muted'}>
+                <span className="flex items-start gap-2">
+                  <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`mt-0.5 shrink-0 ${on ? 'text-primary' : 'text-text-muted'}`}>
                     <path d={KIND_ICON[w.kind]} />
                   </svg>
-                  <span className="text-label-sm font-semibold text-dark">{w.name}</span>
+                  {/* 한글이 글자 중간에서 끊기지 않게 낱말 단위로 줄바꿈(break-keep), 카드 높이는 두 줄로 고정 */}
+                  <span className="line-clamp-2 h-[2lh] break-keep text-label-sm font-semibold text-dark">{w.name}</span>
                 </span>
               </label>
             )
