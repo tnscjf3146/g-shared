@@ -16,8 +16,17 @@ const FIT: Record<GpuFit, { label: string; tone: 'success' | 'primary' | 'warnin
   INSUFFICIENT: { label: 'VRAM 부족', tone: 'danger' },
 }
 
-/** 5단계 요약에 그대로 쓰이는 등급 표시 이름 — 카드에 보이는 것과 같은 규칙(제조사 접두어 제거 + VRAM) */
-const gpuLabel = (g: GpuOption) => `${g.model.replace('NVIDIA GeForce ', '')} · ${Math.round(g.vramMb / 1024)} GB`
+/**
+ * 카드·요약에 쓰는 등급 이름. 제조사 접두어와 꼬리의 "GPU" 를 뗀다.
+ *
+ * <p>"GPU 등급" 목록 안에서 이름마다 "GPU" 를 또 붙일 이유가 없고, 무엇보다 이 꼬리가 붙는 것은
+ * 실제 워커가 보고한 모델명뿐이라(예: "RTX 4070 Laptop GPU") 발표용 목업 항목과 한눈에 갈렸다.
+ * 줄 수까지 달라져(두 줄 vs 한 줄) 카드 높이가 들쭉날쭉했다.
+ */
+const gpuName = (model: string) => model.replace('NVIDIA GeForce ', '').replace(/\s*GPU$/i, '')
+
+/** 5단계 요약에 그대로 쓰이는 등급 표시 이름 — 카드에 보이는 것과 같은 규칙 */
+const gpuLabel = (g: GpuOption) => `${gpuName(g.model)} · ${Math.round(g.vramMb / 1024)} GB`
 
 type Props = { spec: JobSpec; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 type Result = { key: string; options: GpuOption[] } | { key: string; error: string }
@@ -128,8 +137,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
                     className="sr-only"
                   />
                   <div className="flex items-start justify-between gap-2">
-                    {/* text-balance: 카드 폭이 좁아 "RTX 4050 Laptop GPU" 가 두 줄이 되는데, 그냥 두면 마지막 "GPU" 한 단어만 넘어가 고아 줄이 된다 */}
-                    <span className="text-balance text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
+                    {/* text-balance: 그래도 접히는 긴 이름이 있으면 두 줄로 고르게 나눈다(마지막 한 단어만 떨어지는 고아 줄 방지) */}
+                    <span className="text-balance text-label-sm font-semibold text-dark">{gpuName(g.model)}</span>
                     {/* shrink-0: 이름이 길면("RTX 4070 Laptop GPU") 배지가 눌려 "추/천" 으로 쪼개진다 */}
                     <StatusBadge tone={FIT[g.fit].tone} className="shrink-0 whitespace-nowrap">
                       {FIT[g.fit].label}
@@ -138,7 +147,9 @@ export function StepGpu({ spec, state, onChange }: Props) {
                   <span className="text-caption tabular-nums text-text-muted">
                     {Math.round(g.vramMb / 1024)} GB · 대기 워커 {g.availableWorkers}대
                   </span>
-                  <span className="text-hint text-text-muted">{g.reason}</span>
+                  {/* 서버가 주는 reason("예상 실행 시간이 가장 짧습니다" · "여유 4 GB 로 넉넉합니다")은 그리지 않는다.
+                      이 줄이 붙는 것은 실제 워커에서 온 등급뿐이라(목업은 빈 문자열) 카드 높이와 정보량이 갈렸다.
+                      고르는 데 필요한 값(VRAM·대기 워커 수·적합도 배지)은 위 두 줄에 이미 다 있다. */}
                 </label>
               )
             })}
