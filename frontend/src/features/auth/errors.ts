@@ -4,6 +4,10 @@ import { ApiError } from '@/lib/fetcher'
 const MESSAGES: Record<string, string> = {
   INVALID_CREDENTIALS: '이메일 또는 비밀번호가 올바르지 않습니다.',
   DUPLICATE_EMAIL: '이미 사용 중인 이메일입니다.',
+  // 같은 이메일로 동시에 가입하면 DB unique 위반이 DUPLICATE_EMAIL 로 번역되지 못하고 이 코드로 나간다
+  // (수정요청서 BE-23 · FE-09). 백엔드가 변환해 주기 전까지는 실제 원인인 중복과 같은 말을 해 준다 —
+  // 폴백("잠시 후 다시 시도")은 다시 눌러도 같은 결과라 사용자를 헛돌게 만든다
+  CONFLICT: '이미 사용 중인 이메일입니다.',
   TOO_MANY_REQUESTS: '시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.',
   EXPIRED_TOKEN: '다시 로그인해 주세요.',
   INVALID_TOKEN: '다시 로그인해 주세요.',

@@ -28,6 +28,18 @@ const JOBS_PER_PAGE = 5 // 내 학습 작업 목록 — 클라이언트 페이�
 
 type Loaded<T> = { status: 'loading' } | { status: 'error' } | { status: 'ready'; data: T }
 
+/**
+ * 도넛·구성비가 쓰는 **전체 기준** 집계. 목록은 한 번에 50건만 받는데, 그 창 안에서 센 값을
+ * "전체 분포" 라고 그려 놓으면 작업이 50건을 넘는 순간 화면이 조용히 틀린 말을 한다(수정요청서 FE-07).
+ *
+ * <p>서버에 집계 엔드포인트가 없어서 `totalElements` 를 쓴다. 8가지 상태를 다 묻지 않고 4번만 묻는다 —
+ * "대기" 는 전체에서 나머지를 뺀 값이라 따로 셀 필요가 없다(대기 = 전체 − 진행 − 완료 − 실패 − 취소).
+ * 목록 조회가 이미 전체 개수를 주므로 total 은 공짜다. 집계 API 가 생기면 이 네 번은 한 번이 된다.
+ */
+export type JobTally = { total: number; running: number; completed: number; failedOrCancelled: number }
+const TALLY_STATUSES = ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const
+const countOf = (status: JobStatus) => getJobs({ status, page: 0, size: 1 }).then((p) => p.totalElements)
+
 export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [jobs, setJobs] = useState<Loaded<JobSummary[]>>({ status: 'loading' })
   const [workers, setWorkers] = useState<Loaded<Worker[]>>({ status: 'loading' })
@@ -37,13 +49,20 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
   const [notice, setNotice] = useState<string | null>(null)
   const [jobPage, setJobPage] = useState(0)
   const [jobView, setJobView] = useState<'latest' | 'oldest' | 'done'>('latest') // 목록 정렬·필터
+  const [tally, setTally] = useState<JobTally | null>(null) // 도넛·구성비의 정본. 실패하면 직전 값 유지(없으면 목록 기준으로 물러섬)
 
   // 응답이 온 뒤에만 setState. 폴링 실패는 조용히(직전 데이터 유지)
   // '오래된순'은 서버 정렬(sort=id,asc)로 다시 받는다 — 최신 50건 안에서만 뒤집으면
   // 작업이 50건을 넘는 순간 "가장 오래된 것"이 거짓말이 된다(리뷰 지적)
   const load = useCallback((silent = false) => {
     getJobs({ page: 0, size: PAGE_SIZE, sort: jobView === 'oldest' ? 'id,asc' : 'id,desc' })
-      .then((p) => setJobs({ status: 'ready', data: p.content }))
+      .then((p) => {
+        setJobs({ status: 'ready', data: p.content })
+        // 목록 응답이 이미 전체 개수를 들고 온다 — 나머지 셋만 따로 세면 도넛이 전체 기준이 된다
+        Promise.all(TALLY_STATUSES.map(countOf))
+          .then(([running, completed, failed, cancelled]) => setTally({ total: p.totalElements, running, completed, failedOrCancelled: failed + cancelled }))
+          .catch(() => {}) // 집계만 실패하면 도넛은 직전 값(또는 목록 기준)으로 — 목록 자체는 이미 떠 있다
+      })
       .catch(() => {
         if (!silent) setJobs({ status: 'error' })
       })
@@ -52,6 +71,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
       .catch(() => {
         if (!silent) setWorkers({ status: 'error' })
       })
+    getNetworkStats()
+      .then(setNetwork)
+      .catch(() => {}) // 실패해도 카드만 '—' — 직전 값을 지우지 않는다
   }, [jobView]) // 정렬이 바뀌면 서버에서 다시 받는다 (아래 useEffect 가 load 변경에 반응해 재호출·폴링 재설정)
 
   useEffect(() => {
@@ -62,16 +84,15 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
     }, POLL_MS)
     return () => clearInterval(poll)
   }, [load])
+  // 카탈로그는 이름표라 한 번만. 네트워크 통계는 "지금 몇 대가 일을 받을 수 있나" 라서 폴링에 같이 태운다 —
+  // 예전에는 마운트 때 한 번만 받아서, 화면을 열어 둔 내내 처음 숫자가 그대로 박혀 있었다(수정요청서 FE-11)
   useEffect(() => {
-    getNetworkStats()
-      .then(setNetwork)
-      .catch(() => {})
     getCatalog()
       .then(setCatalog)
       .catch(() => {})
   }, [])
 
-  // 도넛·KPI 는 전체 기준이라 서버가 준 그대로(최신순) 쓴다
+  // 목록·비용·추세가 보는 창(최신 50건). 도넛만 위 tally 로 전체 기준을 쓴다
   const jobList = jobs.status === 'ready' ? jobs.data : []
 
   // 대시보드에 있을 때도 작업이 끝나면 알린다.
@@ -180,7 +201,7 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
 
       {/* 요약(도넛·KPI·진행 중 / 지표 4칸)은 데이터가 있을 때만 — 0건이면 빈 카드만 잔뜩 뜨므로, 아래 빈 상태 안내에 맡긴다 */}
       {tab === 'jobs'
-        ? (jobs.status === 'loading' || jobList.length > 0) && <JobsOverview jobList={jobList} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
+        ? (jobs.status === 'loading' || jobList.length > 0) && <JobsOverview jobList={jobList} tally={tally} loading={jobs.status === 'loading'} nameOf={nameOf} network={network} now={now} />
         : (workers.status === 'loading' || workerList.length > 0) && <StatTiles items={stats} loading={workers.status === 'loading'} />}
 
       {tab === 'jobs' ? (

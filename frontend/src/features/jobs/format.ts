@@ -140,3 +140,15 @@ export function adapterFileName(jobId: number, name: string | null | undefined, 
   const ext = /\.([a-zA-Z0-9]{1,12}(?:\.(?:gz|zst|bz2))?)$/.exec(path)?.[1]
   return ext ? `${stem}.${ext}` : stem
 }
+
+/**
+ * 모델 이름이 이미 크기를 말하고 있는가 — "Qwen3 0.6B" 옆에 `600M` 배지를 또 붙이지 않기 위한 판정.
+ *
+ * <p>카탈로그의 `params`(600M · 1.7B)는 이름과 **같은 값을 다른 단위로** 적은 것이라, 둘을 나란히 두면
+ * 서로 다른 두 수치처럼 읽힌다(수정요청서 FE-11). 이름에 크기가 없는 모델(예: `klue-roberta-base`)에는
+ * 여전히 필요한 정보라 배지를 없애지 않고, 중복일 때만 감춘다.
+ *
+ * <p>숫자+단위(B·M)가 낱말로 떨어져 있을 때만 크기로 본다 — `Llama-3.2-1B` 의 `3.2` 같은 버전 번호를
+ * 크기로 오해하지 않도록 단위를 반드시 요구한다.
+ */
+export const nameStatesSize = (name: string) => /\d+(\.\d+)?\s*[BM]\b/i.test(name)

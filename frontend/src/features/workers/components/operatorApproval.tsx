@@ -19,7 +19,7 @@ const WAITING_SERVER = '트랜잭션은 확인됐지만 서버 반영을 기다�
 
 export type WorkAvailability = { text: string; tone: 'ok' | 'danger' | 'muted' }
 
-export function OperatorApproval({ worker, onWork }: { worker: Worker; onWork?: (w: WorkAvailability) => void }) {
+export function OperatorApproval({ worker, onWork, tick }: { worker: Worker; onWork?: (w: WorkAvailability) => void; tick?: number }) {
   const [status, setStatus] = useState<OperatorStatus | null | 'error'>(null) // null = 조회 중
   const [approval, setApprovalRaw] = useState<Approval>({ s: 'OPERATOR_APPROVAL_REQUIRED' })
 
@@ -54,9 +54,15 @@ export function OperatorApproval({ worker, onWork }: { worker: Worker; onWork?: 
       ),
     [worker.workerId],
   )
+  // 승인은 이 화면 밖에서도 끝날 수 있다 — 다른 기기·다른 탭에서 MetaMask 로 승인하거나, 보류 중이던 영수증을
+  // 서버가 뒤늦게 반영하는 경우. 마운트 때 한 번만 물어보면 그 사이 승인된 워커가 새로고침 전까지 "승인 필요"로 남는다
+  // (수정요청서 FE-10). 대시보드의 폴링 시계(tick)를 같이 받아 그 주기로 다시 묻는다 — 카드가 스스로 타이머를 돌리지 않는다.
+  // 내 지갑 서명이 진행 중일 때는 건너뛴다: 그때의 화면 문구는 이 컴포넌트가 주인이고, 조회 결과로 덮으면 진행 안내가 끊긴다
+  const pendingApproval = approval.s === 'OPERATOR_APPROVAL_PENDING'
   useEffect(() => {
+    if (pendingApproval) return
     void refresh()
-  }, [refresh])
+  }, [refresh, tick, pendingApproval])
 
   const approve = async () => {
     if (status === null || status === 'error' || !status.providerAddress || !status.operatorAddress || !status.escrowAddress) return

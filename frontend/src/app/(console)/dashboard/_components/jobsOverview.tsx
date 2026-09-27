@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { ACTIVE_STATUSES, formatCost } from '@/features/jobs/format'
 import type { JobSummary } from '@/features/jobs/types'
 import type { NetworkStats } from '@/features/workers/types'
+import type { JobTally } from './dashboardView'
 import { Pager } from './pager'
 
 // 작업 탭 상단(대시보드.png 참고 구조, 프로필 사진 없음): 히어로 배너 + 상태 도넛 → KPI 카드 3개 → 진행 중 작업(진행률)
@@ -18,10 +19,15 @@ const SEGMENTS = [
   { key: '취소/실패', match: (j: JobSummary) => j.status === 'FAILED' || j.status === 'CANCELLED', color: 'var(--color-chart-rose)' },
 ]
 
-export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobList: JobSummary[]; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {
+export function JobsOverview({ jobList, tally, loading, nameOf, network, now }: { jobList: JobSummary[]; tally: JobTally | null; loading: boolean; nameOf: (id: number) => string; network: NetworkStats | null; now: number }) {
   // 끝나지 않은 작업(대기 포함) 전체의 예상 비용 합 — 라벨에 "대기 포함"을 명시해 목록의 개별 비용과 헷갈리지 않게
   const activeCost = jobList.filter((j) => ACTIVE_STATUSES.has(j.status)).reduce((a, j) => a + j.estimatedCost, 0)
-  const counts = SEGMENTS.map((s) => jobList.filter(s.match).length)
+  // 도넛은 **전체 기준** 집계를 쓴다. 받아 둔 50건 안에서 세면 작업이 그보다 많아지는 순간 구성비가 틀린다(FE-07).
+  // 집계가 아직/영영 안 오면(첫 렌더·조회 실패) 목록 기준으로 물러선다 — 틀릴 수 있지만 빈 도넛보다 낫다.
+  // 대기 = 전체 − 진행 − 완료 − (실패+취소). 음수 방어는 폴링 사이 집계·목록이 어긋난 순간을 위한 것
+  const counts = tally
+    ? [tally.running, Math.max(0, tally.total - tally.running - tally.completed - tally.failedOrCancelled), tally.completed, tally.failedOrCancelled]
+    : SEGMENTS.map((s) => jobList.filter(s.match).length)
   const total = counts.reduce((a, b) => a + b, 0)
 
   // 진행 중 작업 — 진행률 내림차순, 3건씩 화살표 페이징
@@ -76,8 +82,10 @@ export function JobsOverview({ jobList, loading, nameOf, network, now }: { jobLi
         {[
           { label: '진행 중 예상 비용', value: formatCost(activeCost), d: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3' },
           { label: '최근 7일 새 작업', value: String(recent7), d: 'M3 3h8v8H3zM13 3h8v5h-8zM13 12h8v9h-8zM3 15h8v6H3z' },
-          // 네트워크 전체(GET /network/stats) — 내 워커가 아니라 "지금 일 받을 수 있는 GPU가 몇 대냐"
-          { label: '네트워크 온라인 워커', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
+          // 네트워크 전체(GET /network/stats) — 내 워커가 아니라 등록된 전체 중 지금 켜져 있는 수.
+          // 서버의 onlineWorkers 는 ONLINE **과 RUNNING** 을 합친 값이다(NetworkStatsResponse). 즉 "지금 비어 있는 GPU"가 아니라
+          // "지금 켜져 있는 GPU"다 — 예전 라벨("온라인 워커")은 비어 있는 대수로 읽히기 쉬웠다(수정요청서 FE-11)
+          { label: '켜져 있는 GPU', value: network ? `${network.onlineWorkers} / ${network.totalWorkers}` : '—', d: 'M3 5h18v11H3zM8 20h8M12 16v4' },
         ].map((k, i) => (
           <section key={k.label} className="card animate-enter flex flex-col gap-4" style={{ animationDelay: `${80 + i * 40}ms` }}>
             <div className="flex items-center gap-2.5">
