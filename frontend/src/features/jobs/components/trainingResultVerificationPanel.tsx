@@ -91,7 +91,8 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
     return (
       <section className="card flex flex-col gap-3 px-6 py-5" aria-busy>
         <div className="h-6 w-40 animate-pulse rounded bg-surface-1" />
-        <div className="h-[170px] animate-pulse rounded bg-surface-1" />
+        {/* 상세는 접힌 채로 뜨므로 차트 높이(170px)를 잡아 둘 이유가 없다 — 로드 뒤 위로 튀는 것 방지 */}
+        <div className="h-[72px] animate-pulse rounded bg-surface-1" />
       </section>
     )
   }
@@ -161,42 +162,57 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
         <p className="text-caption text-text-muted">학습 요약 데이터가 제공되지 않습니다.</p>
       )}
 
-      {/* Loss Curve | Adapter 검증 — 데스크톱 2열, 모바일 세로 */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="card-quiet flex flex-col gap-2 p-4">
-          <h3 className="text-caption font-semibold text-dark">Loss Curve</h3>
-          <LossChart history={t?.lossHistory ?? []} />
-        </div>
-        <div className="card-quiet flex flex-col gap-3 p-4">
-          <h3 className="text-caption font-semibold text-dark">LoRA Adapter 검증</h3>
-          {a ? (
-            <>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                <Stat value={a.tensorCount != null ? a.tensorCount.toLocaleString('ko-KR') : '—'} label="LoRA Tensors" />
-                <Stat value={a.changedTensorCount != null ? a.changedTensorCount.toLocaleString('ko-KR') : '—'} label="Changed" />
-                {/* NaN·Inf 는 0 이 정상 — 0 이 아니면 숫자 자체를 빨갛게(색+텍스트 병행) */}
-                <Stat value={a.nanCount != null ? String(a.nanCount) : '—'} label={(a.nanCount ?? 0) > 0 ? 'NaN (비정상)' : 'NaN'} />
-                <Stat value={a.infCount != null ? String(a.infCount) : '—'} label={(a.infCount ?? 0) > 0 ? 'Inf (비정상)' : 'Inf'} />
-              </div>
-              <p className={`text-caption ${a.valid === false || (a.nanCount ?? 0) > 0 || (a.infCount ?? 0) > 0 ? 'text-danger' : 'text-text-muted'}`}>
-                {a.valid === false
-                  ? '검증 이상 발견 — tensor 수치에 비정상 값이 있습니다.'
-                  : a.changedTensorCount != null && a.tensorCount != null
-                    ? `${a.changedTensorCount.toLocaleString('ko-KR')}/${a.tensorCount.toLocaleString('ko-KR')} tensor 가 학습으로 변경됐고, 비정상 수치(NaN·Inf)는 없습니다.`
-                    : '구조 검증에서 비정상 수치(NaN·Inf)는 발견되지 않았습니다.'}
-              </p>
-            </>
-          ) : (
-            <p className="text-caption text-text-muted">Adapter 검증 데이터가 제공되지 않습니다.</p>
-          )}
-        </div>
+      {/* 상세 셋은 접어 둔다 — 상단 4칸과 무결성만으로 "됐는지" 는 이미 보이고,
+          세 그래프를 늘 펼쳐 두면 상세 화면이 필요 이상으로 길어진다.
+          네이티브 <details> 를 쓴다(stepConfig 의 고급 설정과 같은 방식) — 상태·키보드·스크린리더가 공짜다 */}
+      {/* items-start: 한쪽만 펼치면 stretch 가 닫힌 쪽까지 같은 높이로 늘려, 글자 한 줄짜리 빈 상자가 생긴다(리뷰 지적) */}
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
+        <details className="card-quiet p-4">
+          <summary className="cursor-pointer marker:text-text-muted">
+            <h3 className="inline text-caption font-semibold text-dark">Loss Curve</h3>
+          </summary>
+          <div className="pt-3">
+            <LossChart history={t?.lossHistory ?? []} />
+          </div>
+        </details>
+        <details className="card-quiet p-4">
+          <summary className="cursor-pointer marker:text-text-muted">
+            <h3 className="inline text-caption font-semibold text-dark">LoRA Adapter 검증</h3>
+          </summary>
+          <div className="flex flex-col gap-3 pt-3">
+            {a ? (
+              <>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                  <Stat value={a.tensorCount != null ? a.tensorCount.toLocaleString('ko-KR') : '—'} label="LoRA Tensors" />
+                  <Stat value={a.changedTensorCount != null ? a.changedTensorCount.toLocaleString('ko-KR') : '—'} label="Changed" />
+                  {/* NaN·Inf 는 0 이 정상 — 0 이 아니면 숫자 자체를 빨갛게(색+텍스트 병행) */}
+                  <Stat value={a.nanCount != null ? String(a.nanCount) : '—'} label={(a.nanCount ?? 0) > 0 ? 'NaN (비정상)' : 'NaN'} />
+                  <Stat value={a.infCount != null ? String(a.infCount) : '—'} label={(a.infCount ?? 0) > 0 ? 'Inf (비정상)' : 'Inf'} />
+                </div>
+                <p className={`text-caption ${a.valid === false || (a.nanCount ?? 0) > 0 || (a.infCount ?? 0) > 0 ? 'text-danger' : 'text-text-muted'}`}>
+                  {a.valid === false
+                    ? '검증 이상 발견 — tensor 수치에 비정상 값이 있습니다.'
+                    : a.changedTensorCount != null && a.tensorCount != null
+                      ? `${a.changedTensorCount.toLocaleString('ko-KR')}/${a.tensorCount.toLocaleString('ko-KR')} tensor 가 학습으로 변경됐고, 비정상 수치(NaN·Inf)는 없습니다.`
+                      : '구조 검증에서 비정상 수치(NaN·Inf)는 발견되지 않았습니다.'}
+                </p>
+              </>
+            ) : (
+              <p className="text-caption text-text-muted">Adapter 검증 데이터가 제공되지 않습니다.</p>
+            )}
+          </div>
+        </details>
       </div>
 
       {/* Layer × Module heatmap */}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-caption font-semibold text-dark">Layer별 LoRA Weight 변화</h3>
-        <LoraWeightHeatmap data={a?.layerModuleDeltaMagnitude ?? {}} />
-      </div>
+      <details className="card-quiet p-4">
+        <summary className="cursor-pointer marker:text-text-muted">
+            <h3 className="inline text-caption font-semibold text-dark">Layer별 LoRA Weight 변화</h3>
+          </summary>
+        <div className="pt-3">
+          <LoraWeightHeatmap data={a?.layerModuleDeltaMagnitude ?? {}} />
+        </div>
+      </details>
 
       {/* 결과 무결성 — 검증 hash ↔ 체인 제출 hash. 이 조각만 실패해도 위 섹션은 그대로 */}
       <div className="flex flex-col gap-2 border-t border-hairline pt-4">

@@ -159,7 +159,9 @@ export function WorkloadWizard() {
     }
     if (i === 3) {
       if (!state.gpuId) return 'GPU 등급을 선택해 주세요.'
-      if (!state.estimate) return '견적을 받는 중입니다. 잠시 기다려 주세요.'
+      // 견적이 실패해 비워진 경우에도 여기로 온다 — 그때는 기다려도 다시 시도되지 않으므로
+      // "잠시 기다려 주세요" 라고만 하면 거짓말이 된다. 위 단계에 [다시 시도]가 있다는 것을 같이 알린다
+      if (!state.estimate) return '견적이 아직 없습니다. 계산 중이면 잠시 기다리고, 오류 안내가 보이면 [다시 시도]를 눌러 주세요.'
     }
     return null
   }
