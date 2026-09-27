@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { ApiError } from '@/lib/fetcher'
 import { signup } from '../api'
 import { messageFor } from '../errors'
 import { useZodForm } from '../hooks/use-zod-form'
@@ -27,7 +28,12 @@ export function SignupForm() {
       await signup({ email: data.email, password: data.password, nickname: data.nickname })
       router.push('/login?signup=done')
     } catch (err) {
-      f.setFormError(messageFor(err))
+      // 같은 이메일로 동시에 가입하면 DB unique 위반이 DUPLICATE_EMAIL 로 번역되지 못하고 409 CONFLICT 로 나간다
+      // (수정요청서 BE-23 · FE-09). 폴백("잠시 후 다시 시도")은 다시 눌러도 같은 결과라 사용자를 헛돌게 한다.
+      // 공용 표(errors.ts)가 아니라 여기서만 푼다 — 그 표는 로그인·내 계정 화면도 같이 쓰고,
+      // 거기서 나는 409 는 이메일 중복이 아니다
+      const duplicate = err instanceof ApiError && err.status === 409 && err.code === 'CONFLICT'
+      f.setFormError(duplicate ? '이미 사용 중인 이메일입니다.' : messageFor(err))
       f.setPending(false)
     }
   }

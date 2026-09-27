@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { formatUnits } from '@/features/wallet/ethereum'
-import { AUTO_MODE_META, adapterLabel, formatBytes, formatCost } from '../format'
+import { AUTO_MODE_META, adapterLabel, formatBytes, formatCost, nameStatesSize } from '../format'
 import { ONE_GSC, hasEnough, type Funds } from '../hooks/use-wallet-funds'
 import type { Catalog, JobSpec } from '../types'
 import { EstimateCard } from './estimateCard'
@@ -43,7 +43,8 @@ export function StepUpload({ catalog, spec, state, funds, onRecheck }: Props) {
         {(
           [
             ['워크로드', workload?.name],
-            ['모델', `${model?.name} (${model?.params})`],
+            // 이름이 이미 크기를 말하면 괄호를 붙이지 않는다 — "Qwen3 0.6B (600M)" 은 같은 값을 두 번 쓴 것이다(FE-11, 1단계와 같은 규칙)
+            ['모델', model && (nameStatesSize(model.name) ? model.name : `${model.name} (${model.params})`)],
             [isTrain ? '학습 시작점' : '어댑터', source],
             ...(isTrain ? ([['만들어질 어댑터', `${resultName}${resultVersion ? ` v${resultVersion}` : ''}`]] as [string, string][]) : []),
             ['설정', workload?.kind === 'TRAIN_LORA' ? (typeof state.custom === 'object' && state.custom ? '직접 설정' : `자동 · ${AUTO_MODE_META[state.level].label}`) : '—'],

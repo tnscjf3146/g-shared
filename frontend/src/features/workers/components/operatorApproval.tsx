@@ -48,7 +48,9 @@ export function OperatorApproval({ worker, onWork, tick }: { worker: Worker; onW
           return st
         },
         () => {
-          if (alive.current) setStatus('error')
+          // 폴링 실패로 "확인 실패" 를 띄우지 않는다 — 직전에 받아 둔 답이 있으면 그걸 유지한다(대시보드 load(silent) 와 같은 방침).
+          // 15초마다 한 번씩 실패할 때마다 승인 버튼이 사라졌다 나타나면 쓸 수 없다. 아직 한 번도 못 받았을 때만 error
+          if (alive.current) setStatus((prev) => (prev === null ? 'error' : prev))
           return null
         },
       ),
@@ -57,12 +59,18 @@ export function OperatorApproval({ worker, onWork, tick }: { worker: Worker; onW
   // 승인은 이 화면 밖에서도 끝날 수 있다 — 다른 기기·다른 탭에서 MetaMask 로 승인하거나, 보류 중이던 영수증을
   // 서버가 뒤늦게 반영하는 경우. 마운트 때 한 번만 물어보면 그 사이 승인된 워커가 새로고침 전까지 "승인 필요"로 남는다
   // (수정요청서 FE-10). 대시보드의 폴링 시계(tick)를 같이 받아 그 주기로 다시 묻는다 — 카드가 스스로 타이머를 돌리지 않는다.
-  // 내 지갑 서명이 진행 중일 때는 건너뛴다: 그때의 화면 문구는 이 컴포넌트가 주인이고, 조회 결과로 덮으면 진행 안내가 끊긴다
-  const pendingApproval = approval.s === 'OPERATOR_APPROVAL_PENDING'
+  //
+  // 건너뛰는 것은 **내 지갑과 주고받는 중**일 때뿐이다. 그 문구의 주인은 이 컴포넌트이고 조회 결과로 덮으면 안내가 끊긴다.
+  // 다만 WAITING_SERVER("트랜잭션은 확인됐지만 서버 반영을 기다리는 중")는 같은 PENDING 이어도 성격이 정반대다 —
+  // 지갑 일은 이미 끝났고 **서버가 반영하기를 기다리는 중**이라, 여기서까지 건너뛰면 폴링이 가장 필요한 상태에서
+  // 폴링이 멈춰 사용자가 수동 "다시 확인" 을 누를 때까지 그 문구에 갇힌다(리뷰 지적).
+  // refresh 는 승인 상태를 낮추지 않는다(성공이면 APPROVED 로 올리기만) — 덮어쓸 위험도 없다.
+  const waitingServer = approval.s === 'OPERATOR_APPROVAL_PENDING' && approval.detail === WAITING_SERVER
+  const walletBusy = approval.s === 'OPERATOR_APPROVAL_PENDING' && !waitingServer
   useEffect(() => {
-    if (pendingApproval) return
+    if (walletBusy) return
     void refresh()
-  }, [refresh, tick, pendingApproval])
+  }, [refresh, tick, walletBusy])
 
   const approve = async () => {
     if (status === null || status === 'error' || !status.providerAddress || !status.operatorAddress || !status.escrowAddress) return

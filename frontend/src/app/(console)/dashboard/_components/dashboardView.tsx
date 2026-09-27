@@ -58,7 +58,9 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
     getJobs({ page: 0, size: PAGE_SIZE, sort: jobView === 'oldest' ? 'id,asc' : 'id,desc' })
       .then((p) => {
         setJobs({ status: 'ready', data: p.content })
-        // 목록 응답이 이미 전체 개수를 들고 온다 — 나머지 셋만 따로 세면 도넛이 전체 기준이 된다
+        // 목록 응답이 이미 전체 개수를 들고 온다 — 나머지 셋만 따로 세면 도넛이 전체 기준이 된다.
+        // 도넛은 작업 탭에서만 그린다 — 공급 탭에서까지 세면 쓰지도 않을 질의를 폴링마다 4번씩 보낸다(리뷰 지적)
+        if (tab !== 'jobs') return
         Promise.all(TALLY_STATUSES.map(countOf))
           .then(([running, completed, failed, cancelled]) => setTally({ total: p.totalElements, running, completed, failedOrCancelled: failed + cancelled }))
           .catch(() => {}) // 집계만 실패하면 도넛은 직전 값(또는 목록 기준)으로 — 목록 자체는 이미 떠 있다
@@ -74,13 +76,17 @@ export function DashboardView({ tab }: { tab: DashboardTab }) {
     getNetworkStats()
       .then(setNetwork)
       .catch(() => {}) // 실패해도 카드만 '—' — 직전 값을 지우지 않는다
-  }, [jobView]) // 정렬이 바뀌면 서버에서 다시 받는다 (아래 useEffect 가 load 변경에 반응해 재호출·폴링 재설정)
+  }, [jobView, tab]) // 정렬·탭이 바뀌면 서버에서 다시 받는다 (아래 useEffect 가 load 변경에 반응해 재호출·폴링 재설정)
 
   useEffect(() => {
     void load()
     const poll = setInterval(() => {
-      setNow(Date.now()) // 워커 카드의 "n분 전" 갱신용. 폴링 주기면 충분
-      if (document.visibilityState === 'visible') load(true)
+      // now 는 워커 카드의 "n분 전" 표시이자 승인 상태 재조회 신호(OperatorApproval 의 tick)다.
+      // 그래서 load 와 같은 가시성 조건 안에 둔다 — 밖에 두면 백그라운드 탭에서 다른 폴링은 다 멈춘 채
+      // 워커 수만큼의 operator-status 요청만 계속 나간다(리뷰 지적)
+      if (document.visibilityState !== 'visible') return
+      setNow(Date.now())
+      load(true)
     }, POLL_MS)
     return () => clearInterval(poll)
   }, [load])
