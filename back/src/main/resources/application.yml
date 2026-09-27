@@ -43,6 +43,9 @@ jwt:
   secret: ${JWT_SECRET}
   access-expiration: 30m
   refresh-expiration: 14d
+  # 회전 직후 옛 refresh 토큰을 받아 주는 시간. 재발급 응답이 오기 전에 화면이 넘어가면 브라우저가
+  # 새 쿠키를 못 받는데, 그 뒤의 요청을 재사용으로 취급하면 세션이 죽는다(BE-08). 왕복 한 번이면 충분하다
+  refresh-grace: 30s
 
 # 브라우저에서 API 를 호출할 수 있는 출처.
 # 프론트(:3000)와 API(:8080)는 호스트가 같아도 포트가 달라 서로 다른 출처다.
