@@ -1,6 +1,7 @@
 package com.gshared.back.auth.repository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -24,6 +25,7 @@ import java.util.List;
  * 응답이 오기 전에 화면이 넘어가면 브라우저가 새 쿠키를 못 받는데, 그것을 도둑질로 취급하면 안 된다.
  * 유예가 지난 뒤의 재사용은 진짜 이상 신호이므로 그때는 **그 패밀리만** 폐기한다(다른 기기는 살아 있다).
  */
+@Slf4j
 @Repository
 @RequiredArgsConstructor
 public class RefreshTokenRepository {
@@ -80,11 +82,29 @@ public class RefreshTokenRepository {
                 List.of(key(userId, familyId), prevKey(userId, familyId)),
                 presented, newToken, String.valueOf(ttl.toSeconds()), String.valueOf(grace.toSeconds()));
 
-        // execute 가 null 을 주는 것은 스크립트가 아예 안 돌았다는 뜻 — 보수적으로 재사용 취급(세션을 열어 두지 않는다)
+        // 스크립트가 아예 안 돌았거나(execute 가 null) 모양이 다르면 세션을 열어 두지 않는다 —
+        // 인증에서 "모르겠으면 통과" 는 없다. 다시 로그인하는 불편이 세션을 잘못 여는 것보다 낫다
         if (result == null || result.size() < 2) {
+            log.warn("[AUTH] refresh 회전 스크립트 응답이 비정상 — 재사용으로 처리 (result={})", result);
             return new Rotation(RotateResult.REUSED, null);
         }
-        return new Rotation(RotateResult.valueOf(String.valueOf(result.get(0))), String.valueOf(result.get(1)));
+        // Redis 가 돌려준 값은 신뢰하되 형태는 검사한다. 예상 밖의 문자열이면 valueOf 가 터져 500 이 나가는데,
+        // 인증 경로에서 500 은 가장 나쁜 답이다 — 여기서도 재사용으로 닫는다
+        String code = String.valueOf(result.get(0));
+        RotateResult parsed;
+        try {
+            parsed = RotateResult.valueOf(code);
+        } catch (IllegalArgumentException e) {
+            log.warn("[AUTH] refresh 회전 스크립트가 모르는 결과를 줌 — 재사용으로 처리 (code={})", code);
+            return new Rotation(RotateResult.REUSED, null);
+        }
+        String current = result.get(1) == null ? null : String.valueOf(result.get(1));
+        // ROTATED·GRACE 인데 토큰이 비어 오면 쿠키에 빈 값을 심게 된다 — 그 역시 닫는다
+        if (parsed != RotateResult.REUSED && (current == null || current.isBlank())) {
+            log.warn("[AUTH] refresh 회전 결과 {} 인데 토큰이 비어 있음 — 재사용으로 처리", parsed);
+            return new Rotation(RotateResult.REUSED, null);
+        }
+        return new Rotation(parsed, current);
     }
 
     /** 로그아웃 — 이 기기(패밀리)만 끊는다. 다른 기기의 로그인은 그대로 둔다 */

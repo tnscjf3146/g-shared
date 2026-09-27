@@ -104,8 +104,10 @@ public class AuthService {
                 Claims refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
                 refreshTokenRepository.delete(userId, jwtProvider.refreshFamilyId(refreshClaims));
             } catch (BusinessException e) {
-                // 만료·위조·패밀리 없음(구버전 토큰) — 지울 세션을 특정할 수 없을 뿐이다. 아래는 그대로 진행한다
-                log.debug("[AUTH] 로그아웃 — refresh 쿠키로 세션을 특정하지 못함: {}", e.getMessage());
+                // 만료·위조·패밀리 없음(구버전 토큰) — 지울 세션을 특정할 수 없을 뿐이다. 아래는 그대로 진행한다.
+                // warn 인 이유: 정상 흐름이라면 로그인한 사람의 쿠키는 늘 읽혀야 한다. 이 줄이 자주 찍히면
+                // 배포 직후 구버전 토큰이 도는 중이거나, 남의 쿠키로 로그아웃을 시도하는 중이다 — 둘 다 보고 싶다
+                log.warn("[AUTH] 로그아웃 — refresh 쿠키로 세션을 특정하지 못함 (userId={}): {}", userId, e.getMessage());
             }
         }
 

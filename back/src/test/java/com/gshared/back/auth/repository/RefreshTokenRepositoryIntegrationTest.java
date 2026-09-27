@@ -189,6 +189,44 @@ class RefreshTokenRepositoryIntegrationTest {
     }
 
     @Test
+    @DisplayName("유예 경계 — 만료 직전이면 받아 주고, 지나면 폐기한다")
+    void graceBoundary() throws Exception {
+        String first = token("1");
+        repository.save(USER_ID, family, first, TTL);
+        Duration shortGrace = Duration.ofSeconds(3);
+        repository.rotate(USER_ID, family, first, token("2"), TTL, shortGrace);
+
+        // 만료 직전 — 아직 받아 준다
+        Thread.sleep(1000);
+        assertThat(repository.rotate(USER_ID, family, first, token("x"), TTL, shortGrace).result())
+                .isEqualTo(RotateResult.GRACE);
+
+        // 만료 뒤 — 폐기
+        Thread.sleep(2500);
+        assertThat(repository.rotate(USER_ID, family, first, token("y"), TTL, shortGrace).result())
+                .isEqualTo(RotateResult.REUSED);
+    }
+
+    @Test
+    @DisplayName("유예 안에서 옛 토큰을 되풀이해도 유예가 연장되지는 않는다")
+    void graceIsNotExtendedByReplay() throws Exception {
+        String first = token("1");
+        repository.save(USER_ID, family, first, TTL);
+        Duration shortGrace = Duration.ofSeconds(4);
+        repository.rotate(USER_ID, family, first, token("2"), TTL, shortGrace);
+
+        // 1초 간격으로 계속 되풀이 — 연장된다면 아래 마지막 호출도 GRACE 여야 한다
+        for (int i = 0; i < 3; i++) {
+            Thread.sleep(1000);
+            repository.rotate(USER_ID, family, first, token("r" + i), TTL, shortGrace);
+        }
+        Thread.sleep(1500); // 최초 회전으로부터 4.5초 경과
+
+        assertThat(repository.rotate(USER_ID, family, first, token("z"), TTL, shortGrace).result())
+                .isEqualTo(RotateResult.REUSED);
+    }
+
+    @Test
     @DisplayName("회전한 토큰에는 본 TTL 이, 직전 토큰에는 유예 TTL 이 걸린다")
     void ttlsAreApplied() {
         String first = token("1");
