@@ -92,7 +92,9 @@ public class JobEstimateService {
         JobSpecRequest spec = request.spec();
         BaseModel baseModel = loadBaseModel(spec);
 
-        GpuGrade grade = gpuCatalogService.grades().stream()
+        // 목록(gpu-options)·주문(create)과 **같은 후보 집합**을 본다. 여기만 approvedOnly 가 빠져 있어서,
+        // 화면에서 사라진 등급으로도 견적이 나오고 정작 주문은 거절되는 일이 있었다(수정요청서 BE-12).
+        GpuGrade grade = approvedOnly(gpuCatalogService.grades()).stream()
                 .filter(g -> g.id() == request.gpuId())
                 .findFirst()
                 // 조회 때 있던 등급이 사라졌다는 것은 그 PC 들이 모두 꺼졌다는 뜻 — 기다리면 되는 상황이다.

@@ -56,7 +56,12 @@ export function StepGpu({ spec, state, onChange }: Props) {
         onChange({ estimate: e })
       })
       .catch((e) => {
-        if (!ignore) setLastError({ key, gpuId, message: jobMessageFor(e) })
+        if (ignore) return
+        setLastError({ key, gpuId, message: jobMessageFor(e) })
+        // 실패했으면 **지난 견적도 치운다.** 안 치우면 "지금 작업 가능한 GPU가 없습니다" 바로 아래에
+        // 예전 금액이 그대로 떠 있고, 위저드는 estimate 가 있다는 이유로 다음 단계까지 열어 준다 —
+        // 사용자는 이미 틀린 가격을 보고 주문하게 된다. 실패한 순간에 확실한 것은 "지금은 모른다" 뿐이다
+        onChange({ estimate: null })
       })
     return () => {
       ignore = true
