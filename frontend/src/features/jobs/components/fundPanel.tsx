@@ -36,21 +36,27 @@ type Phase =
 const isRejected = (e: unknown) => (e as { code?: number })?.code === 4001
 
 /**
- * 새로고침해도 예치 보류를 잃지 않도록, 서버가 기억하는 해시(`fundTxHash`)로 시작 상태를 정한다.
+ * 서버가 기억하는 예치 해시(`fundTxHash`)로 보류 상태를 만든다.
  *
  * <p>예전에는 보류가 이 컴포넌트의 state 에만 있어서 새로고침하면 `idle` 로 돌아갔다. 그러면 예치
  * 버튼이 다시 보이고, 두 번째 서명은 컨트랙트가 같은 externalRef 라며 되돌려 "실패" 문구로 끝났다.
  * 돈이 두 번 나가지는 않지만 사용자는 실패했다고 믿게 되고, 그 상태로 취소하면 온체인 자금 추적이
  * 끊긴다(수정요청서 FE-01 → BE-01). 서버는 이미 해시를 들고 있으니 그것을 정본으로 쓴다.
  */
-const initialPhase = (job: JobDetail): Phase =>
-  job.fundTxHash
-    ? { s: 'pendingConfirm', txHash: job.fundTxHash, message: '예치는 체인에 접수됐고 서버가 영수증을 기다리는 중입니다. 트랜잭션을 다시 보내지 말고 아래에서 확인만 다시 눌러 주세요.' }
-    : { s: 'idle' }
+const PENDING_MESSAGE = '예치는 체인에 접수됐고 서버가 영수증을 기다리는 중입니다. 트랜잭션을 다시 보내지 말고 아래에서 확인만 다시 눌러 주세요.'
+const pendingPhase = (hash: string): Phase => ({ s: 'pendingConfirm', txHash: hash, message: PENDING_MESSAGE })
 
 export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => void }) {
-  const [phase, setPhaseRaw] = useState<Phase>(() => initialPhase(job))
-  const [txHash, setTxHash] = useState<string | null>(job.fundTxHash ?? null)
+  const [localPhase, setPhaseRaw] = useState<Phase>({ s: 'idle' })
+  const [localTxHash, setTxHash] = useState<string | null>(null)
+
+  // 서버가 해시를 들고 있으면 그게 정본이다 — state 로 **복사해 두지 않고** 렌더에서 겹쳐 쓴다.
+  // 복사하면 두 가지를 다 놓친다: 마운트 때만 읽으면(초기값) 폴링으로 뒤늦게 온 해시를 영영 못 보고
+  // (상세 화면은 CREATED 동안 3초마다 job prop 만 갈아 끼울 뿐 이 컴포넌트를 다시 마운트하지 않는다),
+  // effect 로 맞추면 같은 상태를 두 군데에 두는 동기화가 된다. 파생이면 둘 다 없다.
+  // 내 흐름이 진행 중일 때(busy·done·rejected)는 건드리지 않는다 — 서명 중 화면이 바뀌면 안 된다
+  const phase: Phase = job.fundTxHash && (localPhase.s === 'idle' || localPhase.s === 'error') ? pendingPhase(job.fundTxHash) : localPhase
+  const txHash = localTxHash ?? job.fundTxHash ?? null
   const busy = phase.s === 'busy'
 
   // 예치는 서명·채굴 대기로 오래 걸린다 — 도중에 벗어나면(작업 상태 폴링으로 리렌더/언마운트) setState 를 건너뛴다

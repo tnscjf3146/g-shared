@@ -49,7 +49,11 @@ export function StepGpu({ spec, state, onChange }: Props) {
     let ignore = false
     estimateJob({ ...(JSON.parse(key) as JobSpec), gpuId })
       .then((e) => {
-        if (!ignore) onChange({ estimate: e })
+        if (ignore) return
+        // 성공했으면 에러를 지운다. 렌더 필터만으로는 부족하다 — 같은 등급을 떠났다 되돌아오면
+        // (A 실패 → B → 다시 A) 키가 도로 맞아떨어져, 새 견적이 떠 있는데 옛 에러 배너가 같이 남는다(리뷰 지적)
+        setLastError(null)
+        onChange({ estimate: e })
       })
       .catch((e) => {
         if (!ignore) setLastError({ key, gpuId, message: jobMessageFor(e) })
@@ -100,7 +104,19 @@ export function StepGpu({ spec, state, onChange }: Props) {
                   className={`card-quiet flex cursor-pointer flex-col gap-2 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}
                 >
                   {/* 고른 등급의 표시 이름을 같이 적어 둔다 — 5단계 요약이 따로 /gpus 를 받지 않아도 되고, 목록이 아직 안 온 시점에도 "—" 가 되지 않는다 */}
-                  <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, gpuLabel: gpuLabel(g), estimate: null })} className="sr-only" />
+                  <input
+                    type="radio"
+                    name="gpuId"
+                    value={g.id}
+                    checked={on}
+                    // 고를 때 에러도 같이 지운다(이벤트 핸들러라 효과 안 동기 setState 문제가 없다) — 안 지우면
+                    // A 실패 → B → 다시 A 로 돌아왔을 때 옛 에러가 새 요청이 도는 동안 그대로 떠 있다
+                    onChange={() => {
+                      setLastError(null)
+                      onChange({ gpuId: g.id, gpuLabel: gpuLabel(g), estimate: null })
+                    }}
+                    className="sr-only"
+                  />
                   <div className="flex items-start justify-between gap-2">
                     {/* text-balance: 카드 폭이 좁아 "RTX 4050 Laptop GPU" 가 두 줄이 되는데, 그냥 두면 마지막 "GPU" 한 단어만 넘어가 고아 줄이 된다 */}
                     <span className="text-balance text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>

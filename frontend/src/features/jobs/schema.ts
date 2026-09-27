@@ -2,7 +2,8 @@ import * as z from 'zod/mini'
 
 // 경로 상수는 여기(React 의존 없음) — mocks 가 api.ts 를 import 하면 auth store 가 서버 번들로 끌려감(wallet.md §3)
 export const JOBS_PATH = '/jobs'
-/** 카탈로그 3종 — develop 에 있음(2026-09-10 be-feature/job-wizard-apis). gpus 는 살아 있는 워커를 모델명으로 묶어 만든 등급이라 시간에 따라 바뀌고 비어 있을 수 있다 */
+/** 카탈로그 경로. 화면이 실제로 받는 것은 workloads·base-models 둘뿐이고, gpus 는 MSW 핸들러가 그 엔드포인트를 계속 흉내 내기 위해 남겨 둔다
+ *  (앱 코드는 4단계에서 POST /jobs/gpu-options 로 등급을 받는다 — 수정요청서 FE-03) */
 export const CATALOG_PATHS = { workloads: '/workloads', baseModels: '/base-models', gpus: '/gpus' } as const
 /** 데이터셋 메타데이터 등록·조회(develop). 원본 파일 업로드가 아니라 분석 결과 저장 — 파일 저장 위치는 미정(블록체인 회의 6-3) */
 export const DATASETS_PATH = '/datasets'

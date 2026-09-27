@@ -209,10 +209,14 @@ export function TrainingResultVerificationPanel({ job }: { job: JobDetail }) {
               <span className="text-text-muted">Backend </span>
               {shortHash(backendHash)}
             </span>
-            <span className="text-caption tabular-nums text-dark" title={chainHash ?? undefined}>
-              <span className="text-text-muted">{chainHashLabel} </span>
-              {chainHash ? shortHash(chainHash) : '—'}
-            </span>
+            {/* 체인을 못 읽었을 때는 이 줄을 아예 그리지 않는다 — 내용이 Backend 줄과 바이트까지 같은 값이라,
+                출처만 다른 라벨을 달아 두면 서로 다른 두 증거를 맞춰 본 것처럼 보인다(리뷰 지적) */}
+            {fromChain && (
+              <span className="text-caption tabular-nums text-dark" title={fromChain}>
+                <span className="text-text-muted">{chainHashLabel} </span>
+                {shortHash(fromChain)}
+              </span>
+            )}
             {hashMatch == null ? (
               <span className="text-caption text-text-muted">{backendHash != null && chainHash != null ? '체인 기록을 읽지 못해 대조하지 못했습니다 — 확인 불가' : 'Blockchain 기록 hash 가 제공되지 않습니다.'}</span>
             ) : (

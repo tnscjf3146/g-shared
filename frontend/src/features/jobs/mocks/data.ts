@@ -78,6 +78,14 @@ export const MOCK_JOBS: JobDetail[] = z.array(jobDetailSchema).parse([
   },
   { ...base, jobId: 2, status: 'FAILED', assignedWorkerId: 'worker-22222222-2222-4222-8222-222222222222', failReason: 'CUDA_OOM: 학습 도중 GPU 메모리가 부족했습니다(batch 16 × max length 40).', progressPercent: 18, progressEpoch: 1, progressTotalEpochs: 3, actualRuntimeSec: 900, createdAt: '2026-09-08T11:00:00', startedAt: '2026-09-08T11:05:00', finishedAt: '2026-09-08T11:20:00' },
   { ...base, jobId: 1, status: 'CANCELLED', createdAt: '2026-09-07T10:00:00' },
+  // 예치 보류 — 트랜잭션은 보냈는데 서버가 아직 영수증을 못 읽은 상태(CREATED + fundTxHash + escrowJobId 없음).
+  // 목업에 이 모양이 없어서 FE-01(새로고침 후 보류 복원 · 보류 중 취소 차단)을 화면으로 확인할 길이 없었다.
+  // 자동 전이(MOCK_ADVANCE_MS)에 걸리지 않게 createdAt 을 과거로 둔다
+  {
+    ...base, jobId: 9, status: 'CREATED',
+    fundTxHash: '0x' + 'ab'.repeat(32), escrowJobId: null,
+    createdAt: '2026-09-06T09:00:00',
+  },
 ])
 
 /** 목업 전용 자동 전이 간격(ms): 생성 → FUNDED → ASSIGNED → RUNNING → 진행률 +10%/틱 → COMPLETED */

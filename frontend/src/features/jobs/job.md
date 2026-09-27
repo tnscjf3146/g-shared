@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | `GET /api/workloads` | — | `[{ id, kind: TRAIN_LORA\|INFERENCE\|EVALUATION, name, description("" 가능) }]` | |
 | `GET /api/base-models` | — | `[{ id, name, params("7B"), workloadIds[] }]` params 는 서버가 만든 표기 | |
-| `GET /api/gpus` | — | `[{ id, model, vramMb, hourlyPrice: 0 }]` **살아 있는 워커를 모델명으로 묶은 등급** — 시간에 따라 바뀌고 빈 배열 가능. `hourlyPrice` 는 과금이 토큰 기준이라 0 → 화면에 안 씀 | |
+| `GET /api/gpus` | — | `[{ id, model, vramMb, hourlyPrice: 0 }]` **살아 있는 워커를 모델명으로 묶은 등급**. 2026-09-27 부터 프런트는 이 엔드포인트를 쓰지 않는다(FE-03) — 이름표 카탈로그와 한 묶음으로 받다가 그쪽 실패에 화면 전체가 끌려갔다. 등급은 4단계의 `POST /jobs/gpu-options` 가 준다 | |
 | `POST /api/jobs/gpu-options` | `JobSpec`(평평) | `[{ …gpu, fit: RECOMMENDED\|OK\|TIGHT\|INSUFFICIENT, requiredVramMb, reason, availableWorkers }]` INSUFFICIENT 도 포함(선택 차단은 화면). 저장 안 함 | `NO_AVAILABLE_WORKER` 409, `NO_FEASIBLE_GPU`/`SCHEDULER_REJECTED` 422, `SCHEDULER_UNAVAILABLE` 503 |
 | `POST /api/jobs/estimate` | `JobSpec + gpuId` | `{ trainingConfig{4값}, predictedRuntimeSec, estimatedCost }` AUTO 면 Scheduler 가 정한 설정. 저장 안 함 | 위와 같음 |
 | `POST /api/datasets` | `{ sizeBytes, sampleCount, totalTokens, effectiveTokens, avgSeqLength, maxSeqLength, dataHash?(66), storageUri?(512) }` **메타만**(원본 파일 X) | `201 { datasetId, …같은 필드, createdAt }` | `INVALID_INPUT` 400 |
@@ -155,7 +155,7 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 
 ## 6. 목업(MSW) — `jobHandlers`
 
-- 카탈로그 3 GET(workloads·base-models·gpus): fixture 그대로. `GET /datasets` 는 기존 데이터셋 선택 제거(2026-09-10)와 함께 뺐다.
+- 카탈로그 GET(workloads·base-models): fixture 그대로. `/gpus` 핸들러도 남아 있지만 앱 코드는 부르지 않는다(FE-03). `GET /datasets` 는 기존 데이터셋 선택 제거(2026-09-10)와 함께 뺐다.
 - `POST /jobs/estimate`: AUTO 면 mode 별 고정 설정(SPEED: 1 epoch/…), CUSTOM 이면 받은 설정. `predictedRuntimeSec = sampleCount×epochs / (gpu 계수)` 정도의 단순식, `estimatedCost = ceil(runtime/3600) × hourlyPrice`. **정확할 필요 없음** — 화면용.
 - `POST /jobs`: id 증가, `CREATED` 로 추가. 목업 전용 **자동 전이 타이머**: 5초 뒤 FUNDED → 5초 ASSIGNED → RUNNING(진행률 +10%/3초, epoch 갱신) → COMPLETED(`resultUrl` 가짜). 폴링 UI·상태 배지 전부를 목업만으로 확인.
 - `GET /jobs`: status 필터·페이지 계산 흉내(`page/size`). `GET /jobs/:id`: 404 재현용 id `999`.
