@@ -23,7 +23,9 @@ const FIT: Record<GpuFit, { label: string; tone: 'success' | 'primary' | 'warnin
  * 실제 워커가 보고한 모델명뿐이라(예: "RTX 4070 Laptop GPU") 발표용 목업 항목과 한눈에 갈렸다.
  * 줄 수까지 달라져(두 줄 vs 한 줄) 카드 높이가 들쭉날쭉했다.
  */
-const gpuName = (model: string) => model.replace('NVIDIA GeForce ', '').replace(/\s*GPU$/i, '')
+// 접두어는 "NVIDIA GeForce" 만이 아니다 — 워크스테이션 카드는 "NVIDIA RTX A6000" 처럼 GeForce 가 없다.
+// 하나만 떼면 그 카드에만 "NVIDIA" 가 남아 옆줄과 어긋난다. 표시용 변환이라 실제 model 문자열은 그대로다
+const gpuName = (model: string) => model.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').replace(/\s*GPU$/i, '')
 
 /** 5단계 요약에 그대로 쓰이는 등급 표시 이름 — 카드에 보이는 것과 같은 규칙 */
 const gpuLabel = (g: GpuOption) => `${gpuName(g.model)} · ${Math.round(g.vramMb / 1024)} GB`
