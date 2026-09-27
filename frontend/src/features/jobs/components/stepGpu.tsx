@@ -128,7 +128,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
                   <span className="text-caption tabular-nums text-text-muted">
                     {Math.round(g.vramMb / 1024)} GB · 대기 워커 {g.availableWorkers}대
                   </span>
-                  <span className="text-hint text-text-muted">{g.reason}</span>
+                  {/* 추천 등급의 서버 문구("예상 실행 시간이 가장 짧습니다.")는 안 보인다 — 배지로 충분 */}
+                  {g.fit !== 'RECOMMENDED' && <span className="text-hint text-text-muted">{g.reason}</span>}
                 </label>
               )
             })}

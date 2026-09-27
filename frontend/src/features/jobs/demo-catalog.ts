@@ -5,10 +5,10 @@ import type { BaseModel, GpuOption, Workload } from './types'
 const W = { image: 9001, speech: 9002, multimodal: 9003, code: 9004 }
 
 export const DEMO_WORKLOADS: Workload[] = [
-  { id: W.image, kind: 'TRAIN_LORA', name: '이미지 학습', description: '이미지 생성·분류 모델을 내 이미지 데이터로 미세조정합니다.' },
-  { id: W.speech, kind: 'TRAIN_LORA', name: '음성 학습', description: '음성 인식(받아쓰기) 모델을 내 음성 데이터로 미세조정합니다.' },
-  { id: W.multimodal, kind: 'TRAIN_LORA', name: '멀티모달 학습', description: '이미지와 텍스트를 함께 이해하는 모델을 학습합니다.' },
-  { id: W.code, kind: 'TRAIN_LORA', name: '코드 학습', description: '내 코드 저장소로 코드 생성 모델을 미세조정합니다.' },
+  { id: W.image, kind: 'TRAIN_LORA', name: 'DreamBooth LoRA 이미지 학습', description: '이미지 생성·분류 모델을 내 이미지 데이터로 미세조정합니다.' },
+  { id: W.speech, kind: 'TRAIN_LORA', name: 'PEFT LoRA 음성 학습', description: '음성 인식(받아쓰기) 모델을 내 음성 데이터로 미세조정합니다.' },
+  { id: W.multimodal, kind: 'TRAIN_LORA', name: 'VLM QLoRA 멀티모달 학습', description: '이미지와 텍스트를 함께 이해하는 모델을 학습합니다.' },
+  { id: W.code, kind: 'TRAIN_LORA', name: 'Code SFT 코드 학습', description: '내 코드 저장소로 코드 생성 모델을 미세조정합니다.' },
 ]
 
 // TEXT 자리는 서버의 실제 텍스트 학습 워크로드 id 로 채운다(demoBaseModels)
