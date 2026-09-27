@@ -35,8 +35,14 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response, @AuthenticationPrincipal CustomUserDetails userDetails) {
-        authService.logout(request, response, userDetails.getId());
+    public ResponseEntity<Void> logout(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            @AuthenticationPrincipal CustomUserDetails userDetails,
+            // 어느 기기(패밀리)를 끊을지는 쿠키가 알려 준다 — 없어도 로그아웃 자체는 진행된다(BE-08)
+            @CookieValue(name = "refreshToken", required = false) String refreshToken
+    ) {
+        authService.logout(request, response, userDetails.getId(), refreshToken);
         return ResponseEntity.noContent().build();
     }
 }
