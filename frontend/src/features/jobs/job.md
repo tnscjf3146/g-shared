@@ -174,8 +174,8 @@ AI 스케줄러는 파일을 보지 않고 `DatasetMetadata` 5값(`dataset_size_
 | `INVALID_TRAINING_CONFIG` 400 | 학습 설정 4값 확인 | 2·5단계 |
 | **`NO_AVAILABLE_WORKER` 409** | 지금 일할 수 있는 GPU 가 없습니다. **설정은 그대로 두고** 잠시 후 다시 시도 | 4·5단계 — 기다리면 해결 |
 | **`NO_FEASIBLE_GPU` 422** | 이 설정으로 실행할 수 있는 GPU 가 없습니다. **모델·batch·max length 를 줄여** 주세요 | 4·5단계 — 기다려도 소용없음 |
-| `SCHEDULER_REJECTED` 422 | 스케줄러가 요청을 거절했습니다. 설정을 확인 | 4·5단계 |
-| `SCHEDULER_UNAVAILABLE` 503 | 스케줄러에 연결할 수 없습니다. 잠시 후 재시도 | 4·5단계 |
+| `SCHEDULER_REJECTED` 422 | 이 설정으로는 GPU 추천을 계산할 수 없습니다. 모델을 바꾸거나 설정을 줄이기 | 4·5단계 |
+| `SCHEDULER_UNAVAILABLE` 503 | 지금 GPU 추천을 계산할 수 없습니다. 설정 그대로 잠시 후 재시도 | 4·5단계 |
 
 409(기다리면 됨)와 422(요청을 바꿔야 함)는 사용자에게 할 말이 정반대라 문구를 갈랐다.
 

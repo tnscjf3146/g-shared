@@ -57,7 +57,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
       </header>
 
       {!current && (
-        <div aria-busy aria-label="GPU 추천 계산 중" className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div aria-busy aria-label="GPU 추천 계산 중" className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="card-quiet h-28 animate-pulse" />
           ))}
@@ -76,7 +76,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
       {visible && visible.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="sr-only">GPU 등급</legend>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* AGENTS.md 카드 그리드 규칙: 1 → md 2 → lg 3. md 에서 바로 3열로 가면 카드가 규칙보다 한 칸 좁아져 이름이 두 줄로 접힌다 */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {visible.map((g) => {
               const on = state.gpuId === g.id
               return (
@@ -86,7 +87,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
                 >
                   <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
+                    {/* text-balance: 카드 폭이 좁아 "RTX 4050 Laptop GPU" 가 두 줄이 되는데, 그냥 두면 마지막 "GPU" 한 단어만 넘어가 고아 줄이 된다 */}
+                    <span className="text-balance text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
                     {/* shrink-0: 이름이 길면("RTX 4070 Laptop GPU") 배지가 눌려 "추/천" 으로 쪼개진다 */}
                     <StatusBadge tone={FIT[g.fit].tone} className="shrink-0 whitespace-nowrap">
                       {FIT[g.fit].label}
