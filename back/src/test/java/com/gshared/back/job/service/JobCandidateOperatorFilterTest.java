@@ -207,6 +207,38 @@ class JobCandidateOperatorFilterTest {
     }
 
     @Test
+    @DisplayName("같은 등급에 승인·미승인 워커가 섞여 있으면 승인된 쪽만 남는다 — 등급째 버리지 않는다")
+    void estimateKeepsApprovedWorkerWhenGradeIsMixed() {
+        // 같은 GPU 모델(=같은 등급)인데 공급자가 다른 두 번째 워커. 이쪽은 승인되지 않았다.
+        User other = userRepository.save(User.createUser(
+                "mixed-" + UUID.randomUUID() + "@gshared.io", "encoded", "미승인공급자"));
+        String otherWallet = "0x1111111111111111111111111111111111111111";
+        String otherOperator = "0x2222222222222222222222222222222222222222";
+        other.linkWallet(otherWallet);
+        Worker unapproved = workerRepository.save(Worker.register(
+                "worker-mixed-" + UUID.randomUUID(), other, "hash-" + UUID.randomUUID(),
+                otherOperator, "0.1.0", "Windows 11", true,
+                worker.getGpuModel(), 8188, 900.0, null, "transformer-bench-v1"));
+        unapproved.goOnline(LocalDateTime.now());
+        workerRepository.flush();
+
+        given(chain.isOperator(PROVIDER_WALLET, OPERATOR)).willReturn(Optional.of(true));
+        given(chain.isOperator(otherWallet, otherOperator)).willReturn(Optional.of(false));
+
+        // 승인된 워커가 하나라도 남으면 등급은 살아 있어야 한다 → Scheduler 까지 간다(거기서 끊긴다)
+        assertThatThrownBy(() -> jobEstimateService.estimate(estimateRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
+
+        // 그리고 넘어간 후보는 승인된 워커 하나뿐이다
+        ArgumentCaptor<com.gshared.back.global.client.dto.SchedulerRecommendRequest> captor =
+                ArgumentCaptor.forClass(com.gshared.back.global.client.dto.SchedulerRecommendRequest.class);
+        then(schedulerClient).should().recommend(captor.capture());
+        assertThat(captor.getValue().gpuCandidates()).hasSize(1);
+        assertThat(captor.getValue().gpuCandidates().get(0).workerId()).isEqualTo(worker.getId());
+    }
+
+    @Test
     @DisplayName("OFFLINE + approved=true → 후보 제외")
     void offlineIsExcluded() {
         worker.goOffline();
