@@ -25,12 +25,17 @@ type Result = { key: string; options: GpuOption[] } | { key: string; error: stri
 export function StepGpu({ spec, state, onChange }: Props) {
   const key = JSON.stringify(spec) // 스펙이 바뀌면 다시 추천. 결과에 key 를 같이 두어 "옛 스펙의 결과" 를 로딩으로 취급(effect 안 동기 setState 없음)
   const [result, setResult] = useState<Result | null>(null)
+  // 다시 시도 — 스펙도 등급도 그대로일 때 목록·견적을 **다시 부르는** 유일한 길.
+  // 이게 없으면 잠깐의 409 하나가 막다른 길이 된다: 화면은 "잠시 후 다시 시도해 주세요" 라고 하는데
+  // 두 효과 모두 [key, gpuId] 가 바뀔 때만 다시 돌고, 이미 고른 등급을 다시 눌러도 onChange 가 안 난다.
+  // 기다려도 아무 일이 일어나지 않아, 등급을 바꿨다 되돌아오는 우연한 조작으로만 풀렸다(리뷰 지적)
+  const [retry, setRetry] = useState(0)
 
   useEffect(() => {
     getGpuOptions(JSON.parse(key) as JobSpec)
       .then((options) => setResult({ key, options }))
       .catch((e) => setResult({ key, error: jobMessageFor(e) }))
-  }, [key])
+  }, [key, retry])
 
   const current = result && result.key === key ? result : null
   const options = current && 'options' in current ? current.options : null
@@ -56,14 +61,19 @@ export function StepGpu({ spec, state, onChange }: Props) {
         onChange({ estimate: e })
       })
       .catch((e) => {
-        if (!ignore) setLastError({ key, gpuId, message: jobMessageFor(e) })
+        if (ignore) return
+        setLastError({ key, gpuId, message: jobMessageFor(e) })
+        // 실패했으면 **지난 견적도 치운다.** 안 치우면 "지금 작업 가능한 GPU가 없습니다" 바로 아래에
+        // 예전 금액이 그대로 떠 있고, 위저드는 estimate 가 있다는 이유로 다음 단계까지 열어 준다 —
+        // 사용자는 이미 틀린 가격을 보고 주문하게 된다. 실패한 순간에 확실한 것은 "지금은 모른다" 뿐이다
+        onChange({ estimate: null })
       })
     return () => {
       ignore = true
     }
     // onChange 는 안정된 setState 래퍼
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, gpuId])
+  }, [key, gpuId, retry])
   // 지금 고른 스펙·등급의 에러만 보여 준다 — 등급을 바꾸면 옛 에러는 저절로 사라진다
   const estimateError = lastError && lastError.key === key && lastError.gpuId === gpuId ? lastError.message : null
 
@@ -139,9 +149,14 @@ export function StepGpu({ spec, state, onChange }: Props) {
 
       {/* 견적 — GPU 선택 직후 */}
       {gpuId != null && estimateError && (
-        <p role="alert" className="rounded-md bg-danger-tint px-4 py-3 text-caption text-danger">
-          {estimateError}
-        </p>
+        // 목록도 같이 다시 받는다 — 견적이 409 라는 것은 그 등급의 워커가 빠졌다는 뜻이라,
+        // 옆 카드의 "대기 워커 n대" 도 이미 옛 숫자다. 둘이 어긋난 채로 두면 화면이 서로 다른 말을 한다
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-danger-tint px-4 py-3">
+          <p className="text-caption text-danger">{estimateError}</p>
+          <button type="button" onClick={() => setRetry((n) => n + 1)} className="text-caption font-medium text-danger underline underline-offset-2">
+            다시 시도
+          </button>
+        </div>
       )}
       {gpuId != null && !estimateError && !state.estimate && <div aria-busy aria-label="견적 계산 중" className="card card-featured h-36 animate-pulse" />}
       {gpuId != null && state.estimate && <EstimateCard estimate={state.estimate} stale={false} />}
