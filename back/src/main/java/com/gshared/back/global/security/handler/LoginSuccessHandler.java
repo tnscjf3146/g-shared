@@ -35,8 +35,10 @@ public class LoginSuccessHandler implements AuthenticationSuccessHandler {
         Long id = userDetails.getId();
         Role role = userDetails.getRole();
 
-        String refreshToken = jwtProvider.createRefreshToken(id);
-        refreshTokenRepository.save(id, refreshToken, jwtProperties.refreshExpiration());
+        // 로그인 한 번 = 패밀리 하나. 다른 기기에서 로그인해도 서로 다른 키에 들어가므로 먼저 쓰던 기기가 끊기지 않는다(BE-08)
+        String familyId = jwtProvider.newRefreshFamilyId();
+        String refreshToken = jwtProvider.createRefreshToken(id, familyId);
+        refreshTokenRepository.save(id, familyId, refreshToken, jwtProperties.refreshExpiration());
         addRefreshTokenToCookie(response, refreshToken);
 
         String accessToken = jwtProvider.createAccessToken(id, role);

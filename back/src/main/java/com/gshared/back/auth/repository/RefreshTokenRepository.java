@@ -1,32 +1,126 @@
 package com.gshared.back.auth.repository;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Repository;
 
 import java.time.Duration;
-import java.util.Optional;
+import java.util.List;
 
+/**
+ * Refresh 토큰 보관소.
+ *
+ * <p><b>로그인 한 번 = 패밀리 하나.</b> 키는 사용자당 하나가 아니라 {@code refresh:{userId}:{familyId}} 다.
+ * 예전에는 {@code refresh:{userId}} 한 칸뿐이라, 다른 기기에서 로그인하면 먼저 쓰던 기기의 토큰을 덮어썼고
+ * 그 기기가 재발급을 시도하면 불일치로 판정돼 둘 다 로그아웃됐다(수정요청서 BE-08).
+ *
+ * <p><b>회전은 원자적으로.</b> 예전에는 읽고-비교하고-쓰는 세 단계가 따로 놀아서, 탭 두 개가 같은 토큰으로
+ * 동시에 재발급하면 둘 다 성공한 뒤 서버가 마지막 것만 기억했다. 브라우저에 남은 쿠키가 그것과 다르면
+ * 다음 재발급이 "재사용"으로 판정돼 세션이 통째로 죽었다. 아래 Lua 는 이 셋을 한 번에 처리한다.
+ *
+ * <p><b>직전 토큰에 유예를 둔다.</b> 회전 직후 짧은 시간 동안은 옛 토큰을 들고 온 요청도 받아 준다 —
+ * 응답이 오기 전에 화면이 넘어가면 브라우저가 새 쿠키를 못 받는데, 그것을 도둑질로 취급하면 안 된다.
+ * 유예가 지난 뒤의 재사용은 진짜 이상 신호이므로 그때는 **그 패밀리만** 폐기한다(다른 기기는 살아 있다).
+ */
+@Slf4j
 @Repository
 @RequiredArgsConstructor
 public class RefreshTokenRepository {
 
+    /** 회전 결과 — 호출부가 셋을 구분해 다르게 응답한다 */
+    public enum RotateResult {
+        /** 제시한 토큰이 현재 값이었다 → 새 토큰으로 교체됨 */
+        ROTATED,
+        /** 유예 중인 직전 토큰이었다 → 회전하지 않고 현재 토큰을 그대로 돌려준다(경합한 쪽) */
+        GRACE,
+        /** 현재도 직전도 아니다 → 이 패밀리를 폐기했다 */
+        REUSED,
+    }
+
+    /** 회전 결과와, GRACE 일 때 돌려줄 현재 토큰 */
+    public record Rotation(RotateResult result, String currentToken) {
+    }
+
     private final StringRedisTemplate redisTemplate;
 
-    public void save(Long userId, String refreshToken, Duration ttl) {
-        redisTemplate.opsForValue().set(key(userId), refreshToken, ttl);
+    /*
+     * KEYS[1] = 현재 토큰 키, KEYS[2] = 직전 토큰 키
+     * ARGV[1] = 제시한 토큰, ARGV[2] = 새 토큰, ARGV[3] = 본 TTL(초), ARGV[4] = 유예 TTL(초)
+     *
+     * 반환: {결과, 현재 토큰}
+     *
+     * ⚠️ Redis Cluster 로 옮기면 두 키가 서로 다른 슬롯에 떨어져 CROSSSLOT 오류가 난다
+     * (아래 delete 의 다중 키 DEL 도 같다). 그때는 해시 태그로 묶어야 한다 — refresh:{userId:fid} 처럼.
+     * 지금은 단일 인스턴스라 문제가 없다(보안 리뷰 지적).
+     */
+    private static final RedisScript<List> ROTATE = new DefaultRedisScript<>("""
+            local current = redis.call('GET', KEYS[1])
+            if current == ARGV[1] then
+              redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[4])
+              redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+              return {'ROTATED', ARGV[2]}
+            end
+            if redis.call('GET', KEYS[2]) == ARGV[1] and current then
+              return {'GRACE', current}
+            end
+            redis.call('DEL', KEYS[1])
+            redis.call('DEL', KEYS[2])
+            return {'REUSED', ''}
+            """, List.class);
+
+    /** 로그인 — 이 패밀리의 첫 토큰을 심는다 */
+    public void save(Long userId, String familyId, String refreshToken, Duration ttl) {
+        redisTemplate.opsForValue().set(key(userId, familyId), refreshToken, ttl);
     }
 
-    public Optional<String> findByUserId(Long userId) {
-        String refreshToken = redisTemplate.opsForValue().get(key(userId));
-        return Optional.ofNullable(refreshToken);
+    /**
+     * 제시한 토큰을 새 토큰으로 교체한다. 읽기·비교·쓰기가 한 번에 일어나므로 동시에 들어온 요청 중
+     * 하나만 회전에 성공하고, 나머지는 {@link RotateResult#GRACE} 로 현재 토큰을 받아 간다.
+     */
+    public Rotation rotate(Long userId, String familyId, String presented, String newToken, Duration ttl, Duration grace) {
+        List<?> result = redisTemplate.execute(
+                ROTATE,
+                List.of(key(userId, familyId), prevKey(userId, familyId)),
+                presented, newToken, String.valueOf(ttl.toSeconds()), String.valueOf(grace.toSeconds()));
+
+        // 스크립트가 아예 안 돌았거나(execute 가 null) 모양이 다르면 세션을 열어 두지 않는다 —
+        // 인증에서 "모르겠으면 통과" 는 없다. 다시 로그인하는 불편이 세션을 잘못 여는 것보다 낫다
+        if (result == null || result.size() < 2) {
+            log.warn("[AUTH] refresh 회전 스크립트 응답이 비정상 — 재사용으로 처리 (result={})", result);
+            return new Rotation(RotateResult.REUSED, null);
+        }
+        // Redis 가 돌려준 값은 신뢰하되 형태는 검사한다. 예상 밖의 문자열이면 valueOf 가 터져 500 이 나가는데,
+        // 인증 경로에서 500 은 가장 나쁜 답이다 — 여기서도 재사용으로 닫는다
+        String code = String.valueOf(result.get(0));
+        RotateResult parsed;
+        try {
+            parsed = RotateResult.valueOf(code);
+        } catch (IllegalArgumentException e) {
+            log.warn("[AUTH] refresh 회전 스크립트가 모르는 결과를 줌 — 재사용으로 처리 (code={})", code);
+            return new Rotation(RotateResult.REUSED, null);
+        }
+        String current = result.get(1) == null ? null : String.valueOf(result.get(1));
+        // ROTATED·GRACE 인데 토큰이 비어 오면 쿠키에 빈 값을 심게 된다 — 그 역시 닫는다
+        if (parsed != RotateResult.REUSED && (current == null || current.isBlank())) {
+            log.warn("[AUTH] refresh 회전 결과 {} 인데 토큰이 비어 있음 — 재사용으로 처리", parsed);
+            return new Rotation(RotateResult.REUSED, null);
+        }
+        return new Rotation(parsed, current);
     }
 
-    public void deleteByUserId(Long userId) {
-        redisTemplate.delete(key(userId));
+    /** 로그아웃 — 이 기기(패밀리)만 끊는다. 다른 기기의 로그인은 그대로 둔다 */
+    public void delete(Long userId, String familyId) {
+        redisTemplate.delete(List.of(key(userId, familyId), prevKey(userId, familyId)));
     }
 
-    private String key(Long userId) {
-        return "refresh:" + userId;
+    private String key(Long userId, String familyId) {
+        return "refresh:" + userId + ":" + familyId;
+    }
+
+    private String prevKey(Long userId, String familyId) {
+        return key(userId, familyId) + ":prev";
     }
 }
