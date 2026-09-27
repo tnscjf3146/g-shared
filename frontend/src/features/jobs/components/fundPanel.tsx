@@ -35,9 +35,22 @@ type Phase =
 /** MetaMask code 4001 = 사용자가 팝업에서 거절 */
 const isRejected = (e: unknown) => (e as { code?: number })?.code === 4001
 
+/**
+ * 새로고침해도 예치 보류를 잃지 않도록, 서버가 기억하는 해시(`fundTxHash`)로 시작 상태를 정한다.
+ *
+ * <p>예전에는 보류가 이 컴포넌트의 state 에만 있어서 새로고침하면 `idle` 로 돌아갔다. 그러면 예치
+ * 버튼이 다시 보이고, 두 번째 서명은 컨트랙트가 같은 externalRef 라며 되돌려 "실패" 문구로 끝났다.
+ * 돈이 두 번 나가지는 않지만 사용자는 실패했다고 믿게 되고, 그 상태로 취소하면 온체인 자금 추적이
+ * 끊긴다(수정요청서 FE-01 → BE-01). 서버는 이미 해시를 들고 있으니 그것을 정본으로 쓴다.
+ */
+const initialPhase = (job: JobDetail): Phase =>
+  job.fundTxHash
+    ? { s: 'pendingConfirm', txHash: job.fundTxHash, message: '예치는 체인에 접수됐고 서버가 영수증을 기다리는 중입니다. 트랜잭션을 다시 보내지 말고 아래에서 확인만 다시 눌러 주세요.' }
+    : { s: 'idle' }
+
 export function FundPanel({ job, onFunded }: { job: JobDetail; onFunded: () => void }) {
-  const [phase, setPhaseRaw] = useState<Phase>({ s: 'idle' })
-  const [txHash, setTxHash] = useState<string | null>(null)
+  const [phase, setPhaseRaw] = useState<Phase>(() => initialPhase(job))
+  const [txHash, setTxHash] = useState<string | null>(job.fundTxHash ?? null)
   const busy = phase.s === 'busy'
 
   // 예치는 서명·채굴 대기로 오래 걸린다 — 도중에 벗어나면(작업 상태 폴링으로 리렌더/언마운트) setState 를 건너뛴다

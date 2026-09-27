@@ -1,5 +1,5 @@
-import { catalogSchema, datasetSchema, jobDetailSchema } from '../schema'
-import type { Catalog, Dataset, JobDetail } from '../types'
+import { catalogSchema, datasetSchema, gpuSchema, jobDetailSchema } from '../schema'
+import type { Catalog, Dataset, Gpu, JobDetail } from '../types'
 import * as z from 'zod/mini'
 
 // 고정 fixture(schema 통과값만). 카탈로그는 백엔드 제안 스펙(job.md §1-2)의 모양
@@ -15,12 +15,14 @@ export const MOCK_CATALOG: Catalog = catalogSchema.parse({
     { id: 21, name: 'Llama-3.2-1B', params: '1.2B', workloadIds: [1, 2, 3] },
     { id: 22, name: 'Qwen2.5-1.5B-Instruct', params: '1.5B', workloadIds: [1, 2, 3] },
   ],
-  gpus: [
-    { id: 1, model: 'NVIDIA GeForce RTX 3060', vramMb: 12288, hourlyPrice: 400 },
-    { id: 2, model: 'NVIDIA GeForce RTX 4070', vramMb: 12282, hourlyPrice: 600 },
-    { id: 3, model: 'NVIDIA GeForce RTX 4090', vramMb: 24564, hourlyPrice: 1200 },
-  ],
 })
+
+/** GET /gpus 응답. 카탈로그에서 떼어 냈다 — 이름표(workloads·baseModels)와 달리 살아 있는 워커에 따라 변한다(FE-03) */
+export const MOCK_GPUS: Gpu[] = z.array(gpuSchema).parse([
+  { id: 1, model: 'NVIDIA GeForce RTX 3060', vramMb: 12288, hourlyPrice: 400 },
+  { id: 2, model: 'NVIDIA GeForce RTX 4070', vramMb: 12282, hourlyPrice: 600 },
+  { id: 3, model: 'NVIDIA GeForce RTX 4090', vramMb: 24564, hourlyPrice: 1200 },
+])
 
 /** 등록된 데이터셋(back DatasetResponse). 새로 등록한 것은 id 5000 부터 */
 export const MOCK_DATASETS: Dataset[] = z.array(datasetSchema).parse([

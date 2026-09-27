@@ -16,6 +16,9 @@ const FIT: Record<GpuFit, { label: string; tone: 'success' | 'primary' | 'warnin
   INSUFFICIENT: { label: 'VRAM 부족', tone: 'danger' },
 }
 
+/** 5단계 요약에 그대로 쓰이는 등급 표시 이름 — 카드에 보이는 것과 같은 규칙(제조사 접두어 제거 + VRAM) */
+const gpuLabel = (g: GpuOption) => `${g.model.replace('NVIDIA GeForce ', '')} · ${Math.round(g.vramMb / 1024)} GB`
+
 type Props = { spec: JobSpec; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 type Result = { key: string; options: GpuOption[] } | { key: string; error: string }
 
@@ -35,19 +38,30 @@ export function StepGpu({ spec, state, onChange }: Props) {
   const visible = options ? options.filter((g) => g.fit !== 'INSUFFICIENT') : null
 
   // GPU 를 고르면 견적. 스펙·GPU 가 바뀌면 다시(부모가 gpuId 변경 시 estimate 를 null 로 비운다)
-  const [estimateError, setEstimateError] = useState<string | null>(null)
+  // 에러에 "어느 스펙·어느 등급의 것인지" 를 같이 담는다. 위의 result 와 같은 방식이다 —
+  // 지난 선택의 에러 지우기를 효과 안 동기 setState 대신 렌더에서 걸러 내는 것으로 해결한다
+  const [lastError, setLastError] = useState<{ key: string; gpuId: number; message: string } | null>(null)
   const gpuId = state.gpuId
   useEffect(() => {
     if (gpuId == null) return
+    // ignore: 등급을 빠르게 바꾸면 먼저 보낸 요청이 나중에 도착할 수 있다. 그대로 두면 옛 등급의 견적이
+    // 새 선택 위를 덮어써서, 화면에 보이는 등급과 금액이 서로 다른 것이 된다(수정요청서 FE-06)
+    let ignore = false
     estimateJob({ ...(JSON.parse(key) as JobSpec), gpuId })
       .then((e) => {
-        setEstimateError(null)
-        onChange({ estimate: e })
+        if (!ignore) onChange({ estimate: e })
       })
-      .catch((e) => setEstimateError(jobMessageFor(e)))
+      .catch((e) => {
+        if (!ignore) setLastError({ key, gpuId, message: jobMessageFor(e) })
+      })
+    return () => {
+      ignore = true
+    }
     // onChange 는 안정된 setState 래퍼
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, gpuId])
+  // 지금 고른 스펙·등급의 에러만 보여 준다 — 등급을 바꾸면 옛 에러는 저절로 사라진다
+  const estimateError = lastError && lastError.key === key && lastError.gpuId === gpuId ? lastError.message : null
 
   return (
     <>
@@ -85,7 +99,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
                   key={g.id}
                   className={`card-quiet flex cursor-pointer flex-col gap-2 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}
                 >
-                  <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
+                  {/* 고른 등급의 표시 이름을 같이 적어 둔다 — 5단계 요약이 따로 /gpus 를 받지 않아도 되고, 목록이 아직 안 온 시점에도 "—" 가 되지 않는다 */}
+                  <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, gpuLabel: gpuLabel(g), estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
                     {/* text-balance: 카드 폭이 좁아 "RTX 4050 Laptop GPU" 가 두 줄이 되는데, 그냥 두면 마지막 "GPU" 한 단어만 넘어가 고아 줄이 된다 */}
                     <span className="text-balance text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>

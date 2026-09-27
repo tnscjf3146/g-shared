@@ -74,11 +74,23 @@ export function reissue(): Promise<string | null> {
   return inflight
 }
 
-/** POST /auth/logout(Bearer). 성공/실패와 무관하게 로컬 세션은 비운다 */
+/**
+ * POST /auth/logout(Bearer). 성공/실패와 무관하게 로컬 세션을 비우고 **throw 하지 않는다**.
+ *
+ * <p>예전에는 서버 호출 실패가 그대로 밖으로 나갔다. 호출부가 `await logout()` 뒤에 화면 이동을
+ * 두고 있어서, 401 한 번에 이동이 통째로 건너뛰어졌다 — 로컬 세션은 이미 비워진 뒤라 AuthGate 가
+ * null 을 렌더해 빈 화면에 멈췄다(수정요청서 FE-02).
+ *
+ * <p>access 토큰이 만료(30분)됐으면 재발급을 한 번 받아서 호출한다. 그러지 않으면 서버의 refresh
+ * 세션과 14일짜리 쿠키가 그대로 남는다(FE-02 와 짝인 BE-09). 재발급까지 실패하면 서버 정리는
+ * 포기하고 로컬만 비운다 — 로그아웃은 "못 하면 그냥 둔다" 가 아니라 "최소한 이 브라우저에선 나간다" 다.
+ */
 export async function logout(): Promise<void> {
-  const token = authStore.get().accessToken
   try {
+    const token = authStore.get().accessToken ?? (await reissue())
     if (token) await fetcher<void>('/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+  } catch {
+    // 서버 세션 정리는 best-effort — 네트워크·401 어느 쪽이든 로컬은 아래에서 비운다
   } finally {
     sessionFlag.set(false)
     authStore.signOut()

@@ -80,14 +80,19 @@ export async function getDataset(datasetId: number): Promise<Dataset> {
   return datasetSchema.parse(await authFetch<unknown>(`${DATASETS_PATH}/${datasetId}`))
 }
 
-/** 카탈로그 3종 한 번에. gpus 는 살아 있는 워커 기준이라 빈 배열일 수 있다 */
+/**
+ * 이름표 카탈로그(워크로드·모델) — 둘 다 거의 변하지 않는 목록이라 한 번에 받는다.
+ *
+ * <p>예전에는 `/gpus` 까지 같은 `Promise.all` 에 묶여 있었다. `/gpus` 는 살아 있는 워커를 훑는
+ * 무거운 조회라 혼자 실패하기 쉬운데, 그러면 위저드는 통째로 에러 화면이 되고 대시보드·상세는
+ * 워크로드·모델 이름까지 잃었다 — 정작 그 화면들은 gpus 를 쓰지도 않았다(수정요청서 FE-03).
+ */
 export async function getCatalog(): Promise<Catalog> {
-  const [workloads, baseModels, gpus] = await Promise.all([
+  const [workloads, baseModels] = await Promise.all([
     authFetch<unknown>(CATALOG_PATHS.workloads).then((r) => z.array(workloadSchema).parse(r)),
     authFetch<unknown>(CATALOG_PATHS.baseModels).then((r) => z.array(baseModelSchema).parse(r)),
-    authFetch<unknown>(CATALOG_PATHS.gpus).then((r) => z.array(gpuSchema).parse(r)),
   ])
-  return { workloads, baseModels, gpus }
+  return { workloads, baseModels }
 }
 
 /** POST /jobs/{jobId}/fund { txHash } — 백엔드가 영수증을 직접 읽어 JobFunded 이벤트를 검증한 뒤 FUNDED 로.

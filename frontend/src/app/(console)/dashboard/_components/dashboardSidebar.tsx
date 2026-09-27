@@ -202,10 +202,15 @@ export function DashboardSidebar() {
           type="button"
           title="로그아웃"
           disabled={pending}
+          // logout 은 throw 하지 않지만(auth/api), 이동은 finally 에 둔다 — 이 버튼은 콘솔(AuthGate) 안에 있어서
+          // 세션이 비워진 뒤 이동에 실패하면 guest 가 돼 빈 화면에 갇힌다. 나가는 길은 무슨 일이 있어도 실행돼야 한다
           onClick={async () => {
             setPending(true)
-            await logout()
-            router.replace('/')
+            try {
+              await logout()
+            } finally {
+              router.replace('/')
+            }
           }}
           className={`${item} w-full text-left disabled:opacity-60`}
         >

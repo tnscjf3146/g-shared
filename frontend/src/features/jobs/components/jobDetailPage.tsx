@@ -211,6 +211,11 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
   }
 
   const funded = job.status === 'FUNDED'
+  // 예치는 보냈는데 서버가 아직 영수증을 못 읽은 상태(CREATED + 해시 있음 + 온체인 번호 없음).
+  // 이때 취소하면 escrowJobId 가 없어 서버의 순찰·환불 복구·타임아웃 keeper 가 모두 이 Job 을 놓치고,
+  // 화면에도 번호가 없어 사용자가 직접 회수할 수도 없다(수정요청서 FE-01 → BE-01).
+  // 백엔드가 409 로 막아 주기 전까지 화면에서 먼저 막는다 — 확인이 끝나면(FUNDED) 정상 경로로 취소된다.
+  const fundingPending = job.status === 'CREATED' && !!job.fundTxHash && !job.escrowJobId
   const cancel = async () => {
     setConfirmOpen(false)
     setPending(true)
@@ -247,7 +252,13 @@ export function JobDetailPage({ jobId }: { jobId: number }) {
               블록체인 거래 흐름 보기 →
             </Button>
             {CANCELLABLE_STATUSES.has(job.status) && (
-              <Button variant="secondary" size="sm" disabled={pending} onClick={() => setConfirmOpen(true)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={pending || fundingPending}
+                title={fundingPending ? '예치 확인이 끝나기 전에는 취소할 수 없습니다 — 지금 취소하면 체인에 들어간 GSC 를 추적할 번호(escrowJobId)가 없어 회수 경로가 끊깁니다.' : undefined}
+                onClick={() => setConfirmOpen(true)}
+              >
                 {pending ? '취소 중…' : '작업 취소'}
               </Button>
             )}
