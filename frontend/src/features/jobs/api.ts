@@ -24,6 +24,7 @@ import {
 } from './schema'
 import type { Catalog, FundResponse, CreateDatasetRequest, CreateJobRequest, CreateJobResponse, Dataset, Estimate, EstimateRequest, GpuOption, JobDetail, JobOnchain, JobPage, JobSpec, JobStatus, ResultVerification } from './types'
 import * as z from 'zod/mini'
+import { DEMO_WORKLOADS, demoBaseModels, demoGpuOptions, isDemoId } from './demo-catalog'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const post = (path: string, body: unknown, init: RequestInit = {}) =>
@@ -62,7 +63,15 @@ export function cancelJob(jobId: number): Promise<void> {
 
 /** POST /jobs/gpu-options — 메타데이터·모델·설정으로 GPU 등급별 적합도. 저장 안 함. 워커가 한 대도 없으면 409 NO_AVAILABLE_WORKER */
 export async function getGpuOptions(spec: JobSpec): Promise<GpuOption[]> {
-  return z.array(gpuOptionSchema).parse(await post(`${JOBS_PATH}/gpu-options`, spec))
+  // 발표용 목업(demo-catalog.ts): 목업 워크로드·모델이면 서버를 부르지 않고, 워커가 0대(409)여도 목업 GPU 는 보여 준다
+  if (isDemoId(spec.workloadId) || isDemoId(spec.baseModelId)) return demoGpuOptions([])
+  try {
+    const real = z.array(gpuOptionSchema).parse(await post(`${JOBS_PATH}/gpu-options`, spec))
+    return [...real, ...demoGpuOptions(real)]
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) return demoGpuOptions([])
+    throw e
+  }
 }
 
 /** POST /jobs/estimate — 설정 확정 + 예상 시간·비용. 저장 안 함 */
@@ -92,7 +101,8 @@ export async function getCatalog(): Promise<Catalog> {
     authFetch<unknown>(CATALOG_PATHS.workloads).then((r) => z.array(workloadSchema).parse(r)),
     authFetch<unknown>(CATALOG_PATHS.baseModels).then((r) => z.array(baseModelSchema).parse(r)),
   ])
-  return { workloads, baseModels }
+  // 발표용 목업(demo-catalog.ts) — 서버 목록 뒤에 붙인다
+  return { workloads: [...workloads, ...DEMO_WORKLOADS], baseModels: [...baseModels, ...demoBaseModels(workloads)] }
 }
 
 /** POST /jobs/{jobId}/fund { txHash } — 백엔드가 영수증을 직접 읽어 JobFunded 이벤트를 검증한 뒤 FUNDED 로.
