@@ -6,6 +6,27 @@ import type { WizardState } from './workloadWizard'
 // 1단계: 워크로드 유형(학습 LoRA / 추론 / 평가) → 그 유형을 지원하는 제공 모델
 const KIND_ICON: Record<WorkloadKind, string> = { TRAIN_LORA: 'M4 12l4-4 4 4 4-4', INFERENCE: 'M4 8h9m0 0-3-3m3 3-3 3', EVALUATION: 'M3 12l3-3 3 3 5-6' }
 
+/**
+ * 워크로드 이름을 "기법(영문)" 과 "무엇을 하는지(한글)" 로 나눌 자리를 찾는다.
+ *
+ * <p>이름은 "QLoRA SFT 텍스트 파인튜닝" 처럼 한 문자열로 온다. 접히는 자리를 폭에만 맡기면
+ * 카드마다 줄 수가 달라진다 — 좁으면 "DreamBooth LoRA 이미지 / 학습", 넓으면 한 줄.
+ * 기법과 설명 사이에서 **항상** 끊어야 다섯 장이 같은 모양이 된다.
+ *
+ * <p>나누는 조건을 좁게 잡았다. 다음을 모두 만족할 때만 나눈다:
+ * <ul>
+ *   <li>한글로 시작하지 않는다 — "추론 API 서버" 는 기법 이름이 아니라 그냥 한글 이름이다</li>
+ *   <li>앞부분에 영문자가 있다 — "24시간 추론" 이 "24 / 시간 추론" 으로 갈리지 않게</li>
+ *   <li>한글 바로 앞이 공백이다 — 낱말 경계에서만 끊는다</li>
+ * </ul>
+ * 하나라도 어긋나면 나누지 않고 한 줄로 둔다(그때는 break-keep 이 낱말 단위로 접어 준다).
+ */
+const WORKLOAD_NAME = /^(?![가-힣])(.*[A-Za-z].*?)\s+([가-힣].*)$/
+function splitWorkloadName(name: string): { lead: string; body: string } {
+  const m = WORKLOAD_NAME.exec(name.trim())
+  return m ? { lead: m[1].trim(), body: m[2].trim() } : { lead: '', body: name }
+}
+
 type Props = { catalog: Catalog; state: WizardState; onChange: (p: Partial<WizardState>) => void }
 
 export function StepWorkload({ catalog, state, onChange }: Props) {
@@ -31,8 +52,25 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
                   <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`mt-0.5 shrink-0 ${on ? 'text-primary' : 'text-text-muted'}`}>
                     <path d={KIND_ICON[w.kind]} />
                   </svg>
-                  {/* 한글이 글자 중간에서 끊기지 않게 낱말 단위로 줄바꿈(break-keep), 카드 높이는 두 줄로 고정 */}
-                  <span className="line-clamp-2 h-[2lh] break-keep text-label-sm font-semibold text-dark">{w.name}</span>
+                  {/* 기법(영문)과 설명(한글) 사이에서 항상 끊는다 — 폭에만 맡기면 카드마다 줄 수가 달라진다.
+                      나눌 수 없는 이름은 한 줄로 흐르고, 그때도 break-keep 이 한글을 낱말 단위로 접는다.
+                      높이는 두 줄로 고정해 격자가 흔들리지 않게(line-clamp-2 · h-[2lh], 팀원 작업 유지) */}
+                  {(() => {
+                    const { lead, body } = splitWorkloadName(w.name)
+                    return (
+                      <span className="line-clamp-2 h-[2lh] break-keep text-label-sm font-semibold text-dark">
+                        {lead ? (
+                          <>
+                            {lead}
+                            <br />
+                            {body}
+                          </>
+                        ) : (
+                          body
+                        )}
+                      </span>
+                    )
+                  })()}
                 </span>
               </label>
             )
