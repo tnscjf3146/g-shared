@@ -78,7 +78,14 @@ public class AuthService {
 
         // 유예 밖의 재사용 — 이 패밀리는 이미 폐기됐다(다른 기기의 로그인은 건드리지 않는다)
         if (rotation.result() == RefreshTokenRepository.RotateResult.REUSED) {
+            log.warn("[AUTH] refresh 재사용 감지 — 세션 폐기 (userId={}, fid={})", userId, familyId);
             throw new BusinessException(AuthErrorCode.INVALID_TOKEN);
+        }
+
+        // 유예로 통과한 요청은 남겨 둔다. 정상 사용자에게는 흔한 경합이지만, 훔친 토큰을 내민 경우에도
+        // 같은 길로 들어온다 — 조용히 통과시키면 나중에 무슨 일이 있었는지 알아볼 방법이 없다(보안 리뷰 지적)
+        if (rotation.result() == RefreshTokenRepository.RotateResult.GRACE) {
+            log.warn("[AUTH] 은퇴한 refresh 토큰이 유예 안에서 사용됨 (userId={}, fid={})", userId, familyId);
         }
 
         // ROTATED 면 방금 심은 새 토큰, GRACE 면 경합에서 이긴 쪽이 심어 둔 현재 토큰
@@ -102,7 +109,14 @@ public class AuthService {
         if (refreshToken != null) {
             try {
                 Claims refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
-                refreshTokenRepository.delete(userId, jwtProvider.refreshFamilyId(refreshClaims));
+                // 쿠키가 정말 이 사람 것인지 본다. 키는 호출자 id 로 네임스페이스되니 남의 세션을 지울 수는 없지만,
+                // 확인 없이 지우면 "없는 키를 지우고 성공했다" 가 돼 화면에는 끊겼다고 나온다(보안 리뷰 지적)
+                String subject = refreshClaims.getSubject();
+                if (!String.valueOf(userId).equals(subject)) {
+                    log.warn("[AUTH] 로그아웃 — 쿠키의 주인이 호출자와 다름 (userId={}, cookieSubject={})", userId, subject);
+                } else {
+                    refreshTokenRepository.delete(userId, jwtProvider.refreshFamilyId(refreshClaims));
+                }
             } catch (BusinessException e) {
                 // 만료·위조·패밀리 없음(구버전 토큰) — 지울 세션을 특정할 수 없을 뿐이다. 아래는 그대로 진행한다.
                 // warn 인 이유: 정상 흐름이라면 로그인한 사람의 쿠키는 늘 읽혀야 한다. 이 줄이 자주 찍히면

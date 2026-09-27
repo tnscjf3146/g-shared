@@ -51,6 +51,10 @@ public class RefreshTokenRepository {
      * ARGV[1] = 제시한 토큰, ARGV[2] = 새 토큰, ARGV[3] = 본 TTL(초), ARGV[4] = 유예 TTL(초)
      *
      * 반환: {결과, 현재 토큰}
+     *
+     * ⚠️ Redis Cluster 로 옮기면 두 키가 서로 다른 슬롯에 떨어져 CROSSSLOT 오류가 난다
+     * (아래 delete 의 다중 키 DEL 도 같다). 그때는 해시 태그로 묶어야 한다 — refresh:{userId:fid} 처럼.
+     * 지금은 단일 인스턴스라 문제가 없다(보안 리뷰 지적).
      */
     private static final RedisScript<List> ROTATE = new DefaultRedisScript<>("""
             local current = redis.call('GET', KEYS[1])

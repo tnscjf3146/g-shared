@@ -32,4 +32,13 @@ public record JwtProperties(
         @NotNull(message = "jwt.refresh-grace 설정이 필요합니다.")
         Duration refreshGrace
 ) {
+    /**
+     * 유예를 0(또는 음수)으로 두면 Redis 회전 스크립트가 {@code SET ... EX 0} 을 실행해 오류를 내고,
+     * 재발급이 통째로 500 이 된다 — 기동 때 막는다(보안 리뷰 지적).
+     */
+    public JwtProperties {
+        if (refreshGrace != null && (refreshGrace.isZero() || refreshGrace.isNegative())) {
+            throw new IllegalArgumentException("jwt.refresh-grace 는 0 보다 커야 합니다. (현재: " + refreshGrace + ")");
+        }
+    }
 }
