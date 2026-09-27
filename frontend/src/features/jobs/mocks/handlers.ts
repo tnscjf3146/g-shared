@@ -1,0 +1,474 @@
+import { delay, http, HttpResponse } from 'msw'
+import { API_BASE_URL } from '@/lib/fetcher'
+import { ESCROW_ADDRESS } from '@/features/wallet/ethereum'
+import { CATALOG_PATHS, DATASETS_PATH, JOBS_PATH, createDatasetRequestSchema, createJobRequestSchema, datasetSchema, estimateRequestSchema, jobDetailSchema, jobSpecSchema, jobStatusSchema, renameAdapterRequestSchema } from '../schema'
+import type { AutoMode, Dataset, DatasetMetadata, GpuFit, JobDetail, JobStatus, TrainingConfig } from '../types'
+import { getLinkedWallet } from '@/features/wallet/mocks/handlers'
+import { MOCK_ADVANCE_MS, MOCK_CATALOG, MOCK_DATASETS, MOCK_GPUS, MOCK_JOBS } from './data'
+import * as z from 'zod/mini'
+
+const URL = `${API_BASE_URL}${JOBS_PATH}`
+const error = (status: number, code: string, message: string) => HttpResponse.json({ code, message }, { status })
+const authed = (request: Request) => !!request.headers.get('Authorization')
+const nowLocal = () => new Date().toISOString().replace(/\.\d{3}Z$/, '') // back LocalDateTime 모양(Z 없음)
+
+// 상태는 sessionStorage 에 보존 — 새로고침해도 만든 작업이 남고 자동 전이가 이어진다(탭을 닫으면 fixture 로).
+// 워커 목업처럼 페이지 메모리에만 두면 새로고침마다 사라져 헷갈린다(2026-09-08 경험). 핸들러는 서버(instrumentation)에서도 로드되므로 storage 접근은 방어
+const KEY = 'gshared.mock.jobs'
+const DATASETS_KEY = 'gshared.mock.datasets'
+function loadDatasets(): Dataset[] {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(DATASETS_KEY) : null
+    if (raw) return z.array(datasetSchema).parse(JSON.parse(raw))
+  } catch {
+    /* 깨진 저장값은 버린다 */
+  }
+  return MOCK_DATASETS.map((d) => ({ ...d }))
+}
+let datasets: Dataset[] = loadDatasets()
+let nextDatasetId = Math.max(4999, ...datasets.map((d) => d.datasetId)) + 1
+const fresh = () => MOCK_JOBS.map((j) => ({ ...j }))
+function loadJobs(): JobDetail[] {
+  try {
+    const raw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(KEY) : null
+    if (raw) return z.array(jobDetailSchema).parse(JSON.parse(raw))
+  } catch {
+    /* 깨진 저장값은 버린다 */
+  }
+  return fresh()
+}
+let jobs: JobDetail[] = loadJobs()
+let nextId = Math.max(999, ...jobs.map((j) => j.jobId)) + 1
+function persist() {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(KEY, JSON.stringify(jobs))
+  } catch {
+    /* 저장 불가 환경이면 메모리로만 */
+  }
+}
+function set(jobId: number, patch: Partial<JobDetail>) {
+  jobs = jobs.map((j) => (j.jobId === jobId ? { ...j, ...patch } : j))
+  persist()
+}
+const find = (jobId: number) => jobs.find((j) => j.jobId === jobId)
+const uploaded = new Set<number>() // dataset-upload 목업 상태 — PUT 이 다녀간 jobId
+const adapterUploaded = new Set<number>() // adapter-upload 목업 상태 — 같은 방식
+
+// AUTO 방향 → 설정 (AI build_auto_config 를 단순화)
+const AUTO_CONFIG: Record<AutoMode, (maxSeq: number) => TrainingConfig> = {
+  SPEED: (m) => ({ epochs: 1, batchSize: 32, learningRate: 5e-5, maxLength: Math.min(128, m) }),
+  BALANCED: (m) => ({ epochs: 3, batchSize: 16, learningRate: 3e-5, maxLength: Math.min(512, m) }),
+  TRAINING: (m) => ({ epochs: 5, batchSize: 8, learningRate: 2e-5, maxLength: m }),
+}
+
+// 화면용 단순식: 샘플수 × epochs × 길이 계수 / GPU 계수. 정확할 필요 없음
+function estimate(meta: DatasetMetadata, gpuId: number, cfg: TrainingConfig) {
+  const gpu = MOCK_GPUS.find((g) => g.id === gpuId)!
+  const gpuFactor = gpu.hourlyPrice / 600 // 4070 기준 1.0
+  const predictedRuntimeSec = Math.max(60, Math.round((meta.sampleCount * cfg.epochs * (Math.min(cfg.maxLength, meta.maxSeqLength) / 512)) / (12 * gpuFactor)))
+  const estimatedCost = Math.ceil(predictedRuntimeSec / 3600) * gpu.hourlyPrice
+  return { trainingConfig: cfg, predictedRuntimeSec, estimatedCost }
+}
+
+// GPU 적합도(화면용): 필요 VRAM ≈ 모델 가중치(fp16, params×2) + LoRA/옵티마이저 여유 + 활성값(batch×len). 여유 비율로 등급
+const PARAMS_GB: Record<number, number> = { 11: 0.36, 12: 0.22, 21: 2.4, 22: 3.0 } // 모델 id → fp16 가중치 GB
+function gpuOptions(spec: { baseModelId: number; datasetMetadata: DatasetMetadata; trainingMode: string; autoMode?: AutoMode; trainingConfig?: TrainingConfig; ownModel: boolean }) {
+  const cfg = spec.trainingMode === 'AUTO' ? AUTO_CONFIG[spec.autoMode ?? 'BALANCED'](spec.datasetMetadata.maxSeqLength) : spec.trainingConfig!
+  const weights = PARAMS_GB[spec.baseModelId] ?? 2
+  const activations = (cfg.batchSize * Math.min(cfg.maxLength, spec.datasetMetadata.maxSeqLength)) / 4096 // GB
+  const requiredVramMb = Math.round((weights * 1.6 + activations + 0.8) * 1024)
+  return MOCK_GPUS.map((g) => {
+    const ratio = g.vramMb / requiredVramMb
+    const fit: GpuFit = ratio >= 1.6 ? 'RECOMMENDED' : ratio >= 1.15 ? 'OK' : ratio >= 1 ? 'TIGHT' : 'INSUFFICIENT'
+    const reason =
+      fit === 'RECOMMENDED' ? '여유 있게 돌아갑니다. 배치를 키울 수 있어요.'
+      : fit === 'OK' ? '문제없이 돌아갑니다.'
+      : fit === 'TIGHT' ? 'VRAM 이 빡빡합니다. 최대 길이를 줄이는 걸 권합니다.'
+      : '필요 VRAM 보다 작아 실행할 수 없습니다.'
+    return { ...g, fit, requiredVramMb, reason, availableWorkers: g.id === 2 ? 3 : g.id === 1 ? 1 : 0 }
+  })
+}
+
+// ── 목업 전용 자동 전이: CREATED → FUNDED → ASSIGNED → RUNNING(진행률) → COMPLETED. 단계별 함수라 새로고침 뒤 중간 상태에서 재개 가능 ──
+const timers = new Map<number, ReturnType<typeof setTimeout>>()
+function schedule(jobId: number, ms: number, fn: () => void) {
+  clearTimeout(timers.get(jobId))
+  timers.set(jobId, setTimeout(fn, ms))
+}
+function toFunded(jobId: number) {
+  set(jobId, { status: 'FUNDED' })
+  schedule(jobId, MOCK_ADVANCE_MS.toAssigned, () => toAssigned(jobId))
+}
+function toAssigned(jobId: number) {
+  set(jobId, { status: 'ASSIGNED', assignedWorkerId: 'worker-11111111-1111-4111-8111-111111111111' })
+  schedule(jobId, MOCK_ADVANCE_MS.toRunning, () => toRunning(jobId))
+}
+function toRunning(jobId: number) {
+  const total = find(jobId)?.progressTotalEpochs ?? 3
+  set(jobId, { status: 'RUNNING', startedAt: nowLocal(), progressPercent: 0, progressEpoch: 0, progressTotalEpochs: total })
+  schedule(jobId, MOCK_ADVANCE_MS.progressTick, () => tick(jobId))
+}
+function tick(jobId: number) {
+  const j = find(jobId)
+  if (!j || j.status !== 'RUNNING') return
+  const total = j.progressTotalEpochs ?? 3
+  const pct = Math.min(100, (j.progressPercent ?? 0) + 10)
+  if (pct < 100) {
+    set(jobId, { progressPercent: pct, progressEpoch: Math.max(1, Math.ceil((pct / 100) * total)) })
+    schedule(jobId, MOCK_ADVANCE_MS.progressTick, () => tick(jobId))
+    return
+  }
+  set(jobId, {
+    status: 'COMPLETED', progressPercent: 100, progressEpoch: total, finishedAt: nowLocal(),
+    actualRuntimeSec: Math.round(j.predictedRuntimeSec * 0.92), actualCost: j.estimatedCost,
+    resultHash: '0x' + jobId.toString(16).padStart(64, 'a'), resultUrl: `https://example.com/results/job-${jobId}.tar`,
+  })
+  timers.delete(jobId)
+}
+/** 현재 상태에서 다음 단계 예약(생성 직후·새로고침 뒤 재개 공용) */
+function resume(j: JobDetail) {
+  const next: Partial<Record<JobStatus, [number, () => void]>> = {
+    CREATED: [MOCK_ADVANCE_MS.toFunded, () => toFunded(j.jobId)],
+    FUNDED: [MOCK_ADVANCE_MS.toAssigned, () => toAssigned(j.jobId)],
+    ASSIGNED: [MOCK_ADVANCE_MS.toRunning, () => toRunning(j.jobId)],
+    RUNNING: [MOCK_ADVANCE_MS.progressTick, () => tick(j.jobId)],
+  }
+  const step = next[j.status]
+  if (step) schedule(j.jobId, step[0], step[1])
+}
+// 사용자가 만든 작업(id ≥ 1000)만 자동 전이. fixture 는 고정
+if (typeof window !== 'undefined') jobs.filter((j) => j.jobId >= 1000).forEach(resume)
+
+const toSummary = (j: JobDetail) => ({ jobId: j.jobId, status: j.status, workloadId: j.workloadId, progressPercent: j.progressPercent, estimatedCost: j.estimatedCost, adapterName: j.adapterName, adapterVersion: j.adapterVersion, createdAt: j.createdAt })
+const catalogGet = (path: string, rows: unknown[]) =>
+  http.get(`${API_BASE_URL}${path}`, async ({ request }) => {
+    await delay()
+    return authed(request) ? HttpResponse.json(rows) : error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+  })
+
+export const jobHandlers = [
+  // ── 카탈로그(제안 스펙, job.md §1-2) ──
+  catalogGet(CATALOG_PATHS.workloads, MOCK_CATALOG.workloads),
+  catalogGet(CATALOG_PATHS.baseModels, MOCK_CATALOG.baseModels),
+  catalogGet(CATALOG_PATHS.gpus, MOCK_GPUS),
+
+  // ── 견적(제안) ──
+  http.post(`${URL}/estimate`, async ({ request }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const r = estimateRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    const { datasetMetadata, gpuId, trainingMode, autoMode, trainingConfig } = r.data
+    if (!MOCK_GPUS.some((g) => g.id === gpuId)) return error(400, 'INVALID_INPUT', '선택한 GPU 등급을 찾을 수 없습니다.')
+    const cfg = trainingMode === 'AUTO' ? AUTO_CONFIG[autoMode ?? 'BALANCED'](datasetMetadata.maxSeqLength) : trainingConfig
+    if (!cfg) return error(400, 'INVALID_INPUT', 'trainingConfig는 필수값입니다.')
+    return HttpResponse.json(estimate(datasetMetadata, gpuId, cfg))
+  }),
+
+  // ── GPU 추천(제안) — 메타데이터만 받는다 ──
+  http.post(`${URL}/gpu-options`, async ({ request }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const r = jobSpecSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    return HttpResponse.json(gpuOptions(r.data))
+  }),
+
+  // ── 데이터셋 메타 등록·조회(back DatasetController) — 원본 파일은 받지 않는다 ──
+  http.post(`${API_BASE_URL}${DATASETS_PATH}`, async ({ request }) => {
+    await delay(400)
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const r = createDatasetRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    const d: Dataset = { datasetId: nextDatasetId++, ...r.data, createdAt: nowLocal() }
+    datasets = [d, ...datasets]
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(DATASETS_KEY, JSON.stringify(datasets))
+    } catch {
+      /* 메모리로만 */
+    }
+    return HttpResponse.json(d, { status: 201 })
+  }),
+  http.get(`${API_BASE_URL}${DATASETS_PATH}/:datasetId`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const d = datasets.find((x) => x.datasetId === Number(params.datasetId))
+    return d ? HttpResponse.json(d) : error(404, 'DATASET_NOT_FOUND', 'Dataset을 찾을 수 없습니다.')
+  }),
+
+  // ── Job(back 스펙) ──
+  http.get(URL, async ({ request }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const u = new globalThis.URL(request.url)
+    const statusParam = u.searchParams.get('status')
+    const status = statusParam ? jobStatusSchema.safeParse(statusParam) : null
+    const page = Number(u.searchParams.get('page') ?? 0)
+    const size = Number(u.searchParams.get('size') ?? 10)
+    const all = [...jobs].sort((a, b) => b.jobId - a.jobId).filter((j) => !status || (status.success && j.status === status.data))
+    const content = all.slice(page * size, page * size + size).map(toSummary)
+    return HttpResponse.json({ content, page, totalPages: Math.max(1, Math.ceil(all.length / size)), totalElements: all.length })
+  }),
+
+  http.get(`${URL}/:jobId`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    // 예치 입력값(Escrow_Fund_계약_정리) — 고정 fixture 에 안 두고 응답 시점에 계산: clientWallet 은 실제 연결 지갑
+    return HttpResponse.json({
+      ...job,
+      externalRef: `0x${String(job.jobId).padStart(64, '0')}`,
+      escrowJobId: job.status === 'CREATED' ? null : String(job.jobId),
+      priceWei: `${job.estimatedCost}${'0'.repeat(18)}`,
+      providerWallet: '0x1111111111111111111111111111111111111111',
+      clientWallet: getLinkedWallet(),
+      chainId: 31221,
+      tokenAddress: '0xaCe3c977A539C16668528619F9417589f12C7B22',
+      escrowAddress: ESCROW_ADDRESS, // 배포된 에스크로(wallet/ethereum.ts) — 목업 상세도 실제 주소를 준다
+    })
+  }),
+
+  // 학습 결과 검증(Training_Result_Verification_Panel_Guide) — 백엔드 미구현이라 계약만 고정.
+  // jobId 로 결정적으로 생성(고정 fixture 규칙: 랜덤 금지). 작업 #8 은 legacy 시연용(available=false)
+  http.get(`${URL}/:jobId/result-verification`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (job.status !== 'COMPLETED') return HttpResponse.json({ available: false, reason: 'NOT_COMPLETED' })
+    if (job.jobId === 8) return HttpResponse.json({ available: false, reason: 'LEGACY_JOB' }) // 검증 데이터 이전의 작업
+    const totalSteps = 15
+    // 지수 감쇠 loss — jobId 로 시작값만 달리한다(3.0~3.5). 소수 4자리 고정
+    const startLoss = 3 + (job.jobId % 6) * 0.1
+    const lossHistory = Array.from({ length: totalSteps }, (_, i) => ({
+      step: i + 1,
+      loss: Math.round((1.9 + (startLoss - 1.9) * Math.exp(-i / 5)) * 1e4) / 1e4,
+    }))
+    const modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']
+    const layerModuleDeltaMagnitude = Object.fromEntries(
+      Array.from({ length: 28 }, (_, layer) => [
+        String(layer),
+        // 중간 층·q/v 가 크게 움직이는 전형적 LoRA 패턴을 결정적으로 흉내
+        Object.fromEntries(modules.map((m, mi) => [m, Math.round((0.00003 + 0.0002 * Math.exp(-((layer - 14) ** 2) / 90) * (1 + ((mi * 7 + layer) % 5) * 0.18)) * 1e7) / 1e7])),
+      ]),
+    )
+    return HttpResponse.json({
+      available: true,
+      training: { sampleCount: 240, totalSteps, finalLoss: lossHistory[totalSteps - 1].loss, actualRuntimeSec: job.actualRuntimeSec ?? 5.772, lossHistory },
+      adapter: { tensorCount: 392, changedTensorCount: 386, nonZeroTensorCount: 392, nanCount: 0, infCount: 0, valid: true, layerModuleDeltaMagnitude },
+      integrity: { resultHash: job.resultHash ?? `0x${String(job.jobId).padStart(64, 'a')}` }, // 상세의 resultHash(체인 제출값)와 일치 → "일치" 시연
+    })
+  }),
+
+  // 실시간 이벤트(SSE) — 백엔드와 같은 와이어 형식(`event: <type>` + `data: <json>` + 빈 줄)으로 흘린다.
+  // 이 핸들러가 없으면 목업 모드에서 SSE 경로가 **한 번도 실행되지 않아** 그쪽 버그가 그대로 배포된다.
+  // RUNNING 인 작업만 진행률을 올리고, 100% 에서 JOB_COMPLETED 를 보내고 닫는다.
+  http.get(`${URL}/:jobId/events`, ({ request, params }) => {
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const jobId = job.jobId
+    const encoder = new TextEncoder()
+    let percent = job.progressPercent ?? 0
+    let timer: ReturnType<typeof setInterval> | undefined
+    const stream = new ReadableStream({
+      start(controller) {
+        const send = (type: string, payload: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`event: ${type}\ndata: ${JSON.stringify({ type, jobId, ...payload, updatedAt: new Date().toISOString() })}\n\n`))
+        if (job.status !== 'RUNNING') return // 진행 중이 아니면 연결만 유지(백엔드도 전이 이벤트는 안 준다)
+        timer = setInterval(() => {
+          percent = Math.min(100, percent + 4)
+          // REST 스냅샷도 같이 움직인다 — 안 그러면 이벤트와 상세 응답이 어긋나 종료 경로를 검증할 수 없다
+          job.progressPercent = percent
+          if (percent < 100) send('JOB_PROGRESS', { status: 'RUNNING', progress: percent, currentStep: Math.round((percent / 100) * 15), totalSteps: 15 })
+          else {
+            job.status = 'COMPLETED'
+            send('JOB_COMPLETED', { status: 'COMPLETED', progress: 100, resultAvailable: true })
+            clearInterval(timer)
+            controller.close()
+          }
+        }, 1_500)
+      },
+      cancel() {
+        if (timer) clearInterval(timer)
+      },
+    })
+    return new HttpResponse(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' } })
+  }),
+
+  // 온체인 검증 — 백엔드가 RPC 로 다시 읽은 값. 실제 응답 형태(JobOnchainResponse)를 그대로 흉내낸다.
+  // 예치 전(CREATED)은 available=false + ESCROW_JOB_ID_MISSING, 그 외는 상태에 따라 거래가 쌓인다.
+  http.get(`${URL}/:jobId/onchain`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const escrowJobId = String(job.jobId + 6) // DB job 과 에스크로 슬롯 번호는 다르다 — 화면이 둘을 혼동하지 않는지 보려고 일부러 어긋냄
+    if (job.status === 'CREATED') return HttpResponse.json({ available: false, reason: 'ESCROW_JOB_ID_MISSING', jobId: job.jobId, escrowJobId: null })
+    // 상태별로 체인에 쌓인 거래 — FUND 부터 시작해 진행될수록 늘어난다
+    const base = 11_338_610
+    const hash = (n: number) => `0x${String(n).padStart(8, '0')}${'d'.repeat(48)}${String(job.jobId).padStart(8, '0')}`
+    const txs = [{ type: 'FUND', txHash: hash(1), blockNumber: base, status: 'SUCCESS' }]
+    if (job.status !== 'FUNDED') txs.push({ type: 'ACCEPT', txHash: hash(2), blockNumber: base + 3, status: 'SUCCESS' })
+    if (job.status === 'COMPLETED') txs.push({ type: 'SUBMIT', txHash: hash(3), blockNumber: base + 11, status: 'SUCCESS' })
+    if (job.status === 'CANCELLED' || job.status === 'FAILED') txs.push({ type: 'ABORT', txHash: hash(4), blockNumber: base + 9, status: 'SUCCESS' })
+    const state =
+      job.status === 'COMPLETED' ? 'COMPLETED' : job.status === 'CANCELLED' || job.status === 'FAILED' ? 'CANCELLED' : job.status === 'FUNDED' ? 'FUNDED' : 'ASSIGNED'
+    return HttpResponse.json({
+      available: true,
+      reason: null,
+      jobId: job.jobId,
+      escrowJobId,
+      chain: { chainId: 31221, contractAddress: '0x6617a1b2c3d4e5f60718293a4b5c6d7e8f903c56' },
+      onchain: {
+        state,
+        client: '0xc11e07a11e700000000000000000000000000001',
+        provider: '0x9009d1de7000000000000000000000000000d002',
+        operator: null,
+        price: '1200000000000000000000',
+        resultHash: job.status === 'COMPLETED' ? (job.resultHash ?? `0x${String(job.jobId).padStart(64, 'a')}`) : null,
+        deadline: 1_790_000_000,
+      },
+      evidence: { latestBlockNumber: base + 42, verifiedAt: new Date().toISOString(), source: 'BLOCKCHAIN_RPC' },
+      transactions: txs,
+    })
+  }),
+
+  http.post(URL, async ({ request }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const r = createJobRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_INPUT', r.error.issues[0]?.message ?? '요청이 올바르지 않습니다.')
+    const body = r.data
+    if (!MOCK_CATALOG.workloads.some((w) => w.id === body.workloadId)) return error(404, 'WORKLOAD_NOT_FOUND', '지원하지 않는 Workload입니다.')
+    if (!MOCK_CATALOG.baseModels.some((m) => m.id === body.baseModelId && m.workloadIds.includes(body.workloadId))) return error(404, 'BASE_MODEL_NOT_FOUND', '지원하지 않는 Base Model입니다.')
+    const dataset = datasets.find((d) => d.datasetId === body.datasetId)
+    if (!dataset) return error(404, 'DATASET_NOT_FOUND', 'Dataset을 찾을 수 없습니다.')
+    // 서버가 Scheduler 로 확정하는 부분을 흉내: AUTO 는 방향(trainingPriority)으로, CUSTOM 은 4값 검증
+    const cfg = body.trainingMode === 'AUTO' ? AUTO_CONFIG[body.trainingPriority ?? 'BALANCED'](dataset.maxSeqLength) : body.trainingConfig
+    if (!cfg) return error(400, 'INVALID_TRAINING_CONFIG', 'trainingConfig가 올바르지 않습니다. (epochs·batchSize·learningRate·maxLength 4값 필수)')
+    // 이어서 학습(parentJobId): 내 완료된 학습 작업만 출발점이 될 수 있다 → 버전은 부모+1, 이름은 안 주면 부모 이름을 잇는다
+    let adapterVersion = 1
+    let parentJobId: number | null = null
+    if (body.parentJobId != null) {
+      const parent = find(body.parentJobId)
+      if (!parent) return error(404, 'PARENT_JOB_NOT_FOUND', '이어서 학습할 Job을 찾을 수 없습니다.')
+      if (parent.status !== 'COMPLETED') return error(409, 'PARENT_JOB_NOT_COMPLETED', '완료된 학습 작업의 어댑터만 이어서 학습할 수 있습니다.')
+      if (!parent.resultUrl) return error(404, 'PARENT_ADAPTER_NOT_FOUND', '그 작업의 어댑터 파일을 찾을 수 없습니다.')
+      if (parent.baseModelId !== body.baseModelId) return error(409, 'PARENT_BASE_MODEL_MISMATCH', '이어서 학습할 어댑터는 같은 베이스 모델로 학습한 것이어야 합니다.')
+      parentJobId = parent.jobId
+      adapterVersion = (parent.adapterVersion ?? 1) + 1
+    }
+    const adapterName = body.adapterName?.trim() || (parentJobId != null ? find(parentJobId)?.adapterName : null) || `job-${nextId}-adapter`
+    const est = estimate(dataset, 2, cfg) // 추천 GPU 는 4070 등급으로 고정
+    const job: JobDetail = {
+      jobId: nextId++, status: 'CREATED',
+      workloadId: body.workloadId, baseModelId: body.baseModelId, datasetId: body.datasetId, datasetUploaded: false,
+      hasAdapter: body.hasAdapter === true || parentJobId != null, adapterUploaded: false, // 서버와 같게 — 부모가 있으면 hasAdapter 값과 무관하게 어댑터를 쓴다
+      trainingMode: body.trainingMode, epochs: cfg.epochs, batchSize: cfg.batchSize, learningRate: cfg.learningRate, maxLength: cfg.maxLength,
+      predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, actualRuntimeSec: null, actualCost: null, assignedWorkerId: null,
+      progressPercent: null, progressEpoch: null, progressTotalEpochs: cfg.epochs, resultHash: null, resultUrl: null,
+      adapterName, adapterVersion, parentJobId, failReason: null,
+      createdAt: nowLocal(), startedAt: null, finishedAt: null,
+    }
+    jobs = [job, ...jobs]
+    persist()
+    resume(job)
+    return HttpResponse.json({ jobId: job.jobId, recommendedWorkerId: 'worker-11111111-1111-4111-8111-111111111111', predictedRuntimeSec: est.predictedRuntimeSec, estimatedCost: est.estimatedCost, schedulerModelVersion: 'mock-1', adapterName, adapterVersion }, { status: 201 })
+  }),
+
+  // ── Dataset 원본 업로드(Dataset_Upload_Handoff) — back JobController·StorageController 와 같은 흐름(로컬 목업용) ──
+  http.post(`${URL}/:jobId/dataset-upload`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    if (!find(Number(params.jobId))) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    return HttpResponse.json({ uploadUrl: `${API_BASE_URL}/storage/mock/datasets/${params.jobId}?expires=9999999999&sig=mock` })
+  }),
+  http.put(`${API_BASE_URL}/storage/mock/datasets/:jobId`, async ({ params }) => {
+    uploaded.add(Number(params.jobId)) // 본문은 버린다 — 목업 스토리지는 존재 여부만 기억
+    return new HttpResponse(null, { status: 200 })
+  }),
+  http.post(`${URL}/:jobId/dataset-upload/complete`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    if (!find(Number(params.jobId))) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const verified = uploaded.has(Number(params.jobId))
+    if (verified) set(Number(params.jobId), { datasetUploaded: true }) // back: 검증 통과 시 Job.datasetUploaded 가 true 로
+    return HttpResponse.json({ verified })
+  }),
+
+  // ── 입력 어댑터 .tar 업로드(lora-adapter-frontend-작업 §2) — 데이터셋과 같은 3단 흐름 ──
+  http.post(`${URL}/:jobId/adapter-upload`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const job = find(Number(params.jobId))
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (!job.hasAdapter || job.parentJobId != null) return error(409, 'ADAPTER_NOT_EXPECTED', '어댑터를 쓰지 않는 작업입니다.')
+    return HttpResponse.json({
+      objectKey: `jobs/${params.jobId}/input/adapter.tar`,
+      uploadUrl: `${API_BASE_URL}/storage/mock/adapters/${params.jobId}?expires=9999999999&sig=mock`,
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    })
+  }),
+  http.put(`${API_BASE_URL}/storage/mock/adapters/:jobId`, async ({ params }) => {
+    adapterUploaded.add(Number(params.jobId)) // 본문은 버린다 — 목업 스토리지는 존재 여부만 기억
+    return new HttpResponse(null, { status: 200 })
+  }),
+  http.post(`${URL}/:jobId/adapter-upload/complete`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const id = Number(params.jobId)
+    if (!find(id)) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const body = (await request.json().catch(() => null)) as { sha256?: string; sizeBytes?: number } | null
+    if (!body?.sha256 || !/^[0-9a-f]{64}$/.test(body.sha256)) return error(400, 'INVALID_INPUT', 'sha256은 0x 없는 소문자 64자리 16진수여야 합니다.')
+    const verified = adapterUploaded.has(id)
+    if (verified) set(id, { adapterUploaded: true })
+    return HttpResponse.json({ jobId: id, objectKey: `jobs/${id}/input/adapter.tar`, verified })
+  }),
+
+  // ── 결과 어댑터 이름 변경(job.md §11) — 파일은 그대로, 이름만 ──
+  http.patch(`${URL}/:jobId/adapter-name`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const id = Number(params.jobId)
+    if (!find(id)) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const r = renameAdapterRequestSchema.safeParse(await request.json().catch(() => null))
+    if (!r.success) return error(400, 'INVALID_ADAPTER_NAME', r.error.issues[0]?.message ?? '어댑터 이름이 올바르지 않습니다.')
+    set(id, { adapterName: r.data.adapterName })
+    return HttpResponse.json(find(id))
+  }),
+
+  // 예치 확인 — 백엔드 규격 { txHash } (영수증 검증은 실서버 몫, 목업은 형식만 보고 FUNDED). 멱등: 이미 FUNDED 면 같은 답
+  http.post(`${URL}/:jobId/fund`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const id = Number(params.jobId)
+    const job = find(id)
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    const body = (await request.json().catch(() => null)) as { txHash?: string } | null
+    if (!body?.txHash || !/^0x[0-9a-fA-F]{64}$/.test(body.txHash)) return error(400, 'INVALID_INPUT', 'txHash는 0x로 시작하는 64자리 16진수여야 합니다.')
+    if (job.status !== 'CREATED' && job.status !== 'FUNDED') return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    if (job.status === 'CREATED' && job.datasetUploaded === false) return error(409, 'DATASET_NOT_UPLOADED', '데이터셋 파일이 아직 업로드되지 않았습니다. 업로드를 마친 뒤 예치해주세요.')
+    if (job.status === 'CREATED' && job.hasAdapter && job.parentJobId == null && job.adapterUploaded === false)
+      return error(409, 'ADAPTER_NOT_UPLOADED', '어댑터 파일이 아직 업로드되지 않았습니다. 업로드를 마친 뒤 예치해주세요.')
+    if (job.status === 'CREATED') {
+      set(id, { status: 'FUNDED' })
+      resume(find(id)!)
+    }
+    return HttpResponse.json({ jobId: id, status: 'FUNDED', txHash: body.txHash, escrowJobId: String(id) })
+  }),
+
+  http.post(`${URL}/:jobId/cancel`, async ({ request, params }) => {
+    await delay()
+    if (!authed(request)) return error(401, 'UNAUTHORIZED', '인증이 필요합니다.')
+    const id = Number(params.jobId)
+    const job = find(id)
+    if (!job) return error(404, 'JOB_NOT_FOUND', 'Job을 찾을 수 없습니다.')
+    if (!['CREATED', 'FUNDED', 'ASSIGNED'].includes(job.status)) return error(409, 'INVALID_JOB_STATUS', '현재 상태에서 할 수 없는 작업입니다.')
+    clearTimeout(timers.get(id))
+    timers.delete(id)
+    set(id, { status: 'CANCELLED', finishedAt: nowLocal() })
+    return new HttpResponse(null, { status: 200 })
+  }),
+]

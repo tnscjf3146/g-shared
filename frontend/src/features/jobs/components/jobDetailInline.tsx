@@ -1,0 +1,49 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { getJob } from '../api'
+import { formatDuration, jobStatusMeta } from '../format'
+import type { Catalog, JobDetail, JobSummary } from '../types'
+import { JobProgress } from './jobProgress'
+import { PlainTable } from './plainTable'
+
+// 대시보드 작업 줄 아래에 펼쳐지는 표: 상태 | 작업 종류 | 배정 워커 | 예상 소요 | 진척도.
+// 상태·작업 종류·진척도는 목록 응답(JobSummary)으로 바로, 배정 워커·예상 소요는 GET /jobs/{id} 로 채운다. 목록 폴링으로 상태·진행률이 바뀌면 다시 받는다.
+// GPU 이름은 상세 응답에 없다(워커 1대 = GPU 1개, gpuId 삭제) — 백엔드에 gpuModel 추가를 요청해 둔 상태(job.md §8)
+type State = { status: 'loading' } | { status: 'error' } | { status: 'ready'; job: JobDetail }
+const COLS = ['14%', '20%', '30%', '14%', '22%']
+
+/** "worker-3f2a1b…" — 앞 15자 */
+export const shortWorkerId = (id: string) => (id.length > 15 ? `${id.slice(0, 15)}…` : id)
+
+export function JobDetailInline({ job, catalog }: { job: JobSummary; catalog: Catalog | null }) {
+  const [state, setState] = useState<State>({ status: 'loading' })
+  const { jobId, status, progressPercent } = job
+  useEffect(() => {
+    let alive = true
+    getJob(jobId)
+      .then((j) => alive && setState({ status: 'ready', job: j }))
+      .catch(() => alive && setState((s) => (s.status === 'ready' ? s : { status: 'error' })))
+    return () => {
+      alive = false
+    }
+  }, [jobId, status, progressPercent])
+
+  const workload = catalog?.workloads.find((w) => w.id === job.workloadId)?.name ?? `#${job.workloadId}`
+  const detail = state.status === 'ready' ? state.job : null
+  // 상세 응답 대기 중엔 회색 막대, 실패면 —
+  const pendingCell = state.status === 'loading' ? <span aria-busy aria-label="불러오는 중" className="inline-block h-4 w-24 animate-pulse rounded-xs bg-neutral-tint align-middle" /> : <span className="text-text-muted">—</span>
+
+  return (
+    <PlainTable
+      widths={COLS}
+      cols={[
+        ['상태', jobStatusMeta(job.status, job.failReason, job.cancelReason).label],
+        ['작업 종류', workload],
+        ['배정 워커', detail ? (detail.assignedWorkerId ? <span title={detail.assignedWorkerId}>{shortWorkerId(detail.assignedWorkerId)}</span> : <span className="text-text-muted">미배정</span>) : pendingCell],
+        ['예상 소요', detail ? formatDuration(detail.predictedRuntimeSec) : pendingCell],
+        ['진척도', job.status === 'RUNNING' ? <JobProgress job={job} /> : <span className="text-text-muted">—</span>],
+      ]}
+    />
+  )
+}

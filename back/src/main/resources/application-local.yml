@@ -1,0 +1,59 @@
+spring:
+  config:
+    import: "optional:file:.env[.properties]"
+
+  datasource:
+    # 호스트·포트는 기본값이 그대로 예전 값이라 아무것도 설정하지 않으면 동작이
+    # 같다. 덮어쓸 수 있게 한 것은 이미 3306 을 쓰는 MySQL 이 깔린 기계에서
+    # 개발용 인스턴스를 따로 띄울 수 있어야 하기 때문이다.
+    url: "jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate  # 스키마는 Flyway 가 만들고, JPA 는 검증만
+    properties:
+      hibernate:
+        format_sql: true    # SQL 줄바꿈 정렬
+        highlight_sql: true # SQL 키워드에 색
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+# 로컬은 프론트(Next.js) 개발 서버 주소를 그대로 쓴다.
+cors:
+  allowed-origins: http://localhost:3000
+
+wallet-auth:
+  domain: localhost:3000
+  uri: http://localhost:3000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"        # 로컬에선 전부 열어둠
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  charset:
+    console: UTF-8          # 윈도우 콘솔 한글 깨짐 방지
+  level:
+    root: info
+    com.gshared.back: debug              # 내 코드
+    org.hibernate.SQL: debug             # 실행되는 SQL
+    org.hibernate.orm.jdbc.bind: trace   # ? 에 들어간 실제 값
+    org.springframework.security: debug  # 인증 필터 흐름
+    org.springframework.web: debug       # 요청 매핑
+
+cookie:
+  secure: false
+
+# 로컬·테스트는 모든 요청이 127.0.0.1 하나에서 온다 — IP 제한이 의미가 없고, 통합 테스트 스위트가 1분에 100회를 넘긴다.
+rate-limit:
+  max-requests-per-minute: 100000

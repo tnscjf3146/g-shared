@@ -1,0 +1,64 @@
+services:
+  backend:
+    build: ./back            # ./back의 Dockerfile로 이미지 빌드
+    container_name: gshared-backend
+    ports:
+      - "127.0.0.1:8080:8080"  # 서버 내부(nginx)만 접근 — 도커가 UFW 를 우회해 바깥에 8080 이 직통으로 열리는 것을 차단
+    restart: unless-stopped   # 서버 재부팅·크래시 시 자동 재시작
+    env_file:
+      - .env                  # .env 값을 통째로 컨테이너에 전달
+    environment:
+      SPRING_PROFILES_ACTIVE: prod   # prod 프로필로 기동
+      SCHEDULER_BASE_URL: http://ai:8000   # AI Scheduler 내부 호출 주소 (컨테이너 이름으로 접근)
+    volumes:
+      - ./logs:/app/logs      # 애플리케이션 로그를 서버에 보관
+      - ./storage:/app/storage   # 데이터셋·학습 결과물 오브젝트 (LocalObjectStorage) — 컨테이너 재생성해도 유지
+    depends_on:
+      - mysql                 # mysql이 먼저 뜬 뒤 backend 시작
+      - redis                 # redis도 먼저 기동
+
+  mysql:
+    image: mysql:8            # 도커허브 공식 MySQL 8 이미지
+    container_name: gshared-mysql
+    ports:
+      - "127.0.0.1:3306:3306" # 루프백만 — 도커가 UFW 를 우회해 3306 이 인터넷에 직통으로 열리는 것을 차단 (GUI 접속은 SSH 터널)
+    restart: unless-stopped
+    environment:              # 값은 .env 파일에서 가져옴 (git에 비번 안 남김)
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}   # root(관리자) 비밀번호
+      MYSQL_DATABASE: ${MYSQL_DATABASE}             # 시작 시 자동 생성할 DB
+      MYSQL_USER: ${MYSQL_USER}                     # 일반 사용자 계정
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}             # 일반 사용자 비밀번호
+    volumes:
+      - mysql-data:/var/lib/mysql   # DB 데이터를 컨테이너 밖(볼륨)에 보관
+
+  redis:
+    image: redis:8            # Refresh Token 저장 및 토큰 블랙리스트용
+    container_name: gshared-redis
+    restart: unless-stopped
+    # 포트를 열지 않음 = 컨테이너끼리만 접근 가능
+    volumes:
+      - redis-data:/data      # 재시작해도 토큰 유지
+
+  frontend:
+    build:                   # Next.js SSR (standalone) 컨테이너
+      context: ./frontend
+      additional_contexts:
+        worker: ./system/G-shared   # G-shared.exe 를 /downloads 로 제공 (Dockerfile 의 COPY --from=worker)
+    container_name: gshared-frontend
+    ports:
+      - "127.0.0.1:3000:3000"  # 루프백만 — 외부는 nginx(HTTPS)를 거쳐서만 접근, 평문 3000 직통 차단
+    restart: unless-stopped
+    environment:
+      BACKEND_ORIGIN: http://backend:8080   # 서버사이드 fetch 전용(fetcher.ts, 런타임). next.config.ts rewrite 는 빌드타임 고정이라 안 먹지만 운영은 nginx 가 /api 를 먼저 처리해 무관
+
+  # AI Scheduler (FastAPI + XGBoost) — backend가 http://ai:8000 으로 내부 호출 (바깥 포트 노출 불필요)
+  ai:
+    build: ./ai
+    container_name: gshared-ai
+    restart: unless-stopped
+    volumes:
+      - ./ai/models:/app/models   # 학습된 XGBoost 모델 파일 자리 — 서버에 파일만 넣고 재시작하면 반영 (이미지 재빌드 불필요)
+
+volumes:
+  mysql-data:                 # 명명된 볼륨 (컨테이너 지워도 데이터 유지)
+  redis-data:                 # Refresh Token 보관용

@@ -1,0 +1,53 @@
+spring:
+  datasource:
+    # mysql = compose 서비스 이름
+    url: "jdbc:mysql://${MYSQL_HOST:mysql}:3306/${MYSQL_DATABASE}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: 20
+
+  jpa:
+    hibernate:
+      ddl-auto: validate  # 스키마는 Flyway 가 만들고, JPA 는 검증만
+
+  flyway:
+    placeholders:
+      # 배포 컨테이너는 2026-09-18 전까지 UTC 로 돌아 모든 DATETIME 이 UTC 벽시계다. Dockerfile 이 TZ 를 Asia/Seoul 로
+      # 바꾸는 것과 같은 배포에서 V20 이 기존 값을 +9h 민다. 한 번 적용되면 Flyway 가 다시 돌리지 않으므로 이 값은 그대로 둔다.
+      tz_shift_hours: 9
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+
+management:
+  endpoint:
+    health:
+      show-details: never   # 내부 정보 노출 차단
+
+logging:
+  level:
+    root: warn
+    com.gshared.back: info
+  file:
+    name: /app/logs/back.log
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+storage:
+  root: /app/storage     # compose 볼륨(./storage) — 컨테이너를 지워도 결과물이 남는다
+  # 운영은 기본값(localhost:8080) 을 쓰지 않는다 — 워커 PC 에서 localhost 는 자기 자신이라 서명 URL 이 전부 죽는다.
+  # 비어 있으면 기동을 거부해 설정 누락을 배포 시점에 드러낸다. 예: https://j15e204.p.ssafy.io (스킴 포함, 포트·끝 슬래시 없이)
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL}
+
+# 운영은 체인 확인 없이 아무것도 확정하지 않는다. 환경변수로도 끌 수 없게 값을 박아 둔다.
+escrow:
+  verification-required: true
+
+# IP 기준 제한이라 같은 공유기(교실·발표장) 뒤 여러 명의 요청이 한 IP 로 합산된다 —
+# 기본 100 이면 2~3명 동시 테스트만으로 429 → 재발급까지 막혀 로그인이 풀려 보인다.
+# 2000(초당 ~33회)은 사람 여럿은 통과시키고 봇 폭주(초당 수백 회)는 여전히 차단한다.
+rate-limit:
+  max-requests-per-minute: 2000

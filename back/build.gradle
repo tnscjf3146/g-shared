@@ -1,0 +1,79 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.gshared'
+version = '0.0.1-SNAPSHOT'
+description = 'back'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // ── 웹 ────────────────────────────────────────────
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'  // Worker 실시간 통신
+
+    // ── 보안 ───────────────────────────────────────────
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // ── 데이터 ─────────────────────────────────────────
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // ── DB 마이그레이션 ─────────────────────────────────
+    implementation 'org.springframework.boot:spring-boot-flyway'  // Boot 4 는 Flyway 자동설정이 별도 모듈
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-mysql'   // MySQL 지원은 별도 모듈
+
+    // ── JWT (액세스/리프레시 토큰) ───────────────────────
+    implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
+
+    // ── 지갑 서명 검증 ──────────────────────────────────
+    // MetaMask personal_sign(EIP-191) 서명에서 지갑 주소를 복구한다.
+    // 노드 통신(RPC)은 필요 없으므로 web3j core 대신 crypto 모듈만 사용한다.
+    implementation 'org.web3j:crypto:4.12.3'
+
+    // ── swagger (API 명세) ─────────────────────────────
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.0'
+
+    // ── 운영 (헬스체크 / 배포 확인) ──────────────────────
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // ── 개발 편의 ───────────────────────────────────────
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+
+    // ── 테스트 ─────────────────────────────────────────
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testRuntimeOnly 'com.h2database:h2'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

@@ -1,0 +1,15 @@
+# 대시보드를 파일로 넣는다. 화면에서 손으로 만들면 볼륨을 새로 만들 때마다 사라진다.
+# 데이터소스를 파일로 넣는 것과 같은 이유다.
+apiVersion: 1
+
+providers:
+  - name: gshared
+    orgId: 1
+    type: file
+    # 화면에서 저장·삭제를 막는다. 이 파일이 정본이고, 바꾸려면 저장소를 고쳐야 한다.
+    # 화면에서 임시로 고쳐 보는 것은 여전히 되고, 새로 고치면 원래대로 돌아온다.
+    allowUiUpdates: false
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards

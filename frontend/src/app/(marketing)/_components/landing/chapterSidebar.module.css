@@ -1,0 +1,178 @@
+/* 오른쪽 챕터 사이드바 — React Bits LineSidebar 의 구조를 우리 토큰으로 옮기고 좌우를 뒤집은 것(라벨 오른쪽 정렬, 마커는 라벨 오른쪽).
+   강조 = 현재 챕터(.active, 상시) 또는 커서가 올라간 항목 하나(:hover). 전환은 CSS transition 만 — JS 는 프레임마다 아무것도 안 한다 */
+.root {
+  --accent: var(--color-primary);
+  --text: rgba(247, 249, 244, 0.62);
+  --marker: rgba(247, 249, 244, 0.28);
+  --marker-length: 44px;
+  --marker-gap: 14px;
+  --tick-scale: 0.5;
+  --shift: 22px;
+  --item-gap: 22px; /* 14 → 22: 위아래 히트 영역을 넓히되(각 11px) 이웃과 겹치지 않게(2026-09-10) */
+  --font-size: 0.9rem;
+  --t: 180ms var(--ease-out-expo);
+
+  position: absolute;
+  right: 4rem; /* 네비 px-16 과 정렬 */
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: calc(var(--marker-length) + var(--marker-gap));
+  transition: opacity 400ms var(--ease-out-expo);
+}
+/* 접근 영역: 사이드바 왼쪽 160px·위아래 60px 까지를 hover 로 잡아, 커서가 가까워지면 글자가 나타난다(평소엔 마커 선만 보임) */
+.root::before {
+  content: '';
+  position: absolute;
+  inset: -60px -24px -60px -160px;
+}
+.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--item-gap);
+}
+
+.item {
+  position: relative;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+}
+/* 히트 영역: 위아래로 gap 의 절반씩 넓혀 항목끼리 겹치지 않게(한 번에 하나만 hover), 왼쪽은 밀려 나올 폭, 오른쪽은 마커 선 끝까지 */
+.item::before {
+  content: '';
+  position: absolute;
+  inset: calc(var(--item-gap) / -2) calc(-1 * (var(--marker-length) + var(--marker-gap))) calc(var(--item-gap) / -2) calc(-1 * var(--shift));
+}
+.item:focus-visible .label {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* 라벨 글자 수가 3~4 로 달라도 칸 폭은 같게 — 가장 긴 라벨(G-shared, 라틴 8자) 기준 고정 폭 + 왼쪽 정렬(2026-09-14 사용자 요청).
+   글자를 벌리지는 않는다(양끝맞춤은 한글에 안 먹고, 쪼개서 벌리면 '사 용 자' 처럼 떠 보였다). 번호(.index)·마커는 그대로 */
+.word {
+  display: inline-block;
+  width: 4.2em;
+  text-align: left; /* .item 의 text-align: right 를 여기서만 되돌린다 */
+}
+
+.label {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  font-size: var(--font-size);
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--text);
+  /* 평소엔 숨김(오른쪽으로 조금 밀려 있음). 커서가 사이드바 근처로 오면(.root:hover) 또는 키보드 포커스가 들어오면 전체가 한 번에 오른쪽 → 왼쪽으로 슬라이드해 나타난다(순차 지연 없음, 2026-09-11) */
+  opacity: 0;
+  transform: translateX(18px);
+  transition:
+    color var(--t),
+    transform 320ms var(--ease-out-expo),
+    opacity 260ms var(--ease-out-expo);
+  will-change: transform, opacity;
+}
+.root:hover .label,
+.root:focus-within .label {
+  opacity: 1;
+  transform: translateX(0);
+}
+.index {
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.55rem;
+  font-size: 0.85em;
+  opacity: 0.55;
+  transition: opacity var(--t);
+}
+
+/* 항목 옆(오른쪽) 마커 선 — 평소엔 짧게(45%), 커서가 다가오면 70% 로 조금 늘고, 현재·hover 항목은 85% */
+.marker {
+  position: absolute;
+  top: 50%;
+  right: calc(-1 * var(--marker-length) - var(--marker-gap));
+  height: 1px;
+  width: var(--marker-length);
+  background-color: var(--marker);
+  transform-origin: right center;
+  transform: translateY(-50%) scaleX(0.45);
+  transition:
+    background-color var(--t),
+    transform 320ms var(--ease-out-expo);
+}
+.root:hover .marker,
+.root:focus-within .marker {
+  transform: translateY(-50%) scaleX(0.7);
+}
+/* 항목 사이 짧은 눈금(정적) */
+.item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: calc(100% + var(--item-gap) / 2);
+  right: calc(-1 * var(--marker-length) - var(--marker-gap));
+  height: 1px;
+  width: calc(var(--marker-length) * var(--tick-scale));
+  background-color: var(--marker);
+  opacity: 0.5;
+  transform: translateY(-50%);
+}
+
+/* 강조: 현재 챕터는 커서가 없어도 글자가 보이고(도착하면 어느 챕터인지 나타남, 2026-09-11) 초록·왼쪽으로 밀림·긴 마커.
+   hover 된 항목은 사이드바가 펼쳐진 상태에서 같은 강조 */
+.active .label {
+  opacity: 1;
+  color: var(--accent);
+  transform: translateX(calc(-1 * var(--shift)));
+}
+.active .index {
+  opacity: 1;
+}
+.active .marker {
+  background-color: var(--accent);
+  transform: translateY(-50%) scaleX(0.85); /* 활성 선은 조금만 길게(1.25 → 0.85, 2026-09-11) */
+}
+.item:hover .label {
+  color: var(--accent);
+}
+.root:hover .item:hover .label {
+  transform: translateX(calc(-1 * var(--shift)));
+}
+.item:hover .index {
+  opacity: 1;
+}
+.item:hover .marker {
+  background-color: var(--accent);
+}
+.root:hover .item:hover .marker {
+  transform: translateY(-50%) scaleX(0.85);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .label,
+  .index,
+  .marker {
+    transition: none;
+  }
+}
+@media (max-width: 767px) {
+  .root {
+    display: none; /* 모바일은 자리가 없다 */
+  }
+}

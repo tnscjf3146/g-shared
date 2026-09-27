@@ -1,0 +1,109 @@
+spring:
+  profiles:
+    default: local          # 아무것도 지정 안 하면 local
+
+  jpa:
+    open-in-view: false     # 지연 로딩이 컨트롤러까지 새는 걸 막음
+
+  task:
+    scheduling:
+      pool:
+        # 기본값은 1 — 순찰 8개(JobMatcher·워커 하트비트 스위퍼·에스크로 키퍼·대조기·환불복구·
+        # 정리 2종·SSE 하트비트)가 한 스레드를 나눠 쓰면 서로를 막는다. 특히 EscrowTimeoutKeeper 는
+        # 영수증을 기다리며 만료 Job 하나당 최대 30초(10 × 3초)를 Thread.sleep 으로 자고,
+        # 체인 RPC 도 건당 10초까지 간다. 그동안 JobMatcher(30초 주기)가 아예 못 돌아
+        # "예치했는데 배정이 안 된다"로 나타난다.
+        #
+        # 크기는 **순찰 수와 같게** 둔다. 4 같은 중간값이면 최악의 경우가 그대로 남는다 —
+        # 체인 RPC 가 느려지면 키퍼·대조기·환불복구가 **같은 원인으로 동시에** 길어지고,
+        # SSE 하트비트는 죽은 소켓의 송신 버퍼가 차면 쓰기 타임아웃 없이 매달린다(SseEmitter(0L)).
+        # 넷이 겹치면 풀이 꽉 차 JobMatcher 가 다시 굶는다. 1순찰 1스레드면 누가 막혀도 남이 돈다.
+        # @Scheduled(fixedDelay) 는 같은 메서드의 자기 중첩을 허용하지 않으므로 순찰당 항상 1개다.
+        #
+        # 병렬 안전성: 상태 전이는 전부 조건부 UPDATE(…IfXxx)라 같은 Job 에 둘이 달려들어도
+        # 한쪽만 이긴다. 체인에 쓰는 경로는 EscrowKeeperSigner 하나뿐이고 호출자도 키퍼 단독이라
+        # nonce 가 겹치지 않는다. (남는 틈: Worker 상태는 조건부 UPDATE 가 아니라
+        # JobMatcher 와 스위퍼가 겹칠 수 있다 — 전송 실패 시 unassignJob 으로 자가 복구된다)
+        size: 8
+
+  flyway:
+    placeholders:
+      # V20(UTC→KST 시각 보정)이 몇 시간 밀지. 기본 0 = 아무것도 안 함 — 로컬·테스트는 호스트가 KST 라 밀면 틀어진다.
+      # 배포 컨테이너는 그동안 UTC 로 저장했으므로 prod 프로필이 9 로 덮어쓴다. 값이 없으면 Flyway 가 기동을 거부한다.
+      tz_shift_hours: 0
+
+  data:
+    redis:
+      port: 6379
+
+# 값의 출처만 다르고 표현은 같음
+#   local → .env 파일
+#   prod  → compose 가 넣어주는 환경변수
+jwt:
+  secret: ${JWT_SECRET}
+  access-expiration: 30m
+  refresh-expiration: 14d
+
+# 브라우저에서 API 를 호출할 수 있는 출처.
+# 프론트(:3000)와 API(:8080)는 호스트가 같아도 포트가 달라 서로 다른 출처다.
+# 여러 개면 쉼표로 구분한다. (local 프로필에서 덮어씀)
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+# 지갑 연결 서명에 쓰는 값.
+# domain/uri 는 사용자가 MetaMask 팝업에서 읽는 문장에 그대로 들어가므로
+# 요청 본문이 아니라 서버 설정에서만 가져온다. (local 프로필에서 덮어씀)
+wallet-auth:
+  domain: ${WALLET_AUTH_DOMAIN}
+  uri: ${WALLET_AUTH_URI}
+  # 자체 토큰(GCoin)을 올린 네트워크의 ID. 토큰을 직접 만들어도 체인은 SSAFY 체인이다.
+  # 로컬 Hardhat 노드(31337)에 붙일 때만 환경변수로 덮어쓴다.
+  chain-id: ${WALLET_AUTH_CHAIN_ID:31221}
+  challenge-expiration: 5m
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when-authorized   # 기본은 보수적으로
+
+cookie:
+  secure: true
+
+# AI Scheduler (FastAPI) 호출 설정.
+# 타임아웃 필수 — 없으면 Scheduler 가 느려질 때 Job 생성 스레드가 전부 묶인다.
+scheduler:
+  base-url: ${SCHEDULER_BASE_URL:http://localhost:8000}
+  connect-timeout: 2s
+  read-timeout: 5s
+
+# 오브젝트 스토리지 — 데이터셋 내려받기·결과물 올리기용 서명 URL 발급 (연동 규격 §11·§17).
+# 지금은 Backend 가 파일을 직접 보관한다(LocalObjectStorage). S3 로 옮겨도 이 키 이름은 유지.
+storage:
+  root: ${STORAGE_ROOT:./storage-data}
+  # 워커가 바깥에서 접속하는 Backend 주소. 서명 URL 앞에 그대로 붙는다. (기본값은 로컬 전용 — prod 프로필은 필수로 덮어쓴다)
+  public-base-url: ${STORAGE_PUBLIC_BASE_URL:http://localhost:8080}
+  # URL 서명 키. 따로 두지 않으면 JWT 키를 겸용한다 — 운영에서는 분리 권장.
+  signing-secret: ${STORAGE_SIGNING_SECRET:${JWT_SECRET}}
+  upload-ttl: 1h
+  download-ttl: 2h
+
+# 에스크로 컨트랙트 — Worker 가 acceptJob() 전에 온체인 값과 대조하는 기준 (연동 규격 §11 escrow).
+# chainId 는 wallet-auth.chain-id 를 같이 쓴다 (토큰·에스크로 모두 같은 체인).
+escrow:
+  contract-address: ${ESCROW_CONTRACT_ADDRESS:}
+  # 온체인 값을 읽을 노드. 주소와 함께 둘 다 채워져야 Backend 가 워커의 말을
+  # 체인에 대고 확인한다. 하나만 채워진 상태는 기동 시 거부한다(EscrowStartupValidator).
+  rpc-url: ${ESCROW_RPC_URL:}
+  # 결제 토큰(GSC). 작업 생성 응답에 실려 프런트가 approve 대상으로 쓰고,
+  # 기동 검사에서 에스크로의 paymentToken() 과 같은지 대조한다.
+  token-address: ${GSC_TOKEN_ADDRESS:0xaCe3c977A539C16668528619F9417589f12C7B22}
+  # 체인 확인 없이는 상태를 확정하지 않는다(fail closed). 운영은 반드시 true —
+  # prod 프로필이 덮어쓴다. 로컬에서 체인 없이 돌릴 때만 false.
+  verification-required: ${ESCROW_VERIFICATION_REQUIRED:false}
+  # 만료 Job 을 settleTimeout 으로 정리하는 keeper 지갑 개인키. 비어 있으면 keeper 는 돌지 않는다.
+  # 코드·DB 가 아니라 배포 Secret 으로만 주입한다. SSAFY 체인은 가스비 0 이라 잔액이 필요 없다.
+  keeper-private-key: ${ESCROW_KEEPER_PRIVATE_KEY:}

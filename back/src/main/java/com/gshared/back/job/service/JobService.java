@@ -1,0 +1,953 @@
+package com.gshared.back.job.service;
+
+import com.gshared.back.dataset.domain.Dataset;
+import com.gshared.back.dataset.exception.DatasetErrorCode;
+import com.gshared.back.dataset.repository.DatasetRepository;
+import com.gshared.back.global.client.SchedulerClient;
+import com.gshared.back.global.client.dto.SchedulerRecommendRequest;
+import com.gshared.back.global.client.dto.SchedulerRecommendResponse;
+import com.gshared.back.global.client.dto.SchedulerTrainingConfig;
+import com.gshared.back.global.exception.BusinessException;
+import com.gshared.back.job.domain.AdapterName;
+import com.gshared.back.job.domain.Job;
+import com.gshared.back.job.dto.request.CreateJobRequest;
+import com.gshared.back.job.dto.response.CreateJobResponse;
+import com.gshared.back.job.domain.JobStatus;
+import com.gshared.back.workload.domain.Workload;
+import com.gshared.back.workload.domain.WorkloadKind;
+import com.gshared.back.workload.exception.WorkloadErrorCode;
+import com.gshared.back.workload.repository.BaseModelRepository;
+import com.gshared.back.workload.repository.WorkloadRepository;
+import com.gshared.back.job.dto.response.JobDetailResponse;
+import com.gshared.back.job.dto.response.JobPageResponse;
+import com.gshared.back.job.dto.response.JobSummaryResponse;
+import com.gshared.back.job.exception.JobErrorCode;
+import com.gshared.back.job.repository.JobRepository;
+import com.gshared.back.job.realtime.JobRealtimeEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import com.gshared.back.user.domain.User;
+import com.gshared.back.user.exception.UserErrorCode;
+import com.gshared.back.user.repository.UserRepository;
+import com.gshared.back.worker.repository.WorkerRepository;
+import com.gshared.back.worker.websocket.WorkerMessageSender;
+import com.gshared.back.global.blockchain.EscrowProperties;
+import com.gshared.back.global.blockchain.EscrowVerification;
+import com.gshared.back.global.blockchain.EscrowVerification.Verdict;
+import com.gshared.back.global.storage.ObjectStorage;
+import com.gshared.back.global.storage.StorageProperties;
+import com.gshared.back.global.blockchain.TokenUnits;
+import com.gshared.back.global.wallet.WalletAuthProperties;
+import com.gshared.back.job.dto.response.FundJobResponse;
+import com.gshared.back.worker.domain.GpuGrade;
+import com.gshared.back.worker.domain.Worker;
+import com.gshared.back.worker.websocket.protocol.WorkerMessage;
+import com.gshared.back.worker.websocket.protocol.WorkerMessageType;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
+
+import java.time.LocalDateTime;
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+@Transactional(readOnly = true)
+public class JobService {
+
+    /**
+     * JOB_REJECTED 중 "다시 시도하면 될 수 있는" 사유 (규격 §14). 이 코드면 배정을 되돌려 다음 순찰에 재매칭하고,
+     * 나머지(가격·주소·상태 불일치 등)는 같은 워커에게 다시 줘도 같은 답이라 FAILED 로 확정한다.
+     */
+    private static final Set<String> RETRYABLE_REJECT_CODES = Set.of("BLOCKCHAIN_RPC_FAILED");
+    private static final int FAIL_REASON_MAX = 2000;   // 폭주 메시지 상한 (DB는 TEXT지만 무한 저장 방지)
+
+    private final JobRepository jobRepository;
+    private final EscrowVerification escrow;
+    private final EscrowProperties escrowProperties;
+    private final WalletAuthProperties walletAuthProperties;
+    private final UserRepository userRepository;
+    private final WorkerRepository workerRepository;
+    private final DatasetRepository datasetRepository;
+    private final WorkloadRepository workloadRepository;
+    private final BaseModelRepository baseModelRepository;
+    private final SchedulerClient schedulerClient;
+    private final TrainingConfigResolver trainingConfigResolver;
+    private final WorkerMessageSender messageSender;
+    private final ObjectMapper objectMapper;
+    private final ObjectStorage objectStorage;
+    private final StorageProperties storageProperties;
+    private final ApplicationEventPublisher eventPublisher;
+
+    /**
+     * Job(주문서) 생성 = 견적 발급. CREATED 행이 곧 견적서.
+     *
+     * <p>쓰기 트랜잭션을 명시한다 — 클래스의 {@code readOnly = true} 가 그대로 적용되면 마지막 save() 의
+     * INSERT 가 읽기 전용 트랜잭션에서 실행되어 거절된다. Scheduler(외부 HTTP) 호출이 트랜잭션 안에 들어가는 건
+     * 감수한다: 트랜잭션을 아예 빼면(NOT_SUPPORTED) 후보 워커의 owner 지연 로딩이 깨지고 테스트 트랜잭션 안의
+     * 데이터도 보이지 않으며, 클래스 기본값(readOnly)으로도 이미 커넥션을 쥔 채 기다리고 있었으므로 달라지는 것은 없다.
+     */
+    @Transactional
+    public CreateJobResponse create(Long ownerId, CreateJobRequest request) {
+        // ① 컨텍스트 로드
+        User owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
+        Dataset dataset = datasetRepository.findByIdAndOwnerId(request.datasetId(), ownerId)
+                .orElseThrow(() -> new BusinessException(DatasetErrorCode.DATASET_NOT_FOUND));
+        workloadRepository.findByIdAndEnabledTrue(request.workloadId())
+                .orElseThrow(() -> new BusinessException(WorkloadErrorCode.WORKLOAD_NOT_FOUND));
+        var baseModel = baseModelRepository.findByIdAndEnabledTrue(request.baseModelId())
+                .orElseThrow(() -> new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND));
+        // 모델이 요청한 이미지(workload)에 속하는지 — 불일치 조합이 Worker 까지 흘러가지 않게
+        if (!baseModel.getWorkload().getId().equals(request.workloadId())) {
+            throw new BusinessException(WorkloadErrorCode.BASE_MODEL_NOT_FOUND);
+        }
+
+        // 어댑터 주문 확인 — 이름 규칙·부모 조건은 Scheduler(외부 HTTP)를 부르기 전에 본다. 틀린 주문에 추천을 사 올 이유가 없다.
+        AdapterOrder adapterOrder = resolveAdapterOrder(ownerId, request, baseModel.getSlug());
+
+        SchedulerRecommendRequest.DatasetMeta datasetMeta = new SchedulerRecommendRequest.DatasetMeta(
+                dataset.getSizeBytes(), dataset.getSampleCount(),
+                dataset.getTotalTokens(), dataset.getEffectiveTokens(),
+                dataset.getAvgSeqLength(), dataset.getMaxSeqLength());
+
+        // ② 학습 설정 확정 — CUSTOM 은 사용자 값 검증, AUTO 는 Scheduler 가 결정 (외부 HTTP)
+        SchedulerTrainingConfig config = resolveTrainingConfig(request, datasetMeta);
+
+        // ③ GPU 후보 (규격 §28) — 운영 조건(연결·하트비트·미배정·operator/지갑)은 쿼리가 걸렀고,
+        //    스펙(null 필드) 없는 워커만 여기서 더 뺀다 (Scheduler 가 null 을 422 로 거절)
+        List<Worker> online = workerRepository.findAvailableWorkers();
+        List<Worker> withSpec = online.stream()
+                .filter(w -> w.getGpuModel() != null && w.getVramMb() != null
+                        && w.getBenchmarkTokensPerSec() != null)
+                .toList();
+        // 공급자가 이 operator 키를 온체인에서 승인했는가. 승인하지 않은
+        // 워커에게 배정하면 acceptJob 이 되돌려지고, 그 사이 고객의
+        // 예치금은 묶여 있다. 배정 전에 거르는 편이 싸다.
+        //
+        // 모를 때는 거르지 않는다 -- 체인이 설정되지 않았거나 노드가 잠깐
+        // 답하지 않는 동안 멀쩡한 공급자가 후보에서 조용히 빠지면 Job 은
+        // 배정되지 않고 아무도 이유를 모른다.
+        //
+        // 화면(operator-status)이 뭐라고 했든 여기서 다시 묻는다 — 화면은 UX 이고 이것이 권위다.
+        // 후보 워커를 그대로 들고 있는다 — 수요자가 고른 등급이 어느 워커인지 되짚어야 하고,
+        // 그 매핑은 Scheduler 응답(워커 단위)에는 없다.
+        List<Worker> candidateWorkers = withSpec.stream()
+                .filter(w -> !escrow.operatorApproved(
+                        w.getOwner().getWalletAddress(), w.getOperatorAddress()).isContradicted())
+                .toList();
+        var candidates = candidateWorkers.stream()
+                .map(w -> new SchedulerRecommendRequest.GpuCandidate(
+                        w.getId(), w.getGpuModel(), w.getVramMb(), w.getBenchmarkTokensPerSec(),
+                        w.getBenchmarkPeakVramMb()))   // 구버전 exe 워커는 null — Scheduler 가 허용
+                .toList();
+        if (candidates.isEmpty()) {
+            // 의뢰자에게는 "기다리면 된다"(409)로 충분하지만, 운영자는 왜 0 인지 알아야 한다 —
+            // 공급자 쪽 사유(미승인)는 공급자 화면(availability)이, 여기서는 로그가 말한다.
+            log.warn("[MATCH] 배정 가능한 워커 없음 — ONLINE·미배정·주소 있음 {}대, 그중 스펙 누락 {}대, operator 미승인 {}대",
+                    online.size(), online.size() - withSpec.size(), withSpec.size());
+            throw new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER);   // 409 — 기다리면 해결
+        }
+
+        // ④ Scheduler 추천 (외부 HTTP) — VRAM 하한은 카탈로그 값(모델 하한, 없으면 워크로드 하한)을 그대로 전달, 거르는 건 Scheduler 몫
+        SchedulerRecommendResponse rec = schedulerClient.recommend(new SchedulerRecommendRequest(
+                request.baseModelId(), request.workloadId(), datasetMeta, config,
+                new SchedulerRecommendRequest.Requirements(baseModel.requiredVramMb()), candidates));
+        // 2xx 지만 추천이 비어있는 경우 — "실행 가능한 GPU 없음"으로 명확히 (미매핑 500 방지)
+        if (rec.recommendedWorkerId() == null || rec.rankings() == null || rec.rankings().isEmpty()) {
+            throw new BusinessException(com.gshared.back.global.client.SchedulerErrorCode.NO_FEASIBLE_GPU);
+        }
+
+        // ⑤ 이 Job 이 갈 워커 확정 — 수요자가 등급을 골랐으면 그 등급의 워커, 아니면 Scheduler 의 1 순위.
+        //    선택은 방금 받은 추천 안에 있을 때만 받아들인다. 클라이언트가 보낸 것은 등급 id 하나뿐이고,
+        //    "그 GPU 로 이 설정을 돌릴 수 있는가"는 여기서 Scheduler 의 답으로 다시 확인한다.
+        String chosenWorkerId = chooseWorker(request.gpuId(), rec, candidateWorkers);
+
+        // ⑥ 공급자 정산 지갑 확정 — 온체인 createAndFundJob 의 provider. 예치 뒤에는 체인이 이 값을 잠그므로
+        //    견적에 박아 두고, 예치 확인·매칭이 전부 이 값과 대조한다. 후보 쿼리가 지갑 없는 워커를 걸렀지만
+        //    그 사이 지워졌을 수 있어 다시 확인한다.
+        String providerWallet = workerRepository.findById(chosenWorkerId)
+                .map(Worker::getOwner).map(User::getWalletAddress).orElse(null);
+        if (providerWallet == null) {
+            throw new BusinessException(JobErrorCode.PROVIDER_WALLET_MISSING);
+        }
+
+        // ⑦ 견적 저장 — 예측·비용은 전부 서버가 계산한 값 (클라이언트 값 안 믿음)
+        Job job = Job.create(
+                owner, request.workloadId(), request.baseModelId(), request.datasetId(),
+                request.trainingMode(),
+                config.epochs(), config.batchSize(), config.learningRate(), config.maxLength(),
+                predictedRuntime(rec, chosenWorkerId), rec.schedulerModelVersion(), chosenWorkerId,
+                providerWallet, estimateCost(dataset, config)
+        );
+        // ⑧ 어댑터 주문 — 이름만 사용자가 고르고, 버전·계보는 서버가 정한다 (확인은 ① 직후에 끝났다)
+        job.assignAdapterOrder(adapterOrder.required(), adapterOrder.name(), adapterOrder.version(), adapterOrder.parentJobId());
+        jobRepository.save(job);
+
+        return CreateJobResponse.of(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull());
+    }
+
+    /**
+     * CUSTOM: 사용자 4값 검증 / AUTO: Scheduler 가 방향(trainingPriority)에 맞춰 확정.
+     *
+     * <p>실제 규칙은 {@link TrainingConfigResolver} 에 있다 — 견적(estimate)과 같은 규칙이어야
+     * 하기 때문이다. 견적에서 통과한 설정이 주문에서 거절당하면 사용자는 무엇이 틀렸는지 알 수 없다.
+     */
+    private SchedulerTrainingConfig resolveTrainingConfig(CreateJobRequest request,
+                                                          SchedulerRecommendRequest.DatasetMeta datasetMeta) {
+        return trainingConfigResolver.resolve(
+                request.trainingMode(), request.trainingPriority(),
+                request.trainingConfig(), datasetMeta);
+    }
+
+    /**
+     * 이 Job 이 갈 워커 — 수요자가 고른 것, 없으면 Scheduler 의 1 순위.
+     *
+     * <p>선택을 받아들이는 조건은 하나다: <b>방금 받은 추천 안에 그 워커가 있을 것.</b> 후보 목록은
+     * 이 요청을 처리하며 다시 만들어졌고(ONLINE·미배정·operator 승인), Scheduler 가 그중 이 설정으로
+     * 실제 돌릴 수 있는 것만 rankings 에 남긴다. 그러므로 "있다"는 것은 지금 이 순간 그 GPU 가
+     * 가용하고 이 학습을 감당한다는 뜻이고, 그것 말고 클라이언트에게서 받는 것은 없다.
+     *
+     * <p>없으면 409 다 — 화면이 목록을 그린 뒤 사용자가 누르기까지 사이에 그 워커가 일을 잡았거나
+     * 오프라인이 됐다는 뜻이고, 다른 GPU 를 고르거나 기다리면 해결된다.
+     */
+    private String chooseWorker(Long selectedGpuId, SchedulerRecommendResponse rec,
+                                List<Worker> candidateWorkers) {
+        if (selectedGpuId == null) {
+            return rec.recommendedWorkerId();
+        }
+        long gradeId = selectedGpuId;   // 위에서 null 을 걸렀다 — 박싱 비교로 새는 것을 막는다
+
+        // 등급 id 는 모델명의 32비트 해시인데(GpuGrade.idOf), gpuModel 은 공급자가 등록 때 보내는
+        // 자유 문자열이다(RegisterWorkerRequest 는 @NotBlank 뿐). "Aa"/"BB" 치환만으로 임의의 이름에
+        // 충돌하는 문자열을 만들 수 있으므로, 해시만 보고 묶으면 남의 등급에 끼어들 수 있다 —
+        // benchmarkTokensPerSec 도 자기 신고값이라 그 등급의 1 순위까지 차지할 수 있다.
+        // 그러면 사용자는 A 를 골랐는데 Job 은 B 의 PC 에서 돌고 정산도 B 가 받는다.
+        //
+        // 이름이 갈리면 그 id 는 라우팅 근거가 될 수 없으므로 배정하지 않는다. 근본 해결은 gpuModel 을
+        // 정규화·허용목록으로 좁히거나 서버가 발급한 대리 키로 등급을 여는 것이고, 여기서는 막기만 한다.
+        Set<String> models = candidateWorkers.stream()
+                .map(Worker::getGpuModel)
+                .filter(m -> GpuGrade.idOf(m) == gradeId)
+                .collect(Collectors.toSet());
+        if (models.size() > 1) {
+            log.error("[MATCH] 등급 id {} 에 서로 다른 모델명이 묶임 — 배정 거부 {}", gradeId, models);
+            throw new BusinessException(JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
+        }
+        Set<String> inGrade = candidateWorkers.stream()
+                .filter(w -> models.contains(w.getGpuModel()))
+                .map(Worker::getId)
+                .collect(Collectors.toSet());
+        // 등급 안에서 Scheduler 가 매긴 순위가 가장 높은 워커. rank 가 없는 응답(구버전)은 목록 순서를 따른다.
+        return rec.rankings().stream()
+                .filter(r -> inGrade.contains(r.workerId()))
+                .min(Comparator.comparing(
+                        r -> r.rank() == null ? Integer.MAX_VALUE : r.rank()))
+                .map(SchedulerRecommendResponse.Ranking::workerId)
+                .orElseThrow(() -> {
+                    // 등급을 아예 모르는 것(오타·사라진 등급)과, 등급은 있는데 operator 미승인 등으로
+                    // 후보에서 빠진 것은 다른 사건이다 — 후자는 기다려도 풀리지 않으므로 구분해 남긴다.
+                    log.info("[MATCH] 선택한 등급({})에 돌릴 수 있는 워커 없음 — 등급 내 후보 {}대, 추천 {}건",
+                            selectedGpuId, inGrade.size(), rec.rankings().size());
+                    return new BusinessException(JobErrorCode.SELECTED_WORKER_UNAVAILABLE);
+                });
+    }
+
+    /**
+     * 그 워커의 예상 실행시간 (rankings 에서 추출, 없으면 1등).
+     *
+     * <p>배정만 바꾸고 이 값을 1 순위 것으로 두면 화면이 거짓말을 한다 — 느린 GPU 를 고른
+     * 사용자에게 빠른 GPU 의 시간을 보여주게 된다.
+     */
+    private Double predictedRuntime(SchedulerRecommendResponse rec, String workerId) {
+        return rec.rankings().stream()
+                .filter(r -> java.util.Objects.equals(r.workerId(), workerId))
+                .findFirst()
+                .orElse(rec.rankings().get(0))
+                .predictedRuntimeSec();
+    }
+
+    /**
+     * 예상 비용 (TOKEN). 공식은 {@link JobCostPolicy} 에 있다 —
+     * 견적 화면에서 본 금액과 실제 주문 금액이 갈라지지 않게 한 곳에서만 계산한다.
+     */
+    private Long estimateCost(Dataset dataset, SchedulerTrainingConfig config) {
+        return JobCostPolicy.estimate(dataset.getEffectiveTokens(), config.epochs());
+    }
+
+    /** 서버가 확정한 어댑터 주문 — {@link Job#assignAdapterOrder} 의 인자 그대로. */
+    private record AdapterOrder(boolean required, String name, int version, Long parentJobId) {
+    }
+
+    /**
+     * 주문에 담긴 어댑터 조건을 확정한다.
+     *
+     * <p>세 필드(hasAdapter·adapterName·parentJobId)가 전부 없으면 예전 요청과 똑같이 동작한다 —
+     * 어댑터 없음, v1, 모델 slug 기반 기본 이름.
+     *
+     * <p>{@code parentJobId} 가 오면 그 Job 이 <b>내 것이고, 완료됐고, 결과물이 있고, 같은 베이스 모델로 학습한 것인지</b>
+     * 여기서 확인한다. 프런트도 목록을 그 조건으로 좁혀 보여 주지만 신뢰 경계는 여기다. 확인이 끝나면 버전은 부모 + 1 이고,
+     * 이름을 안 보냈으면 부모 이름을 잇는다(같은 계보는 같은 이름을 쓰는 게 자연스럽다).
+     */
+    private AdapterOrder resolveAdapterOrder(Long ownerId, CreateJobRequest request, String baseModelSlug) {
+        String name = AdapterName.normalize(request.adapterName());
+        if (name != null && !AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+
+        Job parent = null;
+        if (request.parentJobId() != null) {
+            parent = jobRepository.findByIdAndOwnerId(request.parentJobId(), ownerId)
+                    .orElseThrow(() -> new BusinessException(JobErrorCode.PARENT_JOB_NOT_FOUND));
+            if (parent.getStatus() != JobStatus.COMPLETED) {
+                throw new BusinessException(JobErrorCode.PARENT_JOB_NOT_COMPLETED);
+            }
+            // 결과물이 없으면(아직 안 올라왔거나 지워졌거나) 이어서 학습할 입력이 없다
+            if (parent.getResultObjectKey() == null) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // 어댑터를 만드는 작업(학습)의 결과물이어야 한다 — 추론·평가의 result.tar 에는 어댑터가 없다.
+            // 여기서 막지 않으면 예치까지 끝난 뒤 Runtime 이 거절해 돈과 워커 시간이 날아간다.
+            if (workloadRepository.findById(parent.getWorkloadId())
+                    .map(w -> w.getKind() != WorkloadKind.TRAIN_LORA).orElse(true)) {
+                throw new BusinessException(JobErrorCode.PARENT_ADAPTER_NOT_FOUND);
+            }
+            // LoRA 어댑터는 학습한 베이스 모델에만 얹힌다 — 다른 모델에 이어 붙이면 Runtime 이 로드 단계에서 거절한다.
+            if (!parent.getBaseModelId().equals(request.baseModelId())) {
+                throw new BusinessException(JobErrorCode.PARENT_BASE_MODEL_MISMATCH);
+            }
+        }
+
+        boolean required = parent != null || Boolean.TRUE.equals(request.hasAdapter());
+        int version = parent == null ? 1 : parent.getAdapterVersion() + 1;
+        if (name == null) {
+            name = parent != null && parent.getAdapterName() != null
+                    ? parent.getAdapterName()
+                    : AdapterName.defaultFor(baseModelSlug);
+        }
+        return new AdapterOrder(required, name, version, parent == null ? null : parent.getId());
+    }
+
+    /**
+     * 결과 어댑터 이름 변경. 파일도 계보도 건드리지 않으므로 상태 제한이 없다 —
+     * 완료된 Job 을 내려받기 직전에 이름을 고치는 것이 주 사용처다.
+     */
+    @Transactional
+    public JobDetailResponse renameAdapter(Long ownerId, Long jobId, String rawName) {
+        String name = AdapterName.normalize(rawName);
+        if (!AdapterName.isValid(name)) {
+            throw new BusinessException(JobErrorCode.INVALID_ADAPTER_NAME);
+        }
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        job.renameAdapter(name);
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
+    /**
+     * Job 단건 조회. 본인 Job만 조회 가능(소유권 확인).
+     * findByIdAndOwnerId 로 "id가 42면서 동시에 주인이 나인" Job을 찾는다 →
+     * 남의 Job(id는 맞지만 주인이 다름)은 애초에 안 잡혀서 NOT_FOUND.
+     */
+    public JobDetailResponse getJob(Long ownerId, Long jobId) {
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        return JobDetailResponse.from(job, walletAuthProperties.chainId(),
+                escrowProperties.tokenAddressOrNull(), escrowProperties.contractAddressOrNull(),
+                resultDownloadUrl(job));
+    }
+
+    /**
+     * 완료된 Job 의 결과물(어댑터) 내려받기 서명 URL. 파일은 스토리지에 resultObjectKey 로만 저장돼 있어서,
+     * 소유자가 조회할 때마다 유효기간이 살아 있는 URL 을 새로 발급한다 — DB 에 URL 을 저장하면 TTL 이 지나
+     * 죽은 링크가 남는다. 소유권은 이미 위(findByIdAndOwnerId)에서 확인됐다.
+     */
+    private String resultDownloadUrl(Job job) {
+        if (job.getStatus() != JobStatus.COMPLETED || job.getResultObjectKey() == null) {
+            return null;
+        }
+        try {
+            return objectStorage.presignDownload(job.getResultObjectKey(), storageProperties.downloadTtl(),
+                    downloadFilename(job)).url();
+        } catch (Exception e) {
+            // 다운로드 URL 은 부가 정보 — 스토리지 장애가 상세 조회 전체를 죽이면 안 된다.
+            log.error("[STORAGE] 결과물 서명 URL 발급 실패 jobId={} key={}", job.getId(), job.getResultObjectKey(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 저장 파일 이름 조립 (프런트 요청 2026-09-18) — 어댑터 이름은 서버가 정본이라 서버가 규칙대로 만든다.
+     * <ul>
+     *   <li>학습(어댑터 이름 있음): {@code <어댑터이름>-v<버전>.<확장자>} — 예: cs-상담봇-v2.tar
+     *   <li>그 외(추론·평가 등): {@code <워크로드이름>-job-<id>.<확장자>} — 스토리지 키를 그대로 노출하지 않는다
+     * </ul>
+     * 확장자는 실제 저장 키(resultObjectKey)의 것을 따른다 — 이름 규칙과 실물 형식이 어긋나지 않게.
+     */
+    String downloadFilename(Job job) {
+        String ext = extensionOf(job.getResultObjectKey());
+        if (job.getAdapterName() != null && !job.getAdapterName().isBlank()) {
+            int version = job.getAdapterVersion() != null ? job.getAdapterVersion() : 1;
+            return safeName(job.getAdapterName()) + "-v" + version + ext;
+        }
+        String workloadName = workloadRepository.findById(job.getWorkloadId())
+                .map(Workload::getName).orElse("결과");
+        return safeName(workloadName) + "-job-" + job.getId() + ext;
+    }
+
+    /** 파일 이름에 못 들어가는 문자만 바꾼다(윈도우 금지 문자 + 경로 구분자). 한글은 그대로 — 헤더가 RFC 5987 로 싣는다. */
+    private static String safeName(String name) {
+        return name.replaceAll("[\\\\/:*?\"<>|\\r\\n]", "_").trim();
+    }
+
+    /** 저장 키의 확장자(점 포함). 없으면 빈 문자열 — 없는 확장자를 지어내지 않는다. */
+    private static String extensionOf(String objectKey) {
+        String fileName = objectKey.substring(objectKey.lastIndexOf('/') + 1);
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(dot) : "";
+    }
+
+    /**
+     * 본인 Job 목록 조회(페이지네이션). status 가 있으면 그 상태만 필터, 없으면 전체.
+     */
+    public JobPageResponse getJobs(Long ownerId, JobStatus status, Pageable pageable) {
+        Page<Job> jobs = (status == null)
+                ? jobRepository.findByOwnerId(ownerId, pageable)
+                : jobRepository.findByOwnerIdAndStatus(ownerId, status, pageable);
+        return JobPageResponse.from(jobs.map(JobSummaryResponse::from));
+    }
+
+    /**
+     * 예치 확인 → 매칭 대기(FUNDED)로 전이.
+     *
+     * <p>프런트가 주는 것은 트랜잭션 해시뿐이다. Backend 는 영수증을 직접 읽어
+     * <ol>
+     *   <li>트랜잭션이 성공했고 목적지가 우리 에스크로인지,
+     *   <li>그 안의 JobFunded 가 externalRef·client(로그인 사용자 지갑)·provider(견적의 공급자 지갑)·price 를 맞추는지,
+     *   <li>지금 온체인 상태가 FUNDED 인지
+     * </ol>
+     * 확인하고, 전부 맞을 때만 이벤트의 jobId 를 escrowJobId 로 기록하며 FUNDED 로 바꾼다.
+     *
+     * <p><b>모르는 것은 확정하지 않는다.</b> 영수증이 아직 없거나 노드가 답하지 않으면 txHash 만 남기고
+     * CREATED 에 둔다(PENDING). reconciliation 이 다시 확인하고, 프런트도 같은 txHash 로 다시 물을 수 있다.
+     * 운영이 아닌 로컬(체인 미설정·verification-required=false)에서만 받은 escrowJobId 를 그대로 기록한다.
+     *
+     * <p>같은 txHash 재전송은 같은 답이다(멱등). 다른 Job 이 이미 쓴 txHash 는 거부한다.
+     */
+    @Transactional
+    public FundJobResponse fundJob(Long ownerId, Long jobId, String txHash, String devEscrowJobId) {
+        String hash = txHash.toLowerCase();
+        Job job = jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+
+        // 멱등: 이미 이 txHash 로 확정됐으면 같은 답. 다른 txHash 로 이미 확정됐거나 진행·종료 중이면 409.
+        if (job.getStatus() != JobStatus.CREATED) {
+            if (hash.equals(job.getFundTxHash())) {
+                return FundJobResponse.funded(job);
+            }
+            throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+        // 데이터셋 원본이 올라와 검증된 뒤에만 예치를 받는다 — 예치금이 묶인 채 워커가 내려받을 파일이 없는 상황을 막는다.
+        if (!job.hasDatasetFile()) {
+            throw new BusinessException(JobErrorCode.DATASET_NOT_UPLOADED);
+        }
+        // 입력 어댑터도 같은 이유로 준비돼 있어야 한다. 이어서 학습(parentJobId)은 부모 결과물을 쓰므로
+        // 올릴 파일이 없고, 부모가 완료·결과물 보유인지는 주문 때 확인했다.
+        if (!job.isAdapterInputReady()) {
+            throw new BusinessException(JobErrorCode.ADAPTER_NOT_UPLOADED);
+        }
+        // 이 txHash 가 다른 Job 에 붙어 있으면 재사용이다 — 한 예치로 두 작업을 돌릴 수 없다.
+        jobRepository.findByFundTxHash(hash)
+                .filter(other -> !other.getId().equals(jobId))
+                .ifPresent(other -> {
+                    throw new BusinessException(JobErrorCode.FUND_TX_ALREADY_USED);
+                });
+
+        if (!escrow.isConfigured()) {
+            if (escrow.isRequired()) {
+                throw new BusinessException(JobErrorCode.ESCROW_UNAVAILABLE);
+            }
+            // 로컬 개발: 대조할 체인이 없다. 받은 값을 기록하되 그 사실을 남긴다.
+            if (devEscrowJobId == null) {
+                throw new BusinessException(JobErrorCode.INVALID_ESCROW_JOB_ID);
+            }
+            log.warn("[JOB] 체인 미설정 — 프런트가 준 escrowJobId 를 그대로 기록한다 jobId={} escrowJobId={}",
+                    jobId, devEscrowJobId);
+            return fundConfirmed(jobId, walletAuthProperties.chainId(), null, devEscrowJobId, hash);
+        }
+
+        EscrowVerification.FundingCheck check = escrow.fundingOnChain(
+                hash, job.getExternalRef(), job.getOwner().getWalletAddress(),
+                job.getProviderWallet(), TokenUnits.toWei(job.getEstimatedCost()));
+        switch (check.verdict()) {
+            case CONTRADICTED -> {
+                log.warn("[JOB] 예치 확인 거부 jobId={} txHash={} {}", jobId, hash, check.reason());
+                throw new BusinessException(JobErrorCode.ESCROW_FUNDING_REJECTED);
+            }
+            case UNKNOWN -> {
+                if (!escrow.isRequired()) {
+                    // 로컬: 체인은 설정됐는데 답이 없다. 확정할 근거가 없으니 역시 보류한다 —
+                    // 여기서 통과시키면 RPC 장애가 검증 통과처럼 처리된다.
+                    log.warn("[JOB] 예치 확인 보류(체인 미확인) jobId={} txHash={} {}", jobId, hash, check.reason());
+                }
+                job.holdFunding(hash);
+                return FundJobResponse.pending(jobId, hash);
+            }
+            default -> { }
+        }
+        return fundConfirmed(jobId, walletAuthProperties.chainId(), escrowProperties.contractAddressOrNull(),
+                check.event().escrowJobId(), hash);
+    }
+
+    /** 체인 대조가 끝난 뒤의 기록. 0행이면 그 사이 취소됐거나 다른 요청이 먼저 확정했다. */
+    private FundJobResponse fundConfirmed(Long jobId, Long chainId, String contractAddress,
+                                          String escrowJobId, String txHash) {
+        int updated = jobRepository.fundIfCreated(jobId, chainId, contractAddress, escrowJobId, txHash);
+        Job fresh = jobRepository.findById(jobId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+        if (updated == 0) {
+            if (txHash.equals(fresh.getFundTxHash()) && fresh.getStatus() == JobStatus.FUNDED) {
+                return FundJobResponse.funded(fresh);   // 동시 요청이 먼저 확정 — 같은 답
+            }
+            throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);
+        }
+        log.info("[JOB] 예치 확인 jobId={} escrowJobId={} txHash={}", jobId, escrowJobId, txHash);
+        return FundJobResponse.funded(fresh);
+    }
+    /**
+     * Job 취소. 본인 Job이면서 종료 전이면 가능하되, 워커 손에 갔는지에 따라 갈린다.
+     * <ul>
+     *   <li>CREATED/FUNDED → 바로 CANCELLED (아무도 실행하지 않았다)
+     *   <li>ASSIGNED/RUNNING → CANCELLING + 워커에게 JOB_CANCEL. 워커가 abortJob() 후 JOB_CANCELLED 로 답해야
+     *       CANCELLED 로 확정된다 (규격 §21). 답이 없으면 CANCELLING 에 남아 온체인 대조 대상이 된다.
+     * </ul>
+     * 두 UPDATE 모두 조건부라, 확인과 변경 사이에 매칭이 배정해 버려도 취소를 되살리거나 놓치지 않는다.
+     */
+    @Transactional
+    public void cancelJob(Long ownerId, Long jobId) {
+        // 존재/소유 확인 (없거나 남의 것 → 404)
+        jobRepository.findByIdAndOwnerId(jobId, ownerId)
+                .orElseThrow(() -> new BusinessException(JobErrorCode.JOB_NOT_FOUND));
+
+        // 환불 미확인이면 문을 닫지 않는다(failJob 과 같은 원칙). FUNDED 는 돈이 체인에 잠겨 있으므로
+        // 체인이 CANCELLED 라고 확인해줄 때만 즉시 종료하고, 아니면 CANCELLING 으로 keeper 순찰에 태운다
+        // — 의뢰자가 온체인 cancelJob 을 건너뛰고 API 만 불러도 acceptTimeout 만료 후 settleTimeout 이 환불한다.
+        if (refundConfirmedOnChain(jobId)) {
+            if (jobRepository.cancelIfUnassigned(jobId, ownerId, LocalDateTime.now()) > 0) {
+                eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
+                return;   // 워커 손에 가기 전 — 알릴 상대가 없다
+            }
+        } else if (jobRepository.cancelToRefundWaitIfFunded(jobId, ownerId,
+                "cancel requested but the escrow is not CANCELLED — awaiting settleTimeout") > 0) {
+            log.warn("[JOB] FUNDED 취소, 환불 미확인 → CANCELLING(환불 대기) jobId={}", jobId);
+            return;
+        }
+        if (jobRepository.markCancellingIfActive(jobId, ownerId) == 0) {
+            throw new BusinessException(JobErrorCode.INVALID_JOB_STATUS);   // 이미 끝났거나 취소 중
+        }
+        // CANCELLING 확정 "후" 재조회 — clearAutomatically 덕에 DB 최신값(배정 워커)을 읽는다
+        jobRepository.findById(jobId)
+                .map(Job::getAssignedWorkerId)
+                .ifPresent(workerId -> sendCancel(workerId, jobId, "USER_REQUEST"));
+    }
+
+    /**
+     * 매칭: "아직 FUNDED 일 때만" Worker 배정(ASSIGNED). 그 사이 취소됐으면 0행 → false.
+     * JobMatcher 가 Job 단위로 호출 — 이 트랜잭션이 커밋된 뒤 JOB_ASSIGN 을 전송한다.
+     */
+    @Transactional
+    public boolean assignJob(Long jobId, String workerId) {
+        return jobRepository.assignIfFunded(jobId, workerId) > 0;
+    }
+
+    /**
+     * 배정 되돌리기(JOB_ASSIGN 전송 실패 시): ASSIGNED → FUNDED 복귀, 다음 순찰에 재매칭.
+     * 이미 RUNNING(워커가 수락)이면 0행 — 되돌리지 않는다.
+     */
+    @Transactional
+    public boolean unassignJob(Long jobId, String workerId) {
+        return jobRepository.unassignIfAssigned(jobId, workerId) > 0;
+    }
+
+    /**
+     * JOB_ACCEPTED 수신 (규격 §13): payload 의 escrowJobId·operatorAddress 가 Backend 기록과 같을 때만
+     * Job ASSIGNED→RUNNING + acceptJob() 해시 기록 + Worker RUNNING 전이.
+     *
+     * <p>하나라도 다르면 <b>fail closed</b> — RUNNING 으로 올리지 않고 CANCELLING 으로 보내 워커에게 JOB_CANCEL 을 보내며,
+     * 대조 사유를 남긴다. 워커는 이미 온체인에서 accept 했을 수 있으므로 abortJob() 으로 정리해야 한다.
+     * TODO: BC 연동 후 tx receipt · 온체인 state == ASSIGNED · job.operator 까지 여기서 검증한다.
+     * @return 정상 전이 여부 (불일치·배정 불일치·중복이면 false)
+     */
+    @Transactional
+    public boolean acceptJob(String workerId, Long jobId, String escrowJobId, String operatorAddress, String acceptTxHash) {
+        Job job = jobRepository.findByIdAndAssignedWorkerId(jobId, workerId).orElse(null);
+        if (job == null || job.getStatus() != JobStatus.ASSIGNED) {
+            return false;   // 배정된 적 없거나 이미 시작·취소됨 — 호출자(핸들러)가 로그
+        }
+        String expectedOperator = workerRepository.findById(workerId)
+                .map(worker -> worker.getOperatorAddress()).orElse(null);
+
+        String recorded = acceptMismatch(job, expectedOperator, escrowJobId, operatorAddress);
+        // Backend 기록끼리 맞았다면 이제 체인에 같은 것을 묻는다 -- 지금까지는 워커가
+        // 보낸 값을 Backend 가 저장해 둔 값과 대조한 것이고, 둘 다 워커에게서 온
+        // 것이라 "온체인에서 수락했다"는 주장 자체는 아직 아무것도 확인되지 않았다.
+        Verdict onChain = recorded != null ? Verdict.CONTRADICTED
+                : escrow.acceptedOnChain(job.getEscrowContractAddress(), job.getEscrowJobId(), operatorAddress);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            // 운영: 확인 못 한 수락을 RUNNING 으로 올리지 않는다. 그렇다고 취소하지도 않는다 --
+            // RPC 가 잠깐 죽은 것을 근거로 워커를 되돌리면 멀쩡한 작업이 죽는다.
+            // ASSIGNED 에 남겨 두면 reconciliation 이 체인을 다시 읽어 RUNNING 으로 올린다.
+            log.warn("[JOB] JOB_ACCEPTED 체인 미확인 → 보류 jobId={} workerId={} txHash={}", jobId, workerId, acceptTxHash);
+            return false;
+        }
+        final String mismatch = recorded != null ? recorded
+                : onChain.isContradicted()
+                        ? "on-chain state does not show this job assigned to this operator"
+                        : null;
+        if (mismatch != null) {
+            log.error("[JOB] JOB_ACCEPTED 불일치 → fail closed jobId={} workerId={} {}", jobId, workerId, mismatch);
+            boolean cancelling = jobRepository.markCancellingIfAssigned(jobId, workerId) > 0;
+            // 조건부 UPDATE 가 영속성 컨텍스트를 비우므로(clearAutomatically) 사유는 그 뒤에 다시 읽어 남긴다
+            jobRepository.findById(jobId).ifPresent(fresh ->
+                    fresh.flagReconciliation("JOB_ACCEPTED " + mismatch + " (txHash=" + acceptTxHash + ")"));
+            if (cancelling) {
+                sendCancel(workerId, jobId, "ACCEPT_VALIDATION_FAILED");
+            }
+            return false;
+        }
+
+        if (jobRepository.startIfAssigned(jobId, workerId, acceptTxHash, LocalDateTime.now()) == 0) {
+            return false;
+        }
+        workerRepository.findById(workerId)
+                .ifPresent(worker -> worker.startJob(jobId));
+        return true;
+    }
+
+    /** JOB_ACCEPTED 대조. 어긋난 항목을 문장으로, 전부 맞으면 null. */
+    private static String acceptMismatch(Job job, String expectedOperator, String escrowJobId, String operatorAddress) {
+        if (job.getEscrowJobId() == null || !job.getEscrowJobId().equals(escrowJobId)) {
+            return "escrowJobId mismatch: backend=" + job.getEscrowJobId() + " worker=" + escrowJobId;
+        }
+        if (expectedOperator == null || operatorAddress == null || !expectedOperator.equalsIgnoreCase(operatorAddress)) {
+            return "operatorAddress mismatch: backend=" + expectedOperator + " worker=" + operatorAddress;
+        }
+        return null;
+    }
+
+    /**
+     * JOB_REJECTED 수신 (규격 §14): 워커가 acceptJob 전 검증에서 거절.
+     * <ul>
+     *   <li>BLOCKCHAIN_RPC_FAILED — 일시적. 배정을 되돌려 다음 순찰에 재매칭.
+     *   <li>그 외(가격·주소·externalRef 불일치, ESCROW_JOB_NOT_FOUND, ASSIGNMENT_MISMATCH …) — 자동 재매칭하지 않는다.
+     *       FAILED 로 닫고 대조 사유를 남긴다: DB 는 끝났지만 온체인 에스크로는 아직 FUNDED 일 수 있어 사람이 봐야 한다.
+     * </ul>
+     * @return 처리 여부 (이 워커에게 ASSIGNED 인 Job 이 아니면 false)
+     */
+    @Transactional
+    public boolean rejectJob(String workerId, Long jobId, String code, String message) {
+        if (code != null && RETRYABLE_REJECT_CODES.contains(code)) {
+            return jobRepository.unassignIfAssigned(jobId, workerId) > 0;
+        }
+        String reason = failReason(code, message);
+        if (jobRepository.rejectIfAssigned(jobId, workerId, reason, LocalDateTime.now()) == 0) {
+            return false;
+        }
+        jobRepository.findById(jobId).ifPresent(job ->
+                job.flagReconciliation("JOB_REJECTED " + reason + " — 온체인 에스크로 상태 확인 필요"));
+        return true;
+    }
+
+    /** JOB_PROGRESS 수신 (규격 §16): 진행률 스냅샷 갱신. RUNNING 이 아니면 0행(무시). */
+    @Transactional
+    public boolean updateProgress(String workerId, Long jobId, Double percent,
+                                  Integer step, Integer totalSteps,
+                                  Integer epoch, Integer totalEpochs, Integer elapsedSec) {
+        boolean updated = jobRepository.updateProgressIfRunning(jobId, workerId,
+                percent, step, totalSteps, epoch, totalEpochs, elapsedSec) > 0;
+        if (updated) {
+            eventPublisher.publishEvent(JobRealtimeEvent.progress(jobId, percent, step, totalSteps));
+        }
+        return updated;
+    }
+
+    /**
+     * JOB_RESULT 수신 (규격 §19): resultHash 가 업로드 완료 검증(§18)에서 Backend 가 직접 계산한
+     * sha256 에 0x 를 붙인 값과 <b>반드시 같아야</b> COMPLETED 로 전이한다.
+     * 다르거나 §18 을 거치지 않았으면 fail closed — 상태를 바꾸지 않고 대조 사유만 남긴다
+     * (온체인 submitResult 는 이미 됐을 수 있어 되돌릴 수 없다).
+     *
+     * <p><b>CANCELLING 도 받는다.</b> 사용자가 취소를 누른 순간 워커는 이미 결과를 올리고
+     * 온체인 submitResult 까지 끝냈을 수 있다. RUNNING 만 받으면 그 JOB_RESULT 는 버려지고,
+     * 에스크로는 COMPLETED 라 공급자는 정산을 받았는데 Job 은 CANCELLING 에 영원히 남는다.
+     * 취소 중에 들어온 경우에도 대조는 똑같이 거치며, reconciliationReason 에 그 사실을
+     * 남겨 나중에 사람이 "왜 취소 요청이 완료로 끝났는가"를 알 수 있게 한다.
+     *
+     * TODO: BC 연동 후 온체인 resultHash 까지 같은지 확인. 정산 트리거는 BC 담당과 협의 후.
+     */
+    @Transactional
+    public boolean completeJob(String workerId, Long jobId, String objectKey,
+                               String resultHash, String submitTxHash, Double actualRuntimeSec) {
+        Job job = jobRepository.findByIdAndAssignedWorkerId(jobId, workerId).orElse(null);
+        if (job == null) {
+            return false;
+        }
+        JobStatus status = job.getStatus();
+        if (status != JobStatus.RUNNING && status != JobStatus.CANCELLING) {
+            return false;
+        }
+        String mismatch = resultMismatch(job, objectKey, resultHash);
+        if (mismatch != null) {
+            log.error("[JOB] JOB_RESULT 불일치 → fail closed jobId={} workerId={} {}", jobId, workerId, mismatch);
+            job.flagReconciliation("JOB_RESULT " + mismatch + " (submitTxHash=" + submitTxHash + ")");
+            return false;
+        }
+
+        // 체인이 정말 COMPLETED 이고, 기록된 resultHash 가 Backend 가 §18 에서 직접
+        // 계산한 것과 같은가. 워커가 보낸 resultHash 와 대조하는 것이 아니다 --
+        // 그러면 워커의 말을 워커의 말로 검증하는 셈이다.
+        String verified = job.getResultSha256() == null ? null : "0x" + job.getResultSha256();
+        Verdict onChain = escrow.resultOnChain(job.getEscrowContractAddress(), job.getEscrowJobId(),
+                job.getAcceptTxHash() == null ? null : operatorOf(workerId), verified);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            // 운영: 확인 못 한 결과를 COMPLETED 로 확정하지 않는다. RUNNING 에 남겨 두면
+            // reconciliation 이 체인(COMPLETED · resultHash)을 다시 읽어 확정한다.
+            log.warn("[JOB] JOB_RESULT 체인 미확인 → 보류 jobId={} workerId={} submitTxHash={}", jobId, workerId, submitTxHash);
+            job.flagReconciliation("JOB_RESULT held: chain unverified (submitTxHash=" + submitTxHash + ")");
+            return false;
+        }
+        if (onChain.isContradicted()) {
+            log.error("[JOB] JOB_RESULT 온체인 대조 실패 → fail closed jobId={} workerId={}", jobId, workerId);
+            job.flagReconciliation("JOB_RESULT on-chain mismatch (submitTxHash=" + submitTxHash + ")");
+            return false;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        int updated = status == JobStatus.RUNNING
+                ? jobRepository.completeIfRunning(jobId, workerId,
+                        objectKey, resultHash, submitTxHash, actualRuntimeSec, now)
+                : jobRepository.completeIfCancelling(jobId, workerId,
+                        objectKey, resultHash, submitTxHash, actualRuntimeSec,
+                        CANCEL_LOST_TO_RESULT, now);
+        if (updated == 0) {
+            return false;
+        }
+        if (status == JobStatus.RUNNING) {
+            workerRepository.incrementCompletedCount(workerId);
+        }
+        if (status == JobStatus.CANCELLING) {
+            log.warn("[JOB] 취소 요청과 겹친 JOB_RESULT → COMPLETED jobId={} workerId={}", jobId, workerId);
+        }
+        workerRepository.findById(workerId).ifPresent(worker -> worker.finishJob());
+        eventPublisher.publishEvent(JobRealtimeEvent.completed(jobId));
+        return true;
+    }
+
+    /**
+     * 취소 요청이 결과보다 늦었다는 기록.
+     *
+     * <p>상태만 보고는 알 수 없는 사실이라 남긴다 — COMPLETED 인 Job 을 나중에 보면
+     * 사용자가 취소를 눌렀다는 흔적이 어디에도 없다.
+     */
+    private static final String CANCEL_LOST_TO_RESULT =
+            "사용자 취소 요청이 도착했을 때 결과가 이미 업로드·검증되고 온체인에 기록된 뒤였다. "
+            + "에스크로가 COMPLETED 이므로 취소가 아니라 완료로 확정했다.";
+
+    /**
+     * 취소 요청 중에 실행이 실패해 워커가 abortJob 으로 정리한 기록.
+     *
+     * <p>FAILED 가 아니라 CANCELLED 로 끝나는 이유가 여기 적혀 있다.
+     */
+    private static final String CANCEL_MET_FAILURE =
+            "사용자 취소 요청 중에 실행이 실패했고, 워커가 abortJob 으로 예치금을 돌려줬다. "
+            + "온체인 상태가 CANCELLED 이므로 CANCELLED 로 확정했다 (실패 사유는 failReason 에 남긴다).";
+
+    /** JOB_RESULT 대조. §18 기록(objectKey·sha256)과 워커 보고값이 어긋난 항목을 문장으로, 전부 맞으면 null. */
+    private static String resultMismatch(Job job, String objectKey, String resultHash) {
+        if (job.getResultSha256() == null) {
+            return "result-upload/complete 검증 기록 없음";
+        }
+        if (job.getResultObjectKey() == null || !job.getResultObjectKey().equals(objectKey)) {
+            return "objectKey mismatch: verified=" + job.getResultObjectKey() + " worker=" + objectKey;
+        }
+        String expected = "0x" + job.getResultSha256();
+        if (resultHash == null || !expected.equalsIgnoreCase(resultHash)) {
+            return "resultHash mismatch: expected=" + expected + " worker=" + resultHash;
+        }
+        return null;
+    }
+
+    /**
+     * JOB_FAILED 수신 (규격 §20): Job FAILED + 사유·abortJob() 해시·실측 시간 기록, Worker 는 다시 대기(ONLINE).
+     *
+     * <p><b>CANCELLING 이었으면 FAILED 가 아니라 CANCELLED 로 끝난다.</b> 워커가 실패를
+     * 보고했다는 것은 abortJob 으로 예치금을 돌려줬다는 뜻이고 — abortTxHash 가 그 증거다 —
+     * 체인은 CANCELLED 다. 사용자는 취소를 요청했고 돈은 돌아갔으므로 CANCELLED 가 양쪽과
+     * 맞는 유일한 종료 상태다. 실패 사유는 버리지 않고 failReason 에 그대로 남는다.
+     *
+     * <p>이것을 받지 않으면 Job 은 CANCELLING 에 영원히 남는다 — 컨테이너는 죽었고 예치금은
+     * 돌아갔는데 기록만 취소 중인 상태.
+     *
+     * <p><b>환불이 체인에서 확인되지 않으면 종료하지 않는다.</b> abortTxHash 가 없거나(워커가
+     * 환불 전에 죽음) 체인이 CANCELLED 가 아니면, FAILED 로 닫는 순간 keeper·reconciler 의
+     * 순찰 대상에서 빠져 예치금이 잠긴 채 잊힌다. 대신 CANCELLING 으로 남겨 keeper 가 시한
+     * 만료 후 settleTimeout 으로 환불하게 한다. 돈이 잠긴 한 문을 닫지 않는다.
+     */
+    @Transactional
+    public boolean failJob(String workerId, Long jobId, String code, String message,
+                           String abortTxHash, Double actualRuntimeSec) {
+        LocalDateTime now = LocalDateTime.now();
+        String reason = failReason(code, message);
+
+        if (abortTxHash != null) {
+            // 환불 주장(tx)이 있다 — 체인이 아직이라면 미채굴일 수 있으니 보류(NACK).
+            // 워커가 같은 보고를 재전송하고, 체인이 따라잡으면 아래 정상 경로로 확정된다.
+            if (chainContradictsCancellation(jobId, workerId)) {
+                return false;
+            }
+        } else if (!refundConfirmedOnChain(jobId)) {
+            // 환불 주장 자체가 없다(워커가 abortJob 전에 죽음) — 재전송을 기다려도 올 것이 없다.
+            // 종료 대신 CANCELLING 으로 순찰에 태워 keeper 가 시한 만료 후 settleTimeout 으로 환불하게 한다.
+            int held = jobRepository.holdFailureForRefund(jobId, workerId, reason,
+                    actualRuntimeSec, "failure reported but the escrow is not CANCELLED — awaiting settleTimeout");
+            if (held > 0) {
+                log.warn("[JOB] 실패 보고(환불 주장 없음), 환불 미확인 → CANCELLING(환불 대기) jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+                workerRepository.findById(workerId)
+                        .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                        .ifPresent(worker -> worker.finishJob());
+                return true;
+            }
+            return false;
+        }
+
+        int updated = jobRepository.failIfRunning(jobId, workerId, reason, abortTxHash, actualRuntimeSec, now);
+        JobStatus terminalStatus = updated > 0 ? JobStatus.FAILED : null;
+        if (updated == 0) {
+            updated = jobRepository.cancelIfFailedWhileCancelling(
+                    jobId, workerId, reason, abortTxHash, actualRuntimeSec, CANCEL_MET_FAILURE, now);
+            if (updated > 0) {
+                terminalStatus = JobStatus.CANCELLED;
+                log.warn("[JOB] 취소 요청 중 실패 → CANCELLED jobId={} workerId={} reason={}",
+                        jobId, workerId, reason);
+            }
+        }
+        if (updated == 0) {
+            return false;
+        }
+        if (terminalStatus == JobStatus.FAILED && WorkerReliabilityPolicy.isWorkerFailure(code)) {
+            workerRepository.incrementFailedCount(workerId);
+        }
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
+        if (terminalStatus == JobStatus.FAILED) {
+            eventPublisher.publishEvent(JobRealtimeEvent.failed(jobId, publicFailureCode(code)));
+        } else {
+            eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
+        }
+        return true;
+    }
+
+    /**
+     * JOB_CANCELLED 수신 (규격 §21): 워커가 정리(abortJob 포함)를 마쳤다는 답.
+     * CANCELLING → CANCELLED 확정 + abortJob() 해시·실측 시간 기록, 워커를 놓아준다(ONLINE).
+     * @return 이 워커의 CANCELLING Job 이었는지
+     */
+    @Transactional
+    public boolean confirmCancelled(String workerId, Long jobId, String abortTxHash, Double actualRuntimeSec) {
+        if (chainContradictsCancellation(jobId, workerId)) {
+            return false;
+        }
+        int updated = jobRepository.confirmCancelledIfCancelling(
+                jobId, workerId, abortTxHash, actualRuntimeSec, LocalDateTime.now());
+        if (updated == 0) {
+            return false;
+        }
+        workerRepository.findById(workerId)
+                .filter(worker -> jobId.equals(worker.getCurrentJobId()))
+                .ifPresent(worker -> worker.finishJob());
+        eventPublisher.publishEvent(JobRealtimeEvent.cancelled(jobId));
+        return true;
+    }
+
+    /** 워커에게 JOB_CANCEL (규격 §21). payload.reason 은 USER_REQUEST 또는 Backend 가 멈춘 사유. keeper·reconciliation 도 쓴다. */
+    void sendCancel(String workerId, Long jobId, String reason) {
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("reason", reason);
+        messageSender.send(workerId, WorkerMessage.of(WorkerMessageType.JOB_CANCEL,
+                String.valueOf(jobId), Instant.now().toString(), payload));
+    }
+
+    /**
+     * 체인이 이 취소·환불 보고의 확정을 막는가.
+     *
+     * <p>체인이 "취소되지 않았다"고 명시적으로 말하면 언제나 막고 대조 사유를 남긴다.
+     * 모를 때는 정책을 따른다: 로컬은 막지 않는다 -- 컨트랙트도 없는데 워커의 종료 보고를
+     * 버리면 Job 은 CANCELLING 에 남고 워커는 이미 슬롯을 놓았다. 운영은 막는다 --
+     * 예치금이 돌아갔다는 것을 확인하지 못한 채 종료 상태로 확정하면, 고객의 돈이 묶인 채
+     * 기록만 끝난다. 그때는 상태를 두고 reconciliation 이 체인을 다시 읽어 확정한다.
+     */
+    private boolean chainContradictsCancellation(Long jobId, String workerId) {
+        Job current = jobRepository.findById(jobId).orElse(null);
+        String escrowJobId = current == null ? null : current.getEscrowJobId();
+        if (escrowJobId == null) {
+            return false;
+        }
+        Verdict onChain = escrow.cancelledOnChain(current.getEscrowContractAddress(), escrowJobId);
+        if (onChain == Verdict.UNKNOWN && escrow.blocks(onChain)) {
+            log.warn("[JOB] 취소·환불 보고 체인 미확인 → 보류 jobId={} workerId={}", jobId, workerId);
+            return true;
+        }
+        if (onChain.isContradicted()) {
+            log.error("[JOB] 취소 보고가 온체인과 어긋난다 → 확정하지 않는다 jobId={} workerId={}",
+                    jobId, workerId);
+            jobRepository.findById(jobId).ifPresent(fresh ->
+                    fresh.flagReconciliation("cancellation reported but the escrow is not CANCELLED"));
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 예치금이 의뢰자에게 돌아갔다고 확인됐는가. 에스크로에 묶인 적 없는 Job(체인 없는 모드)은
+     * 돌려줄 돈이 없으므로 true. CONFIRMED(체인 CANCELLED)만 true — UNKNOWN(노드 미응답)과
+     * CONTRADICTED(아직 잠김)는 모두 "확인 안 됨"이다. 모르는 돈은 잠긴 돈으로 취급한다.
+     */
+    private boolean refundConfirmedOnChain(Long jobId) {
+        Job current = jobRepository.findById(jobId).orElse(null);
+        if (current == null || current.getEscrowJobId() == null) {
+            return true;
+        }
+        return escrow.cancelledOnChain(current.getEscrowContractAddress(), current.getEscrowJobId())
+                .isConfirmed();
+    }
+
+    /** 이 워커의 operator 주소. 없으면 null -- 온체인 대조에서 건너뛴다. */
+    private String operatorOf(String workerId) {
+        return workerRepository.findById(workerId)
+                .map(worker -> worker.getOperatorAddress()).orElse(null);
+    }
+
+    /** 사유 = "코드: 메시지" 형태로 합쳐 저장 (예: "CUDA_OOM: CUDA out of memory."). */
+    private static String failReason(String code, String message) {
+        String reason = (code != null ? code : "UNKNOWN") + (message != null ? ": " + message : "");
+        return reason.length() > FAIL_REASON_MAX ? reason.substring(0, FAIL_REASON_MAX) : reason;
+    }
+
+    private static String publicFailureCode(String code) {
+        return code != null && code.matches("[A-Z0-9_]{1,64}") ? code : "UNKNOWN";
+    }
+}

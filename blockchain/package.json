@@ -1,0 +1,51 @@
+{
+  "name": "gshared-blockchain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "build": "hardhat build",
+    "typecheck": "tsc --noEmit",
+    "test": "hardhat test",
+    "abi": "hardhat build && node scripts/export-abi.mjs",
+    "snapshot": "hardhat test solidity --snapshot",
+    "snapshot:check": "hardhat test solidity --snapshot-check",
+    "check": "npm run build && npm run typecheck && npm test",
+    "deploy:local": "hardhat ignition deploy ignition/modules/GCoin.ts",
+    "dev:node": "hardhat node",
+    "dev:chain": "hardhat run scripts/dev-chain.ts --network localhost",
+    "dev:agent": "hardhat run scripts/provider-agent.ts --network localhost",
+    "dev:agent:abort": "cross-env AGENT_MODE=abort hardhat run scripts/provider-agent.ts --network localhost",
+    "dev:agent:idle": "cross-env AGENT_MODE=idle hardhat run scripts/provider-agent.ts --network localhost",
+    "dev:keeper": "hardhat run scripts/keeper.ts --network localhost",
+    "events": "node scripts/events.ts",
+    "events:follow": "node scripts/events.ts --follow",
+    "events:stats": "node scripts/events.ts stats",
+    "events:jobs": "node scripts/events.ts jobs",
+    "events:watch": "node scripts/events.ts watch",
+    "preflight:ssafy": "hardhat run scripts/preflight-ssafy.ts",
+    "deploy:ssafy": "npm run preflight:ssafy && hardhat ignition deploy ignition/modules/GCoin.ts --network ssafy --parameters ignition/parameters/ssafy.json && npm run verify:ssafy",
+    "verify:ssafy": "hardhat run scripts/verify-ssafy.ts",
+    "preflight:escrow:ssafy": "hardhat run scripts/preflight-escrow.ts",
+    "deploy:escrow:ssafy": "npm run preflight:escrow:ssafy && hardhat ignition deploy ignition/modules/GPUJobEscrow.ts --network ssafy --parameters ignition/parameters/ssafy-escrow.json && npm run verify:escrow:ssafy",
+    "verify:escrow:ssafy": "hardhat run scripts/verify-escrow.ts",
+    "test:deployment": "node scripts/test-ssafy-deployment.mjs",
+    "test:deployment:escrow": "node scripts/test-escrow-deployment.mjs"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ignition": "3.1.8",
+    "@nomicfoundation/hardhat-toolbox-viem": "5.0.7",
+    "@types/node": "24.13.3",
+    "cross-env": "10.1.0",
+    "forge-std": "https://github.com/foundry-rs/forge-std.git#77041d2ce690e692d6e03cc812b57d1ddaa4d505",
+    "hardhat": "3.15.0",
+    "typescript": "5.9.3",
+    "viem": "2.56.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1"
+  }
+}
