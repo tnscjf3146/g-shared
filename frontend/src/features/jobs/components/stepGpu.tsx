@@ -57,7 +57,7 @@ export function StepGpu({ spec, state, onChange }: Props) {
       </header>
 
       {!current && (
-        <div aria-busy aria-label="GPU 추천 계산 중" className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <div aria-busy aria-label="GPU 추천 계산 중" className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
           {[0, 1, 2].map((i) => (
             <div key={i} className="card-quiet h-28 animate-pulse" />
           ))}
@@ -76,7 +76,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
       {visible && visible.length > 0 && (
         <fieldset className="flex flex-col gap-2">
           <legend className="sr-only">GPU 등급</legend>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {/* AGENTS.md 카드 그리드 규칙: 1 → md 2 → lg 3. md 에서 바로 3열로 가면 카드가 규칙보다 한 칸 좁아져 이름이 두 줄로 접힌다 */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             {visible.map((g) => {
               const on = state.gpuId === g.id
               return (

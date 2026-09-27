@@ -16,7 +16,11 @@ const MESSAGES: Record<string, string> = {
   NO_FEASIBLE_GPU: '이 설정으로 실행할 수 있는 GPU 가 없습니다. 모델이나 학습 설정(batch size·max length)을 줄여 주세요.',
   // "스케줄러" 는 우리 내부 부품 이름이다 — 사용자가 읽고 무엇을 해야 할지 알 수 없다.
   // 뜻은 그대로 두되(422=설정을 바꿔야 함 / 503=기다리면 됨) 화면에는 GPU 추천이라는 일로 말한다.
-  SCHEDULER_REJECTED: '이 설정으로는 GPU 추천을 계산할 수 없습니다. 학습 설정(batch size·max length)을 줄여 주세요.',
+  // 이 코드 하나에 서로 다른 원인이 묶여 있다(SchedulerClient 가 AI 의 4xx 를 전부 여기로 보낸다):
+  // 409 no_feasible_gpu(후보 GPU 로는 안 돌아감 → 설정을 줄이면 됨)와 422 unknown_category
+  // (학습된 적 없는 모델·GPU → 설정을 줄여도 그대로, 모델을 바꿔야 함). 그래서 두 길을 다 준다.
+  // AUTO 모드는 batch size·max length 를 사용자가 정하지 않으므로 "모델" 쪽이 유일한 행동이다.
+  SCHEDULER_REJECTED: '이 설정으로는 GPU 추천을 계산할 수 없습니다. 모델을 바꾸거나 학습 설정(batch size·max length)을 줄여 주세요.',
   SCHEDULER_UNAVAILABLE: '지금 GPU 추천을 계산할 수 없습니다. 설정은 그대로 두고 잠시 후 다시 시도해 주세요.',
   // 데이터셋 원본 업로드(back JobErrorCode, 2026-09-15). 상세 화면에는 재업로드가 없다 — 취소 후 다시 등록이 유일한 복구
   DATASET_NOT_UPLOADED: '데이터셋 파일 업로드가 끝나지 않은 작업입니다. 이 작업을 취소하고 워크로드 등록을 다시 진행해 주세요.',
