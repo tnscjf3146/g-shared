@@ -86,7 +86,8 @@ export function StepGpu({ spec, state, onChange }: Props) {
                 >
                   <input type="radio" name="gpuId" value={g.id} checked={on} onChange={() => onChange({ gpuId: g.id, estimate: null })} className="sr-only" />
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
+                    {/* text-balance: 카드 폭이 좁아 "RTX 4050 Laptop GPU" 가 두 줄이 되는데, 그냥 두면 마지막 "GPU" 한 단어만 넘어가 고아 줄이 된다 */}
+                    <span className="text-balance text-label-sm font-semibold text-dark">{g.model.replace('NVIDIA GeForce ', '')}</span>
                     {/* shrink-0: 이름이 길면("RTX 4070 Laptop GPU") 배지가 눌려 "추/천" 으로 쪼개진다 */}
                     <StatusBadge tone={FIT[g.fit].tone} className="shrink-0 whitespace-nowrap">
                       {FIT[g.fit].label}

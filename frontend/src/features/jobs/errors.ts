@@ -14,8 +14,10 @@ const MESSAGES: Record<string, string> = {
   // 설정이 바뀌어 후보에서 빠진 경우. 설정을 바꿀 필요는 없고 다른 GPU 를 고르거나 기다리면 된다.
   SELECTED_WORKER_UNAVAILABLE: '선택하신 GPU를 지금 쓸 수 없습니다. 4단계에서 다른 GPU를 고르거나 잠시 후 다시 시도해 주세요.',
   NO_FEASIBLE_GPU: '이 설정으로 실행할 수 있는 GPU 가 없습니다. 모델이나 학습 설정(batch size·max length)을 줄여 주세요.',
-  SCHEDULER_REJECTED: '스케줄러가 요청을 거절했습니다. 설정을 확인해 주세요.',
-  SCHEDULER_UNAVAILABLE: '스케줄러에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+  // "스케줄러" 는 우리 내부 부품 이름이다 — 사용자가 읽고 무엇을 해야 할지 알 수 없다.
+  // 뜻은 그대로 두되(422=설정을 바꿔야 함 / 503=기다리면 됨) 화면에는 GPU 추천이라는 일로 말한다.
+  SCHEDULER_REJECTED: '이 설정으로는 GPU 추천을 계산할 수 없습니다. 학습 설정(batch size·max length)을 줄여 주세요.',
+  SCHEDULER_UNAVAILABLE: '지금 GPU 추천을 계산할 수 없습니다. 설정은 그대로 두고 잠시 후 다시 시도해 주세요.',
   // 데이터셋 원본 업로드(back JobErrorCode, 2026-09-15). 상세 화면에는 재업로드가 없다 — 취소 후 다시 등록이 유일한 복구
   DATASET_NOT_UPLOADED: '데이터셋 파일 업로드가 끝나지 않은 작업입니다. 이 작업을 취소하고 워크로드 등록을 다시 진행해 주세요.',
   DATASET_OBJECT_NOT_FOUND: '업로드된 데이터셋 파일을 찾을 수 없습니다. 업로드를 다시 진행해 주세요.',
