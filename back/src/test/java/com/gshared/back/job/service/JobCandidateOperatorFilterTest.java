@@ -169,6 +169,43 @@ class JobCandidateOperatorFilterTest {
                 .hasFieldOrPropertyWithValue("errorCode", SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
     }
 
+    /**
+     * 위 두 테스트는 이름이 "견적 화면" 이지만 실제로는 {@code getGpuOptions}(목록)만 부른다.
+     * 그래서 등급을 고른 뒤 부르는 {@code estimate} 에는 같은 필터가 빠져 있었는데도 초록불이었다 —
+     * BE-12 가 "반영됨" 으로 잘못 보고된 경로가 이것이다. 아래 둘이 그 구멍을 직접 막는다.
+     */
+    private com.gshared.back.job.dto.request.EstimateJobRequest estimateRequest() {
+        return new com.gshared.back.job.dto.request.EstimateJobRequest(
+                com.gshared.back.worker.domain.GpuGrade.idOf(worker.getGpuModel()),
+                request.workloadId(), request.baseModelId(),
+                new com.gshared.back.job.dto.request.DatasetMetadataRequest(
+                        52_428_800L, 10_000, 3_500_000L, 350.0, 1800),
+                "CUSTOM", null, objectMapper.readTree(CUSTOM_CONFIG), false, false);
+    }
+
+    @Test
+    @DisplayName("승인 안 된 공급자만 있는 등급은 **견적(estimate)** 도 거절한다 — 목록·주문과 같은 후보 집합")
+    void estimateRejectsGradeWithNoApprovedWorker() {
+        given(chain.isOperator(PROVIDER_WALLET, OPERATOR)).willReturn(Optional.of(false));
+
+        assertThatThrownBy(() -> jobEstimateService.estimate(estimateRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", JobErrorCode.NO_AVAILABLE_WORKER);
+
+        then(schedulerClient).should(never()).recommend(any());
+    }
+
+    @Test
+    @DisplayName("체인이 답하지 않으면 견적(estimate)도 거르지 않는다 — RPC 장애로 멀쩡한 등급이 빠지면 안 된다")
+    void estimateKeepsGradeWhenChainIsSilentOnEstimatePath() {
+        given(chain.isOperator(PROVIDER_WALLET, OPERATOR)).willReturn(Optional.empty());
+
+        // 후보가 넘어간 뒤 Scheduler 가 끊으므로, 여기까지 왔다는 것이 곧 "안 걸러졌다" 는 뜻이다
+        assertThatThrownBy(() -> jobEstimateService.estimate(estimateRequest()))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", SchedulerErrorCode.SCHEDULER_UNAVAILABLE);
+    }
+
     @Test
     @DisplayName("OFFLINE + approved=true → 후보 제외")
     void offlineIsExcluded() {

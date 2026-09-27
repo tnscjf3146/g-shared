@@ -92,12 +92,25 @@ public class JobEstimateService {
         JobSpecRequest spec = request.spec();
         BaseModel baseModel = loadBaseModel(spec);
 
-        // 목록(gpu-options)·주문(create)과 **같은 후보 집합**을 본다. 여기만 approvedOnly 가 빠져 있어서,
-        // 화면에서 사라진 등급으로도 견적이 나오고 정작 주문은 거절되는 일이 있었다(수정요청서 BE-12).
-        GpuGrade grade = approvedOnly(gpuCatalogService.grades()).stream()
+        // 목록(gpu-options)·주문(create)과 **같은 후보 집합**을 본다. 여기만 approvedOnly 가 빠져 있었다(수정요청서 BE-12).
+        //
+        // 방향을 똑바로 적어 둔다: 필터가 없던 쪽은 후보가 **더 넓었다**. 그래서 목록·주문이 거절하는 등급으로도
+        // 견적이 나왔다 — "견적은 나오는데 주문이 409" 가 그 증상이다. 반대로 "목록은 되는데 견적이 409" 는
+        // 이 필터와 무관하고, 목록을 받은 뒤 워커가 빠진 것이다(findAvailableWorkers: ONLINE·미배정,
+        // 또는 benchmark 없는 워커라 recommend 단계에서 빠지는 경우). 두 증상을 섞어 읽지 말 것.
+        //
+        // 고른 등급을 먼저 찾고 **그 등급에만** 승인 확인을 돌린다. approvedOnly 안의
+        // escrow.operatorApproved 는 캐시 없는 체인 RPC(호출당 최대 10초)이고, 이 메서드는 사용자가 GPU 를
+        // 누를 때마다 불린다 — 전체 등급에 돌리면 온라인 워커 수만큼 RPC 가 트랜잭션 안에서 줄지어 나간다
+        // (수정요청서 BE-11 이 경고하는 바로 그 모양). 필요한 것은 고른 등급 하나뿐이다.
+        GpuGrade selected = gpuCatalogService.grades().stream()
                 .filter(g -> g.id() == request.gpuId())
                 .findFirst()
                 // 조회 때 있던 등급이 사라졌다는 것은 그 PC 들이 모두 꺼졌다는 뜻 — 기다리면 되는 상황이다.
+                .orElseThrow(() -> new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER));
+        GpuGrade grade = approvedOnly(List.of(selected)).stream()
+                .findFirst()
+                // 등급은 살아 있는데 그 안에 승인된 워커가 없다 — 목록·주문에서도 빠지는 등급이라 여기서도 뺀다
                 .orElseThrow(() -> new BusinessException(JobErrorCode.NO_AVAILABLE_WORKER));
 
         SchedulerRecommendRequest.DatasetMeta datasetMeta = spec.datasetMetadata().toSchedulerMeta();
