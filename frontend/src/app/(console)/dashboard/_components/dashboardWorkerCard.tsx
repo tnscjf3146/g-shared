@@ -28,15 +28,17 @@ export function DashboardWorkerCard({ worker, index, now, onUnlink, style }: { w
       <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.5fr)_minmax(0,1.6fr)_auto] md:items-center md:gap-6">
         {/* 이름 + 등록해제 — 좁을 땐 한 줄, 넓을 땐 이름만(버튼은 grid 마지막 칸으로) */}
         <div className="flex items-center justify-between gap-4 md:contents">
+          {/* 이름이 비어 오는 워커가 있다(새로 등록한 PC 는 deviceName 이 빈 문자열) — 그대로 두면 제목이 "1." 한 글자만 남는다.
+              GPU 모델 → 워커 id 순으로 물러선다. 무엇이든 그 카드가 어느 PC 인지 알아볼 수 있어야 한다(수정요청서 FE-10) */}
           <h3 className="truncate text-body font-bold tracking-heading text-dark" title={worker.workerId}>
-            <span className="tabular-nums">{index}.</span> {worker.deviceName}
+            <span className="tabular-nums">{index}.</span> {worker.deviceName?.trim() || worker.gpuModel?.trim() || worker.workerId}
           </h3>
           <Button variant="ghost" size="sm" className="flex-none md:order-last" disabled={worker.status === 'RUNNING'} title={worker.status === 'RUNNING' ? '작업이 끝난 뒤 해제할 수 있습니다' : undefined} onClick={() => onUnlink(worker)}>
             등록 해제
           </Button>
         </div>
         <div className="min-w-0">
-          <OperatorApproval worker={worker} onWork={onWork} />
+          <OperatorApproval worker={worker} onWork={onWork} tick={now} />
         </div>
         <div className="min-w-0">
           <div className="text-caption text-text-muted">OS</div>

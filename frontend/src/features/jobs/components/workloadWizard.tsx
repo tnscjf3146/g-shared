@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Stepper } from '@/components/ui/stepper'
 import { completeAdapterUpload, completeDatasetUpload, createDataset, createJob, getCatalog, requestAdapterUpload, requestDatasetUpload, uploadSignedFile } from '../api'
-import { hashFile } from '../dataset-analysis'
+import { hashFile, isTooBigToHash } from '../dataset-analysis'
 import { clearDraft, loadDraft, saveDraft } from '../draft'
 import { jobMessageFor } from '../errors'
 import { suggestAdapterName } from '../format'
@@ -235,7 +235,9 @@ export function WorkloadWizard() {
       await clearDraft()
       router.replace(`/jobs/${jobId}`)
     } catch (e) {
-      setError(jobMessageFor(e))
+      // 파일이 너무 커서 해시를 못 구한 경우는 서버 에러가 아니다 — jobMessageFor 에 넘기면
+      // "잠시 후 다시 시도" 로 뭉개져, 몇 번을 다시 눌러도 같은 자리에서 막힌다(리뷰 지적)
+      setError(isTooBigToHash(e) ? '파일이 너무 커서 이 브라우저에서 해시를 계산할 수 없습니다. 파일을 나누거나 더 작은 데이터셋으로 다시 시도해 주세요.' : jobMessageFor(e))
       setSubmitting(null)
     }
   }

@@ -1,5 +1,6 @@
 'use client'
 
+import { nameStatesSize } from '../format'
 import type { Catalog, WorkloadKind } from '../types'
 import type { WizardState } from './workloadWizard'
 
@@ -52,7 +53,8 @@ export function StepWorkload({ catalog, state, onChange }: Props) {
                   <label key={m.id} className={`card-quiet flex cursor-pointer items-center justify-between gap-3 p-4 transition-colors ${on ? 'border-primary/60 ring-2 ring-primary/30' : 'hover:border-border'}`}>
                     <input type="radio" name="baseModelId" value={m.id} checked={on} onChange={() => onChange({ baseModelId: m.id })} className="sr-only" />
                     <span className="text-label-sm font-semibold text-dark">{m.name}</span>
-                    <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-hint tabular-nums text-text-muted">{m.params}</span>
+                    {/* 이름이 이미 크기를 말하면("Qwen3 0.6B") 배지를 달지 않는다 — 600M 을 나란히 두면 다른 수치처럼 읽힌다(FE-11) */}
+                    {!nameStatesSize(m.name) && <span className="rounded-xs bg-neutral-tint px-1.5 py-0.5 text-hint tabular-nums text-text-muted">{m.params}</span>}
                   </label>
                 )
               })}

@@ -43,12 +43,25 @@ export function sampleText(line: string): string {
 }
 
 /** 파일 SHA-256 → "0x" + 64자(back datasets.data_hash CHAR(66)). POST /datasets 의 dataHash */
-// ponytail: 파일을 통째로 메모리에 올린다(SubtleCrypto 에 스트리밍 digest 가 없다). 어댑터 상한 1 GiB 까지는 버티지만,
-// 더 큰 파일을 받게 되면 청크 sha-256 구현으로 교체할 것
+// 파일을 통째로 메모리에 올린다 — SubtleCrypto 에 스트리밍 digest 가 없어서, 이걸 피하려면 sha-256 을
+// 직접 구현해야 한다. 해시가 한 비트라도 틀리면 서버가 업로드를 통째로 거절하므로 손으로 쓴 구현을
+// 검증 없이 들이지 않는다(수정요청서 FE-11). 대신 **터질 때 왜 터졌는지는 말해 준다** —
+// 예전에는 브라우저의 RangeError 가 그대로 올라가 "잠시 후 다시 시도" 로 뭉개졌고, 몇 번을 다시 해도 같았다.
+const TOO_BIG_FOR_HASH = 'FILE_TOO_LARGE_TO_HASH'
 export async function hashFile(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+  let buf: ArrayBuffer
+  try {
+    buf = await file.arrayBuffer()
+  } catch {
+    // 브라우저가 이 크기의 버퍼를 못 잡았다(RangeError·OOM). 파일을 나눠 올리는 것 말고는 방법이 없다
+    throw new Error(TOO_BIG_FOR_HASH)
+  }
+  const digest = await crypto.subtle.digest('SHA-256', buf)
   return '0x' + Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
 }
+
+/** 위 한계에 걸린 오류인가 — 화면이 "잠시 후 다시" 대신 파일을 줄이라고 말하게 한다 */
+export const isTooBigToHash = (e: unknown) => e instanceof Error && e.message === TOO_BIG_FOR_HASH
 
 /** 샘플 텍스트 목록 → 5값 */
 export function summarize(sampleTokens: number[], sizeBytes: number): DatasetMetadata {
