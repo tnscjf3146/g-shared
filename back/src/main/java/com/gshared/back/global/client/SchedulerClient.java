@@ -26,6 +26,9 @@ import org.springframework.web.client.RestClientResponseException;
 @EnableConfigurationProperties(SchedulerProperties.class)
 public class SchedulerClient {
 
+    /** AI 가 409 본문 detail[].type 에 싣는 값. ai/app/api/scheduler.py 의 recommend 참조 */
+    private static final String NO_FEASIBLE_GPU_TYPE = "\"no_feasible_gpu\"";
+
     private final RestClient restClient;
 
     public SchedulerClient(SchedulerProperties properties) {
@@ -42,7 +45,7 @@ public class SchedulerClient {
                 .build();
     }
 
-    /** GPU 추천 요청. 422 → SCHEDULER_REJECTED, 503·timeout → SCHEDULER_UNAVAILABLE. */
+    /** GPU 추천 요청. 409 no_feasible_gpu → NO_FEASIBLE_GPU, 그 밖의 4xx → SCHEDULER_REJECTED, 503·timeout → SCHEDULER_UNAVAILABLE. */
     public SchedulerRecommendResponse recommend(SchedulerRecommendRequest request) {
         return call("/scheduler/recommend", request, SchedulerRecommendResponse.class);
     }
@@ -67,7 +70,14 @@ public class SchedulerClient {
             return response;
         } catch (RestClientResponseException e) {
             // detail 은 로그로 남긴다 (원인 추적용) — 응답 메시지는 ErrorCode 의 고정 문구
-            log.warn("[Scheduler] {} 응답 {} body={}", path, e.getStatusCode(), e.getResponseBodyAsString());
+            String responseBody = e.getResponseBodyAsString();
+            log.warn("[Scheduler] {} 응답 {} body={}", path, e.getStatusCode(), responseBody);
+            // 409 no_feasible_gpu = "이번 후보 GPU 로는 안 돌아간다"(scheduler-api-contract.md §409).
+            // 4xx 로 뭉뚱그리면 사용자는 "요청을 거절했습니다"만 보고 무엇을 바꿔야 할지 모른다.
+            // 본문 type 까지 확인한다 — AI 가 다른 409 를 추가해도 추측해서 매핑하지 않게.
+            if (e.getStatusCode().value() == 409 && responseBody.contains(NO_FEASIBLE_GPU_TYPE)) {
+                throw new BusinessException(SchedulerErrorCode.NO_FEASIBLE_GPU);
+            }
             if (e.getStatusCode().is4xxClientError()) {
                 // 422(검증 거절)뿐 아니라 400·404(경로/계약 불일치)도 "재시도로 해결 안 됨" 쪽으로
                 throw new BusinessException(SchedulerErrorCode.SCHEDULER_REJECTED);
