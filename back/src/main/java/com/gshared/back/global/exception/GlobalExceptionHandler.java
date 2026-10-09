@@ -1,6 +1,7 @@
 package com.gshared.back.global.exception;
 
 import com.gshared.back.auth.exception.AuthErrorCode;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +22,13 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    public ResponseEntity<ErrorResponse> handleBusinessException(BusinessException e) {
+    public ResponseEntity<ErrorResponse> handleBusinessException(BusinessException e, HttpServletRequest request) {
         ErrorCode errorCode = e.getErrorCode();
-        log.warn("비즈니스 예외: {} - {}", errorCode.name(), errorCode.getMessage());
+        // 요청 경로를 함께 남긴다. 같은 코드라도 어디서 났는지에 따라 뜻이 다르다 —
+        // NO_FEASIBLE_GPU 가 견적(/estimate)이면 사용자가 설정을 고르는 중이고, 주문(POST /api/jobs)이면 확정한 일이 막힌 것이다.
+        // 경로가 없으면 로그만으로 둘을 나눠 셀 수 없다. 쿼리스트링은 빼서 서명 값이 로그로 새지 않게 한다.
+        log.warn("비즈니스 예외: {} - {} [{} {}]", errorCode.name(), errorCode.getMessage(),
+                request.getMethod(), request.getRequestURI());
 
         return toResponse(errorCode);
     }

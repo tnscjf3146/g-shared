@@ -155,13 +155,13 @@
     },
     {
       "type": "stat",
-      "title": "주문 거절 (24시간)",
+      "title": "GPU 없음 — 견적 / 주문 (24시간)",
       "id": 4,
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
-      "description": "AI 스케줄러가 '돌릴 GPU 가 없다'며 거절한 횟수. 0 이 아니면 아래 칸을 본다.",
+      "description": "AI 스케줄러가 '이 설정으로 돌릴 GPU 가 없다'고 답한 횟수를 단계별로 센다. 견적은 사용자가 설정을 고르는 중이라 흔할 수 있고, 주문은 확정한 일이 막힌 것이다. 요청 경로가 로그에 붙은 뒤(be-fix/scheduler-409-mapping)부터 집계된다. 백엔드는 컨테이너·파일 두 경로로 들어와 같은 줄이 두 번 있으므로 source=\"file\" 만 센다.",
       "gridPos": {
         "h": 4,
         "w": 5,
@@ -183,7 +183,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
@@ -195,7 +196,7 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto",
+        "textMode": "value_and_name",
         "graphMode": "area",
         "colorMode": "value"
       },
@@ -206,7 +207,18 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({service=\"backend\"} |= `no_feasible_gpu` [24h]))",
+          "legendFormat": "견적",
+          "expr": "sum(count_over_time({service=\"backend\", source=\"file\"} |= `비즈니스 예외: NO_FEASIBLE_GPU` |~ `\\[POST /api/jobs/(estimate|gpu-options)\\]` [24h]))",
+          "queryType": "instant"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "legendFormat": "주문",
+          "expr": "sum(count_over_time({service=\"backend\", source=\"file\"} |= `비즈니스 예외: NO_FEASIBLE_GPU` |= `[POST /api/jobs]` [24h]))",
           "queryType": "instant"
         }
       ]
@@ -376,7 +388,7 @@
     },
     {
       "type": "logs",
-      "title": "② 주문이 거절됐다 — no_feasible_gpu",
+      "title": "② 돌릴 GPU 가 없다 — no_feasible_gpu",
       "id": 9,
       "datasource": {
         "type": "loki",
@@ -406,7 +418,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=\"backend\"} |= `no_feasible_gpu`",
+          "expr": "{service=\"backend\", source=\"file\"} |~ `no_feasible_gpu|NO_FEASIBLE_GPU`",
           "queryType": "range"
         }
       ]
